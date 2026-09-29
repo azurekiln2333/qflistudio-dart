@@ -1,61 +1,210 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:isolate';
 
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:dart_eval/dart_eval.dart';
 import 'package:path/path.dart' as p;
+import 'package:pubspec_parse/pubspec_parse.dart';
 import 'package:qfli_studio_core/services/studio_profile.dart';
 
-/// Dart 版 App 的运行后端。
-///
-/// 目标形态是**应用内 Dart 子集解释器（纯 Dart）**。
-/// 之所以是解释而不是编译：鸿蒙的普通应用被 SELinux 挡在 `exec` 之外，既调不动
-/// 设备上的编译器，也拉不起打包进 HAP 的可执行文件（HNP 那条路要求应用具备
-/// 生产力应用资格）。但沙箱从来不限制应用解释自己的数据，所以「自带解释器、
-/// 在当前进程里跑自己的源码」是普通应用唯一走得通的路。
-///
-/// C 版的 `qfli_c_runtime` 已经把这条路走通并交付（词法 → 预处理 → 语法 →
-/// 解释，约 7000 行纯 Dart），本版是同一个模式的接入点。
-///
-/// 解释器落地之前，[run] 明确返回「还不能运行」，而不是给一个看起来像结果的
-/// 东西——那比报错更糟。
-///
-/// **接入方式**：把 [_notReady] 换成真实解释器的调用（返回一个带
-/// stdout/stderr/exitCode 的 [ProgramRunResult]）。档位、入口识别、终端输出、
-/// 退出码这些接线都不用动。
 class DartProgramRunner implements ProgramRunner {
   const DartProgramRunner();
-
-  /// 本后端接管的源码后缀。
-  static const Set<String> _sourceExtensions = {'.dart'};
 
   @override
   Future<ProgramRunResult?> run({
     required String projectPath,
     required String entryFile,
   }) async {
-    // 不是本语言的文件交回内核（返回 null），内核会走自己的分流逻辑。
-    if (!_sourceExtensions.contains(p.extension(entryFile).toLowerCase())) {
-      return null;
+    if (p.extension(entryFile).toLowerCase() != '.dart') return null;
+
+    final root = p.normalize(p.absolute(projectPath));
+    final entry = p.normalize(p.absolute(entryFile));
+    if (!p.isWithin(root, entry)) {
+      return _failed('运行 ${p.basename(entry)}', '入口文件不在项目目录内。');
     }
-    return _notReady(p.basename(entryFile));
+
+    try {
+      final sources = await _readSources(root);
+      final relativeEntry = _sourcePath(root, entry);
+      if (!sources.containsKey(relativeEntry)) {
+        return _failed('运行 ${p.basename(entry)}', '找不到入口文件：$relativeEntry');
+      }
+
+      final packageName = await _packageName(root);
+      final librarySources = <String, String>{};
+      for (final source in sources.entries) {
+        if (source.key.startsWith('lib/')) {
+          librarySources[source.key.substring(4)] = source.value;
+        }
+      }
+      final workspaceName = '${packageName}_workspace';
+      final entryUri = relativeEntry.startsWith('lib/')
+          ? 'package:$packageName/${relativeEntry.substring(4)}'
+          : 'package:$workspaceName/$relativeEntry';
+      return _start(
+        title: '运行 ${p.basename(entry)}',
+        packages: {packageName: librarySources, workspaceName: sources},
+        entryUri: entryUri,
+      );
+    } on FileSystemException catch (error) {
+      return _failed('运行 ${p.basename(entry)}', error.message);
+    } on FormatException catch (error) {
+      return _failed('运行 ${p.basename(entry)}', error.message);
+    }
   }
 
-  /// 解释器还没接上时的占位结果。
-  ///
-  /// 退出码用 [kProgramNotRunExitCode]（127）而不是 2：终端面板把非 0 渲染成
-  /// 「（运行结束，退出码 N）」，任何非 127 的值都会被读成「程序自己跑完退出」。
-  ProgramRunResult _notReady(String fileName) {
-    final controller = StreamController<String>();
-    scheduleMicrotask(() {
-      controller
-        ..add('Dart 版的运行后端还在开发中（应用内纯 Dart 解释器）。')
-        ..add('现在已经可用的：编辑器、语法高亮、项目模板、Dart 入门教程。')
-        ..add('内置 Dart 解释器完成后即可在本 App 内运行这段代码。')
-        ..close();
+  static String _sourcePath(String root, String file) =>
+      p.relative(file, from: root).replaceAll('\\', '/');
+
+  static Future<Map<String, String>> _readSources(String root) async {
+    final sources = <String, String>{};
+
+    Future<void> visit(Directory directory) async {
+      await for (final entity in directory.list(followLinks: false)) {
+        final name = p.basename(entity.path);
+        if (name.startsWith('.') || name == 'build') continue;
+        if (entity is Directory) {
+          await visit(entity);
+        } else if (entity is File &&
+            p.extension(name).toLowerCase() == '.dart') {
+          sources[_sourcePath(root, entity.path)] = await entity.readAsString();
+        }
+      }
+    }
+
+    await visit(Directory(root));
+    return sources;
+  }
+
+  static Future<String> _packageName(String root) async {
+    final pubspec = File(p.join(root, 'pubspec.yaml'));
+    if (!await pubspec.exists()) return 'qfli_project';
+    return Pubspec.parse(await pubspec.readAsString()).name;
+  }
+
+  static ProgramRunResult _failed(String title, String message) =>
+      ProgramRunResult(
+        title: title,
+        stdout: const Stream<String>.empty(),
+        stderr: Stream<String>.value(message),
+        exitCode: Future<int>.value(kProgramNotRunExitCode),
+      );
+
+  static Future<ProgramRunResult> _start({
+    required String title,
+    required Map<String, Map<String, String>> packages,
+    required String entryUri,
+  }) async {
+    final output = StreamController<String>();
+    final errors = StreamController<String>();
+    final exitCode = Completer<int>();
+    final messages = ReceivePort();
+    Isolate? worker;
+
+    void finish(int code) {
+      if (exitCode.isCompleted) return;
+      exitCode.complete(code);
+      messages.close();
+      unawaited(output.close());
+      unawaited(errors.close());
+    }
+
+    messages.listen((message) {
+      if (message is Map) {
+        if (message['type'] == 'stdout') {
+          output.add(message['value'] as String);
+        } else if (message['type'] == 'stderr') {
+          errors.add(message['value'] as String);
+        } else if (message['type'] == 'done') {
+          finish(message['value'] as int);
+        }
+      } else if (message is List && message.isNotEmpty) {
+        errors.add(message.first.toString());
+        finish(kProgramNotRunExitCode);
+      } else if (message == null) {
+        finish(kProgramNotRunExitCode);
+      }
     });
+
+    try {
+      worker = await Isolate.spawn(
+        _execute,
+        [messages.sendPort, packages, entryUri],
+        onError: messages.sendPort,
+        onExit: messages.sendPort,
+      );
+    } on Object catch (error) {
+      errors.add('无法启动 Dart 运行时：$error');
+      finish(kProgramNotRunExitCode);
+    }
+
     return ProgramRunResult(
-      title: '运行 $fileName（Dart 解释器开发中）',
-      stdout: controller.stream,
-      stderr: const Stream<String>.empty(),
-      exitCode: Future<int>.value(kProgramNotRunExitCode),
+      title: title,
+      stdout: output.stream,
+      stderr: errors.stream,
+      exitCode: exitCode.future,
+      cancel: () async {
+        worker?.kill(priority: Isolate.immediate);
+        finish(130);
+      },
     );
+  }
+
+  static Future<void> _execute(List<Object> args) async {
+    final port = args[0] as SendPort;
+    final packages = (args[1] as Map).cast<String, Map<String, String>>();
+    final entryUri = args[2] as String;
+
+    await runZoned(
+      () async {
+        late final Program program;
+        try {
+          final compiler = Compiler()..entrypoints.add(entryUri);
+          program = compiler.compile(packages);
+        } on Object catch (error) {
+          port.send({'type': 'stderr', 'value': error.toString()});
+          port.send({'type': 'done', 'value': kProgramNotRunExitCode});
+          return;
+        }
+
+        try {
+          final runtime = Runtime.ofProgram(program);
+          final uriSegments = Uri.parse(entryUri).pathSegments;
+          final source =
+              packages[uriSegments.first]![uriSegments.skip(1).join('/')]!;
+          final args = _mainAcceptsArguments(source) ? [<String>[]] : null;
+          await Future<dynamic>.value(
+            runtime.executeLib(entryUri, 'main', args),
+          );
+          port.send({'type': 'done', 'value': 0});
+        } on Object catch (error) {
+          port.send({'type': 'stderr', 'value': error.toString()});
+          port.send({'type': 'done', 'value': 1});
+        }
+      },
+      zoneSpecification: ZoneSpecification(
+        print: (self, parent, zone, line) {
+          port.send({'type': 'stdout', 'value': line});
+        },
+      ),
+    );
+  }
+
+  static bool _mainAcceptsArguments(String source) {
+    final unit = parseString(content: source, throwIfDiagnostics: false).unit;
+    for (final declaration in unit.declarations) {
+      if (declaration is FunctionDeclaration &&
+          declaration.name.lexeme == 'main') {
+        return declaration
+                .functionExpression
+                .parameters
+                ?.parameters
+                .isNotEmpty ??
+            false;
+      }
+    }
+    return false;
   }
 }

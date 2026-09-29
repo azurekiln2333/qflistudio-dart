@@ -86,19 +86,115 @@ void main() {
   });
 
   group('运行后端', () {
-    test('本语言文件被接管，并说明解释器还在开发中', () async {
-      write('main.dart', '// 示例');
+    test('Dart 模板编译并执行，输出到终端', () async {
+      write('src/main.dart', ProjectTemplate.dart.files.first.content);
       final result = await dartProfile.runner!.run(
         projectPath: project.path,
-        entryFile: p.join(project.path, 'main.dart'),
+        entryFile: p.join(project.path, 'src/main.dart'),
       );
       expect(result, isNotNull, reason: '运行后端没有接管本语言文件');
-      expect(result!.title, contains('Dart 解释器开发中'));
-      expect(await result.stdout.toList(), isNotEmpty);
-      // 127 = 「程序根本没跑起来」的内核约定（见 kProgramNotRunExitCode）。
-      // 不能用 2：终端面板把非 0 渲染成「（运行结束，退出码 N）」，
-      // 会被读成「程序自己跑完退出 2」。
+      expect(await result!.stdout.toList(), ['Hello, QFLIStudio+!']);
+      expect(await result.stderr.toList(), isEmpty);
+      expect(await result.exitCode, 0);
+      expect(result.title, isNot(contains('开发中')));
+    });
+
+    test('同目录 import 可以运行多个源码文件', () async {
+      write(
+        'src/main.dart',
+        "import 'helper.dart'; void main() { print(answer()); }",
+      );
+      write('src/helper.dart', 'int answer() => 42;');
+      final result = (await dartProfile.runner!.run(
+        projectPath: project.path,
+        entryFile: p.join(project.path, 'src/main.dart'),
+      ))!;
+      expect(await result.stdout.toList(), ['42']);
+      expect(await result.exitCode, 0);
+    });
+
+    test('package import 使用项目 pubspec 名称', () async {
+      write('pubspec.yaml', 'name: sample_app\n');
+      write('lib/message.dart', "String message() => 'from package';");
+      write(
+        'src/main.dart',
+        "import 'package:sample_app/message.dart'; void main() { print(message()); }",
+      );
+      final result = (await dartProfile.runner!.run(
+        projectPath: project.path,
+        entryFile: p.join(project.path, 'src/main.dart'),
+      ))!;
+      expect(await result.stdout.toList(), ['from package']);
+      expect(await result.exitCode, 0);
+    });
+
+    test('根目录与 lib 同名入口不会混淆', () async {
+      write('pubspec.yaml', 'name: sample_app\n');
+      write('main.dart', "void main() { print('root'); }");
+      write('lib/main.dart', "void main() { print('library'); }");
+      final result = (await dartProfile.runner!.run(
+        projectPath: project.path,
+        entryFile: p.join(project.path, 'lib/main.dart'),
+      ))!;
+      expect(await result.stdout.toList(), ['library']);
+      expect(await result.exitCode, 0);
+    });
+
+    test('main 接收命令行参数列表', () async {
+      write(
+        'main.dart',
+        'void main(List<String> args) { print(args.length); }',
+      );
+      final result = (await dartProfile.runner!.run(
+        projectPath: project.path,
+        entryFile: p.join(project.path, 'main.dart'),
+      ))!;
+      final stderr = await result.stderr.toList();
+      expect(await result.stdout.toList(), ['0'], reason: stderr.join('\n'));
+      expect(await result.exitCode, 0);
+    });
+
+    test('异步 main 等待完成后结束运行', () async {
+      write(
+        'main.dart',
+        "Future<void> main() async { await Future<void>.delayed(Duration(milliseconds: 1)); print('async done'); }",
+      );
+      final result = (await dartProfile.runner!.run(
+        projectPath: project.path,
+        entryFile: p.join(project.path, 'main.dart'),
+      ))!;
+      expect(await result.stdout.toList(), ['async done']);
+      expect(await result.exitCode, 0);
+    });
+
+    test('语法错误返回诊断而不伪造成功', () async {
+      write('main.dart', 'void main( {');
+      final result = (await dartProfile.runner!.run(
+        projectPath: project.path,
+        entryFile: p.join(project.path, 'main.dart'),
+      ))!;
+      expect(await result.stderr.toList(), isNotEmpty);
       expect(await result.exitCode, kProgramNotRunExitCode);
+    });
+
+    test('运行时异常进入 stderr', () async {
+      write('main.dart', "void main() { throw 'boom'; }");
+      final result = (await dartProfile.runner!.run(
+        projectPath: project.path,
+        entryFile: p.join(project.path, 'main.dart'),
+      ))!;
+      expect((await result.stderr.toList()).join('\n'), contains('boom'));
+      expect(await result.exitCode, 1);
+    });
+
+    test('无限循环可以取消', () async {
+      write('main.dart', 'void main() { while (true) {} }');
+      final result = (await dartProfile.runner!.run(
+        projectPath: project.path,
+        entryFile: p.join(project.path, 'main.dart'),
+      ))!;
+      await result.cancel!();
+      expect(await result.exitCode, 130);
     });
 
     test('别的语言文件交回内核', () async {
@@ -112,15 +208,16 @@ void main() {
   });
 
   group('运行按钮分流', () {
-    test('点运行拿到结果，而不是掉进「移动端跑不了」的兜底提示', () async {
-      write('main.dart', '// 示例');
+    test('点运行拿到程序输出，而不是兜底提示', () async {
+      write('main.dart', "void main() { print('run button'); }");
       final result = await RunnerService.runProject(
         projectPath: project.path,
         entryFile: p.join(project.path, 'main.dart'),
       );
       expect(result, isNotNull);
       expect(result!.hint, isNull, reason: '后端接管了就不该走兜底提示');
-      expect(result.title, contains('Dart 解释器开发中'));
+      expect(await result.stdout!.toList(), ['run button']);
+      expect(await result.exitCode, 0);
     });
   });
 }
