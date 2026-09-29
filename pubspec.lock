@@ -130,7 +130,7 @@ packages:
     source: hosted
     version: "0.8.5"
   dart_style:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: dart_style
       sha256: a9c30492da18ff84efe2422ba2d319a89942d93e58eb0b73d32abe822ef54b7b

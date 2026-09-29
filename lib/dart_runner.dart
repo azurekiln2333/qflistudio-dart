@@ -6,8 +6,9 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:dart_eval/dart_eval.dart';
 import 'package:path/path.dart' as p;
-import 'package:pubspec_parse/pubspec_parse.dart';
 import 'package:qfli_studio_core/services/studio_profile.dart';
+
+import 'dart_project_sources.dart';
 
 class DartProgramRunner implements ProgramRunner {
   const DartProgramRunner();
@@ -19,69 +20,23 @@ class DartProgramRunner implements ProgramRunner {
   }) async {
     if (p.extension(entryFile).toLowerCase() != '.dart') return null;
 
-    final root = p.normalize(p.absolute(projectPath));
-    final entry = p.normalize(p.absolute(entryFile));
-    if (!p.isWithin(root, entry)) {
-      return _failed('运行 ${p.basename(entry)}', '入口文件不在项目目录内。');
-    }
-
     try {
-      final sources = await _readSources(root);
-      final relativeEntry = _sourcePath(root, entry);
-      if (!sources.containsKey(relativeEntry)) {
-        return _failed('运行 ${p.basename(entry)}', '找不到入口文件：$relativeEntry');
-      }
-
-      final packageName = await _packageName(root);
-      final librarySources = <String, String>{};
-      for (final source in sources.entries) {
-        if (source.key.startsWith('lib/')) {
-          librarySources[source.key.substring(4)] = source.value;
-        }
-      }
-      final workspaceName = '${packageName}_workspace';
-      final entryUri = relativeEntry.startsWith('lib/')
-          ? 'package:$packageName/${relativeEntry.substring(4)}'
-          : 'package:$workspaceName/$relativeEntry';
-      return _start(
-        title: '运行 ${p.basename(entry)}',
-        packages: {packageName: librarySources, workspaceName: sources},
-        entryUri: entryUri,
+      final project = await DartProjectSources.load(
+        projectPath: projectPath,
+        entryFile: entryFile,
       );
+      return _start(
+        title: '运行 ${p.basename(entryFile)}',
+        packages: project.packages,
+        entryUri: project.entryUri,
+      );
+    } on ArgumentError catch (error) {
+      return _failed('运行 ${p.basename(entryFile)}', error.message.toString());
     } on FileSystemException catch (error) {
-      return _failed('运行 ${p.basename(entry)}', error.message);
+      return _failed('运行 ${p.basename(entryFile)}', error.message);
     } on FormatException catch (error) {
-      return _failed('运行 ${p.basename(entry)}', error.message);
+      return _failed('运行 ${p.basename(entryFile)}', error.toString());
     }
-  }
-
-  static String _sourcePath(String root, String file) =>
-      p.relative(file, from: root).replaceAll('\\', '/');
-
-  static Future<Map<String, String>> _readSources(String root) async {
-    final sources = <String, String>{};
-
-    Future<void> visit(Directory directory) async {
-      await for (final entity in directory.list(followLinks: false)) {
-        final name = p.basename(entity.path);
-        if (name.startsWith('.') || name == 'build') continue;
-        if (entity is Directory) {
-          await visit(entity);
-        } else if (entity is File &&
-            p.extension(name).toLowerCase() == '.dart') {
-          sources[_sourcePath(root, entity.path)] = await entity.readAsString();
-        }
-      }
-    }
-
-    await visit(Directory(root));
-    return sources;
-  }
-
-  static Future<String> _packageName(String root) async {
-    final pubspec = File(p.join(root, 'pubspec.yaml'));
-    if (!await pubspec.exists()) return 'qfli_project';
-    return Pubspec.parse(await pubspec.readAsString()).name;
   }
 
   static ProgramRunResult _failed(String title, String message) =>
