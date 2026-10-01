@@ -1,11 +1,8 @@
 import 'dart:io';
-import 'dart:typed_data';
-
-import 'package:dart_eval/dart_eval.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
-import 'package:qfli_dart/dart_project_sources.dart';
+import 'package:qfli_dart/native_dart_toolchain.dart';
 import 'package:qfli_dart/dart_tools_page.dart';
 import 'package:qfli_dart/main.dart' show dartProfile;
 import 'package:qfli_studio_core/pages/quick_tools_page.dart';
@@ -183,8 +180,9 @@ void main() {
     expect(find.byIcon(Icons.error_outline), findsWidgets);
     expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isFalse);
 
-    await tester.enterText(find.byType(TextField), 'int main() => 42;');
-    await tester.tap(find.byTooltip('编译 EVC 字节码'));
+    const compiledSource = 'void main() { print(42); }';
+    await tester.enterText(find.byType(TextField), compiledSource);
+    await tester.tap(find.byTooltip('编译'));
     await tester.pump();
     expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isTrue);
     expect(
@@ -203,19 +201,20 @@ void main() {
       reason: 'Bytecode write and flush must finish successfully',
     );
     final project = store.projects.first;
-    final artifact = File(p.join(project.path, 'build', 'src', 'main.evc'));
+    final artifact = File(p.join(project.path, 'build', 'src', 'main.dill'));
     final result = await tester.runAsync(() async {
-      final source = await DartProjectSources.load(
+      final run = await const NativeDartToolchain().run(
         projectPath: project.path,
-        entryFile: mainFile.path,
+        entryFile: artifact.path,
       );
-      final runtime = Runtime(
-        ByteData.sublistView(await artifact.readAsBytes()),
-      );
-      return runtime.executeLib(source.entryUri, 'main');
+      final errors = run.stderr.toList();
+      final output = await run.stdout.toList();
+      expect(await errors, isEmpty);
+      expect(await run.exitCode, 0);
+      return output;
     });
-    expect(result, 42);
-    expect(await tester.runAsync(mainFile.readAsString), 'int main() => 42;');
+    expect(result, ['42']);
+    expect(await tester.runAsync(mainFile.readAsString), compiledSource);
   });
 
   testWidgets('Run saves edits and displays actual output and exit status', (
@@ -409,7 +408,7 @@ void main() {
       size: const Size(320, 640),
       textScale: 1.8,
     );
-    for (final tooltip in ['保存', '格式化 Dart', '语法检查', '编译 EVC 字节码', '运行']) {
+    for (final tooltip in ['保存', '格式化 Dart', '语法检查', '编译', '运行']) {
       await tester.ensureVisible(find.byTooltip(tooltip));
       final rect = tester.getRect(find.byTooltip(tooltip));
       expect(rect.left, greaterThanOrEqualTo(0));

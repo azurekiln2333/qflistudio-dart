@@ -174,7 +174,7 @@ void main() {
         entryFile: p.join(project.path, 'main.dart'),
       ))!;
       expect(await result.stderr.toList(), isNotEmpty);
-      expect(await result.exitCode, kProgramNotRunExitCode);
+      expect(await result.exitCode, isNonZero);
     });
 
     test('运行时异常进入 stderr', () async {
@@ -184,7 +184,7 @@ void main() {
         entryFile: p.join(project.path, 'main.dart'),
       ))!;
       expect((await result.stderr.toList()).join('\n'), contains('boom'));
-      expect(await result.exitCode, 1);
+      expect(await result.exitCode, isNonZero);
     });
 
     test('无限循环可以取消', () async {

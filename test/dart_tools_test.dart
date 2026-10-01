@@ -28,7 +28,7 @@ void main() {
       await mainFile.parent.create(recursive: true);
       await mainFile.writeAsString('int main() => 42;');
 
-      final compiled = await DartTools.compile(
+      final compiled = await DartTools.compilePortable(
         projectPath: project.path,
         entryFile: mainFile.path,
       );

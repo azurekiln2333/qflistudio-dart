@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:qfli_studio_core/services/studio_profile.dart';
 
 import 'dart_project_sources.dart';
+import 'native_dart_toolchain.dart';
 
 class DartProgramRunner implements ProgramRunner {
   const DartProgramRunner();
@@ -21,6 +22,12 @@ class DartProgramRunner implements ProgramRunner {
     if (p.extension(entryFile).toLowerCase() != '.dart') return null;
 
     try {
+      if (NativeDartToolchain.supported) {
+        return await const NativeDartToolchain().run(
+          projectPath: projectPath,
+          entryFile: entryFile,
+        );
+      }
       final project = await DartProjectSources.load(
         projectPath: projectPath,
         entryFile: entryFile,
@@ -36,6 +43,10 @@ class DartProgramRunner implements ProgramRunner {
       return _failed('运行 ${p.basename(entryFile)}', error.message);
     } on FormatException catch (error) {
       return _failed('运行 ${p.basename(entryFile)}', error.toString());
+    } on ProcessException catch (error) {
+      return _failed('运行 ${p.basename(entryFile)}', error.message);
+    } on StateError catch (error) {
+      return _failed('运行 ${p.basename(entryFile)}', error.message);
     }
   }
 

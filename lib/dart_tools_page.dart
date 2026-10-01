@@ -291,7 +291,11 @@ class _DartToolsPageState extends State<DartToolsPage> {
       );
       final relative = p.relative(file, from: project);
       final artifact = File(
-        p.join(project, 'build', '${p.withoutExtension(relative)}.evc'),
+        p.join(
+          project,
+          'build',
+          '${p.withoutExtension(relative)}${compiled.extension}',
+        ),
       );
       await artifact.parent.create(recursive: true);
       await artifact.writeAsBytes(compiled.bytecode, flush: true);
@@ -442,7 +446,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
                     icon: const Icon(Icons.fact_check_outlined),
                   ),
                   IconButton(
-                    tooltip: '编译 EVC 字节码',
+                    tooltip: '编译',
                     onPressed: _busy ? null : () => unawaited(_compile()),
                     icon: const Icon(Icons.memory_outlined),
                   ),

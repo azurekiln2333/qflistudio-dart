@@ -12,6 +12,7 @@ import 'package:qfli_studio_core/store/settings_store.dart';
 
 import 'dart_runner.dart';
 import 'dart_tools_page.dart';
+import 'native_dart_toolchain.dart';
 
 /// 本 App 的产品名。窗口标题、任务切换器和应用内顶栏都读它。
 const String _appTitle = StudioProductCatalog.dartWing;
@@ -19,7 +20,7 @@ const String _appTitle = StudioProductCatalog.dartWing;
 /// Dart 版档位：同一套内核 UI，收窄成只服务 Dart。
 ///
 /// 单独提出来是为了让测试能直接断言档位，而不必为了一个常量去跑 `main()`。
-const StudioProfile dartProfile = StudioProfile(
+final StudioProfile dartProfile = StudioProfile(
   id: 'dart',
   appTitle: _appTitle,
   templates: [ProjectTemplate.empty, ProjectTemplate.dart],
@@ -28,8 +29,10 @@ const StudioProfile dartProfile = StudioProfile(
   isOffline: true,
   productKey: StudioProductCatalog.dartWingKey,
   showHomeTabs: false,
-  runtimeKind: 'embedded-dart-runtime',
-  runtimeStatus: 'unavailable',
+  runtimeKind: NativeDartToolchain.supported
+      ? 'official-dart-sdk'
+      : 'dart-eval',
+  runtimeStatus: NativeDartToolchain.supported ? 'requires-sdk' : 'unavailable',
   supportedFileExtensions: ['.dart'],
   // main.dart 排在默认入口表前面，保证本版一定先命中它。
   entryFileNames: ['main.dart', 'src/main.dart'],

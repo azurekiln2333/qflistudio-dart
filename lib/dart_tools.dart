@@ -6,6 +6,7 @@ import 'package:dart_eval/dart_eval.dart';
 import 'package:dart_style/dart_style.dart';
 
 import 'dart_project_sources.dart';
+import 'native_dart_toolchain.dart';
 
 class DartDiagnostic {
   const DartDiagnostic({
@@ -24,10 +25,15 @@ class DartDiagnostic {
 }
 
 class CompiledDartProgram {
-  const CompiledDartProgram({required this.bytecode, required this.entryUri});
+  const CompiledDartProgram({
+    required this.bytecode,
+    required this.entryUri,
+    this.extension = '.evc',
+  });
 
   final Uint8List bytecode;
   final String entryUri;
+  final String extension;
 }
 
 abstract final class DartTools {
@@ -51,6 +57,23 @@ abstract final class DartTools {
   }
 
   static Future<CompiledDartProgram> compile({
+    required String projectPath,
+    required String entryFile,
+  }) async {
+    if (NativeDartToolchain.supported) {
+      return CompiledDartProgram(
+        bytecode: await const NativeDartToolchain().compileKernel(
+          projectPath: projectPath,
+          entryFile: entryFile,
+        ),
+        entryUri: Uri.file(entryFile).toString(),
+        extension: '.dill',
+      );
+    }
+    return compilePortable(projectPath: projectPath, entryFile: entryFile);
+  }
+
+  static Future<CompiledDartProgram> compilePortable({
     required String projectPath,
     required String entryFile,
   }) async {
