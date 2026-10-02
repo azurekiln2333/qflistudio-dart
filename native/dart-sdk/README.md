@@ -1,10 +1,14 @@
 # Native Dart SDK
 
-Desktop execution and Kernel compilation use the official Dart SDK. Its VM is
+Android and desktop execution and Kernel compilation use the official Dart SDK. Its VM is
 C++; the compiler front end and SDK commands include official Dart code running
 on that VM. This integration does not substitute dart_eval for native execution.
 
 ## Packaging
+
+Android packages the pinned upstream Termux SDK for arm64-v8a and x86_64.
+See [Android Dart SDK](android/README.md) for input hashes, preparation/staging,
+installed code/data layout, the application bridge and device verification.
 
 Windows/Linux CMake installs the complete SDK, including snapshots, platform
 libraries, license and version, into `data/dart-sdk/`. Set `QFLI_DART_SDK` (CMake
@@ -37,6 +41,9 @@ passed. The standalone CMake installation was exercised separately from Flutter.
 There is no Visual Studio C++ toolchain for a full Windows UI build. Linux and
 Apple native execution are not established by these Windows checks.
 
-The mobile runner still uses the previous portable evaluator. Native Android,
-iOS and OHOS Dart VM integration is a remaining requirement, not a completed
-native runtime. This desktop patch alone must not close the cross-product goal.
+Android SDK 3.13.5 passed all nine application-native checks on an API 37 x86_64
+emulator with actual 16 KiB pages. Both Android ABI images passed staging and
+native dependency checks; ARM64 application execution needs a device. The host
+suite passed 34 tests, including source-free runner/tools artifact execution,
+and source analysis passed. Native iOS/OHOS VM integration remains unresolved;
+this Android delivery cannot close the full cross-product goal.

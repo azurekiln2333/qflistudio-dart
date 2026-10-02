@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
-import 'package:qfli_dart/native_dart_toolchain.dart';
 import 'package:qfli_dart/dart_tools_page.dart';
 import 'package:qfli_dart/main.dart' show dartProfile;
 import 'package:qfli_studio_core/pages/quick_tools_page.dart';
@@ -201,20 +200,16 @@ void main() {
       reason: 'Bytecode write and flush must finish successfully',
     );
     final project = store.projects.first;
-    final artifact = File(p.join(project.path, 'build', 'src', 'main.dill'));
-    final result = await tester.runAsync(() async {
-      final run = await const NativeDartToolchain().run(
-        projectPath: project.path,
-        entryFile: artifact.path,
-      );
-      final errors = run.stderr.toList();
-      final output = await run.stdout.toList();
-      expect(await errors, isEmpty);
-      expect(await run.exitCode, 0);
-      return output;
-    });
-    expect(result, ['42']);
+    expect(
+      File(p.join(project.path, 'build', 'src', 'main.dill')).existsSync(),
+      isTrue,
+    );
     expect(await tester.runAsync(mainFile.readAsString), compiledSource);
+    await tester.runAsync(mainFile.delete);
+    await _performAction(tester, '运行编译结果');
+    expect(find.text('42'), findsOneWidget);
+    expect(find.text('退出码 0'), findsOneWidget);
+    expect(mainFile.existsSync(), isFalse);
   });
 
   testWidgets('Run saves edits and displays actual output and exit status', (

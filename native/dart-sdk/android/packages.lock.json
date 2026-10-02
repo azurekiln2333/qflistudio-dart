@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "sdkVersion": "3.13.5",
+  "recipeCommit": "d0f94da1e578a0c9550a84d408bc8ed0003882ec",
+  "sourceSha256": "2da077bf89f3a14ae5a741728549371d87013265df49b8cace6475bd9ffc59e3",
+  "packages": {
+    "arm64-v8a": {
+      "filename": "pool/main/d/dart/dart_3.13.5_aarch64.deb",
+      "size": 96044396,
+      "sha256": "430f2daab52d5b6b8c08f80a2f12a370f959f671a0943399d15c9f8c01709163"
+    },
+    "x86_64": {
+      "filename": "pool/main/d/dart/dart_3.13.5_x86_64.deb",
+      "size": 137226804,
+      "sha256": "5efd7777afcc7697d093f0d4c9cc4a87c8722cebf6c30e6a44a2be5c64be1872"
+    }
+  }
+}

@@ -309,20 +309,21 @@ class _DartToolsPageState extends State<DartToolsPage> {
     }
   }
 
-  Future<void> _execute() async {
+  Future<void> _execute({bool compiled = false}) async {
     final project = _projectPath;
-    final file = _filePath;
+    final file = compiled && project != null && _artifact != null
+        ? p.join(project, _artifact!)
+        : _filePath;
     if (project == null || file == null || !_beginOperation()) return;
     setState(() {
       _output = [];
       _exitCode = null;
       _diagnostics = null;
-      _artifact = null;
     });
     StreamSubscription<String>? stdoutSubscription;
     StreamSubscription<String>? stderrSubscription;
     try {
-      if (!await _writeSource() || !mounted) return;
+      if ((!compiled && !await _writeSource()) || !mounted) return;
       final run = await const DartProgramRunner().run(
         projectPath: project,
         entryFile: file,
@@ -455,6 +456,14 @@ class _DartToolsPageState extends State<DartToolsPage> {
                     onPressed: _busy ? null : () => unawaited(_execute()),
                     icon: const Icon(Icons.play_arrow),
                   ),
+                  if (_artifact?.endsWith('.dill') == true)
+                    IconButton(
+                      tooltip: '运行编译结果',
+                      onPressed: _busy
+                          ? null
+                          : () => unawaited(_execute(compiled: true)),
+                      icon: const Icon(Icons.play_circle_outline),
+                    ),
                   if (_run != null)
                     IconButton(
                       tooltip: '停止',
@@ -521,7 +530,6 @@ class _DartToolsPageState extends State<DartToolsPage> {
         },
       );
     }
-    if (_artifact != null) return SelectableText('已生成 $_artifact');
     if (_output.isNotEmpty || _exitCode != null) {
       return ListView(
         children: [
@@ -530,6 +538,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
         ],
       );
     }
+    if (_artifact != null) return SelectableText('已生成 $_artifact');
     return const SizedBox.shrink();
   }
 }

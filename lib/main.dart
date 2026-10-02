@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -32,10 +33,26 @@ final StudioProfile dartProfile = StudioProfile(
   runtimeKind: NativeDartToolchain.supported
       ? 'official-dart-sdk'
       : 'dart-eval',
-  runtimeStatus: NativeDartToolchain.supported ? 'requires-sdk' : 'unavailable',
-  supportedFileExtensions: ['.dart'],
+  runtimeStatus: Platform.isAndroid
+      ? 'available'
+      : NativeDartToolchain.supported
+      ? 'requires-sdk'
+      : 'unavailable',
+  supportedFileExtensions: [
+    '.dart',
+    if (NativeDartToolchain.supported) '.dill',
+  ],
   // main.dart 排在默认入口表前面，保证本版一定先命中它。
-  entryFileNames: ['main.dart', 'src/main.dart'],
+  entryFileNames: [
+    'main.dart',
+    'src/main.dart',
+    if (NativeDartToolchain.supported) ...[
+      'main.dill',
+      'src/main.dill',
+      'build/main.dill',
+      'build/src/main.dill',
+    ],
+  ],
 );
 
 void main() async {

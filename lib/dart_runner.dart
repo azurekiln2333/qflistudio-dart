@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:dart_eval/dart_eval.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:qfli_studio_core/services/studio_profile.dart';
 
@@ -19,7 +20,11 @@ class DartProgramRunner implements ProgramRunner {
     required String projectPath,
     required String entryFile,
   }) async {
-    if (p.extension(entryFile).toLowerCase() != '.dart') return null;
+    final extension = p.extension(entryFile).toLowerCase();
+    if (extension != '.dart' &&
+        !(extension == '.dill' && NativeDartToolchain.supported)) {
+      return null;
+    }
 
     try {
       if (NativeDartToolchain.supported) {
@@ -47,6 +52,11 @@ class DartProgramRunner implements ProgramRunner {
       return _failed('运行 ${p.basename(entryFile)}', error.message);
     } on StateError catch (error) {
       return _failed('运行 ${p.basename(entryFile)}', error.message);
+    } on PlatformException catch (error) {
+      return _failed(
+        '运行 ${p.basename(entryFile)}',
+        error.message ?? error.code,
+      );
     }
   }
 

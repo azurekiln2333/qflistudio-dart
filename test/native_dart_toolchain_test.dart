@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:qfli_dart/dart_runner.dart';
 import 'package:qfli_dart/native_dart_toolchain.dart';
 
 void main() {
@@ -47,10 +48,10 @@ void main() {
       ),
     );
     await File(entry).delete();
-    final run = await toolchain.run(
+    final run = (await const DartProgramRunner().run(
       projectPath: project.path,
       entryFile: artifact.path,
-    );
+    ))!;
     final errors = run.stderr.toList();
     expect(await run.stdout.toList(), ['kernel execution']);
     expect(await errors, isEmpty);
@@ -76,6 +77,26 @@ void main() {
     expect(await run.exitCode, 42);
     await output;
     await errors;
+  });
+
+  test('input.txt is fed to stdin and missing input is EOF', () async {
+    final entry = await source(
+      "import 'dart:io'; void main() { print(stdin.readLineSync() ?? 'eof'); }",
+    );
+    final input = File(p.join(project.path, 'input.txt'));
+    await input.writeAsString('native-input\n');
+    for (final expected in ['native-input', 'eof']) {
+      final run = await toolchain.run(
+        projectPath: project.path,
+        entryFile: entry,
+      );
+      final output = run.stdout.toList();
+      final errors = run.stderr.toList();
+      expect(await run.exitCode.timeout(const Duration(seconds: 20)), 0);
+      expect(await output, [expected]);
+      expect(await errors, isEmpty);
+      if (await input.exists()) await input.delete();
+    }
   });
 
   test('an active native program can be stopped', () async {

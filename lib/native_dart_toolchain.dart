@@ -8,13 +8,18 @@ import 'package:path/path.dart' as p;
 import 'package:pubspec_parse/pubspec_parse.dart';
 import 'package:qfli_studio_core/services/studio_profile.dart';
 
+import 'android_dart_sdk.dart';
+
 class NativeDartToolchain {
   const NativeDartToolchain({this.executable});
 
   final String? executable;
 
   static bool get supported =>
-      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+      Platform.isAndroid ||
+      Platform.isWindows ||
+      Platform.isLinux ||
+      Platform.isMacOS;
 
   Future<String> resolveExecutable() async {
     if (executable != null) {
@@ -24,6 +29,7 @@ class NativeDartToolchain {
         executable,
       );
     }
+    if (Platform.isAndroid) return (await AndroidDartSdk.prepare()).vm;
     final name = Platform.isWindows ? 'dart.exe' : 'dart';
     final appDirectory = p.dirname(Platform.resolvedExecutable);
     final macArchitecture = Abi.current() == Abi.macosArm64 ? 'arm64' : 'x64';
@@ -62,15 +68,25 @@ class NativeDartToolchain {
     final packages = await _packages(projectPath);
     late final Process process;
     try {
-      process = await Process.start(sdk, [
-        '--disable-dart-dev',
-        if (packages.path != null) '--packages=${packages.path}',
-        entry,
-      ], workingDirectory: p.absolute(projectPath));
+      process = await Process.start(
+        sdk,
+        [
+          '--disable-dart-dev',
+          if (packages.path != null) '--packages=${packages.path}',
+          entry,
+        ],
+        workingDirectory: p.absolute(projectPath),
+        environment: Platform.isAndroid
+            ? (await AndroidDartSdk.prepare()).environment
+            : null,
+      );
     } catch (_) {
       await packages.dispose();
       rethrow;
     }
+    unawaited(
+      _feedInput(process.stdin, File(p.join(projectPath, 'input.txt'))),
+    );
     var finished = false;
     var cancelled = false;
     final status = process.exitCode.then((code) async {
@@ -110,14 +126,27 @@ class NativeDartToolchain {
     final output = await Directory.systemTemp.createTemp('qfli-dart-kernel-');
     try {
       final artifact = File(p.join(output.path, 'program.dill'));
-      final process = await Process.start(sdk, [
-        'compile',
-        'kernel',
-        if (packages.path != null) '--packages=${packages.path}',
-        entry,
-        '-o',
-        artifact.path,
-      ], workingDirectory: p.absolute(projectPath));
+      final process = await Process.start(
+        sdk,
+        [
+          if (Platform.isAndroid) ...[
+            '--disable-dart-dev',
+            '--snapshot-kind=kernel',
+            '--snapshot=${artifact.path}',
+          ] else ...[
+            'compile',
+            'kernel',
+          ],
+          if (packages.path != null) '--packages=${packages.path}',
+          entry,
+          if (!Platform.isAndroid) ...['-o', artifact.path],
+        ],
+        workingDirectory: p.absolute(projectPath),
+        environment: Platform.isAndroid
+            ? (await AndroidDartSdk.prepare()).environment
+            : null,
+      );
+      unawaited(process.stdin.close());
       final stdout = process.stdout
           .transform(const Utf8Decoder(allowMalformed: true))
           .join();
@@ -139,6 +168,19 @@ class NativeDartToolchain {
     } finally {
       await packages.dispose();
       await output.delete(recursive: true);
+    }
+  }
+
+  static Future<void> _feedInput(IOSink sink, File file) async {
+    try {
+      if (await file.exists()) await sink.addStream(file.openRead());
+    } on IOException {
+      // The program can exit before it consumes the input.
+    }
+    try {
+      await sink.close();
+    } on IOException {
+      // Cancellation closes the native pipe.
     }
   }
 
