@@ -1,0 +1,239 @@
+diff --git a/old/lib/services/code_import_service.dart b/new/lib/services/code_import_service.dart
+index 3498e25..e183bf3 100644
+--- a/old/lib/services/code_import_service.dart
++++ b/new/lib/services/code_import_service.dart
+@@ -58,10 +58,18 @@ abstract final class CodeImportService {
+     }
+   }
+ 
+-  static Future<void> _writeNewFile(File file, String code) async {
+-    if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+-        FileSystemEntityType.notFound) {
+-      throw CodeImportException(CodeImportFailure.fileExists, file.path);
++  static Future<void> _writeFile(
++    File file,
++    String code, {
++    bool overwrite = false,
++  }) async {
++    final type = FileSystemEntity.typeSync(file.path, followLinks: false);
++    if (type != FileSystemEntityType.notFound) {
++      if (type != FileSystemEntityType.file || !overwrite) {
++        throw CodeImportException(CodeImportFailure.fileExists, file.path);
++      }
++      await file.writeAsString(code, flush: true);
++      return;
+     }
+     // Reserve the name exclusively so simultaneous imports cannot overwrite it.
+     try {
+@@ -96,7 +104,7 @@ abstract final class CodeImportService {
+     );
+     final file = File(p.join(directory.path, entryFile));
+     await file.parent.create(recursive: true);
+-    await _writeNewFile(file, example.code);
++    await _writeFile(file, example.code);
+     final project = Project.create(
+       name: example.title.trim().isEmpty
+           ? p.basenameWithoutExtension(fileName)
+@@ -116,11 +124,11 @@ abstract final class CodeImportService {
+     return (project: project, path: file.path);
+   }
+ 
+-  static Future<CodeImportResult> importIntoProject({
++  static String destinationPath({
+     required Project project,
+     required ExampleCode example,
+     required String fileName,
+-  }) async {
++  }) {
+     _validateFileName(fileName);
+     final directory = Directory(project.path);
+     if (project.isCloud ||
+@@ -133,7 +141,19 @@ abstract final class CodeImportService {
+         ProjectTemplate.fromLanguage(project.language) ??
+         _templateForType(example.type);
+     final folder = p.dirname(template?.mainFile ?? 'src/snippet.txt');
+-    final file = File(p.join(directory.path, folder, fileName));
++    return p.normalize(p.join(directory.absolute.path, folder, fileName));
++  }
++
++  static Future<CodeImportResult> importIntoProject({
++    required Project project,
++    required ExampleCode example,
++    required String fileName,
++    bool overwrite = false,
++  }) async {
++    final file = File(
++      destinationPath(project: project, example: example, fileName: fileName),
++    );
++    final directory = Directory(project.path);
+     await file.parent.create(recursive: true);
+     final projectRoot = directory.resolveSymbolicLinksSync();
+     final parentPath = file.parent.resolveSymbolicLinksSync();
+@@ -141,7 +161,7 @@ abstract final class CodeImportService {
+         !p.isWithin(projectRoot, parentPath)) {
+       throw const CodeImportException(CodeImportFailure.projectUnavailable);
+     }
+-    await _writeNewFile(file, example.code);
++    await _writeFile(file, example.code, overwrite: overwrite);
+     return (project: project, path: file.path);
+   }
+ }
+diff --git a/old/lib/widgets/code_snippet.dart b/new/lib/widgets/code_snippet.dart
+index 2e71064..9f3b6d9 100644
+--- a/old/lib/widgets/code_snippet.dart
++++ b/new/lib/widgets/code_snippet.dart
+@@ -97,24 +97,35 @@ class _CodeSnippetState extends State<CodeSnippet> {
+           ),
+           const Divider(height: 1),
+           if (widget.controller != null)
+-            TextField(
+-              controller: widget.controller,
+-              minLines: 8,
+-              maxLines: 24,
+-              style: style,
+-              decoration: InputDecoration(
+-                border: InputBorder.none,
+-                enabledBorder: InputBorder.none,
+-                focusedBorder: InputBorder.none,
+-                contentPadding: const EdgeInsets.all(16),
+-                hintText: l10n.sampleCode,
++            SizedBox(
++              height: 360,
++              child: TextField(
++                controller: widget.controller,
++                expands: true,
++                minLines: null,
++                maxLines: null,
++                style: style,
++                textAlignVertical: TextAlignVertical.top,
++                decoration: InputDecoration(
++                  border: InputBorder.none,
++                  enabledBorder: InputBorder.none,
++                  focusedBorder: InputBorder.none,
++                  contentPadding: const EdgeInsets.all(16),
++                  hintText: l10n.sampleCode,
++                ),
+               ),
+             )
+           else
+-            SingleChildScrollView(
+-              scrollDirection: Axis.horizontal,
+-              padding: const EdgeInsets.all(16),
+-              child: SelectableText(widget.example.code, style: style),
++            ConstrainedBox(
++              constraints: const BoxConstraints(maxHeight: 360),
++              child: SingleChildScrollView(
++                primary: false,
++                child: SingleChildScrollView(
++                  scrollDirection: Axis.horizontal,
++                  padding: const EdgeInsets.all(16),
++                  child: SelectableText(widget.example.code, style: style),
++                ),
++              ),
+             ),
+         ],
+       ),
+@@ -145,10 +156,8 @@ class _CodeSnippetState extends State<CodeSnippet> {
+         ),
+       );
+       if (result == null || !mounted) return;
+-      if (intoProject) {
+-        widget.store!.touch(result.project);
+-        TaskActivityService.report(widget.auth!, 'open_project');
+-      }
++      widget.store!.touch(result.project);
++      TaskActivityService.report(widget.auth!, 'open_project');
+       await Navigator.of(context).push<void>(
+         MaterialPageRoute(
+           builder: (_) => EditorPage(
+@@ -224,6 +233,7 @@ class _CodeImportDialogState extends State<_CodeImportDialog> {
+                 children: [
+                   if (widget.intoProject) ...[
+                     DropdownButtonFormField<String>(
++                      key: const ValueKey('import-target-project'),
+                       initialValue: _projectId ?? '',
+                       isExpanded: true,
+                       decoration: InputDecoration(
+@@ -305,6 +315,7 @@ class _CodeImportDialogState extends State<_CodeImportDialog> {
+             child: Text(l10n.cancel),
+           ),
+           FilledButton.icon(
++            key: const ValueKey('import-code-confirm'),
+             onPressed: _saving ? null : _submit,
+             icon: _saving
+                 ? const SizedBox.square(
+@@ -328,19 +339,41 @@ class _CodeImportDialogState extends State<_CodeImportDialog> {
+     try {
+       final CodeImportResult imported;
+       if (!widget.intoProject) {
+-        imported = await CodeImportService.openInEditor(
++        final snippet = await CodeImportService.openInEditor(
+           example: widget.example,
+           fileName: _fileName.text.trim(),
+         );
++        final registered = await widget.store.addExisting(snippet.project.path);
++        if (registered.error != null || registered.project == null) {
++          throw FileSystemException(
++            registered.error ?? 'Project registration failed',
++          );
++        }
++        imported = (project: registered.project!, path: snippet.path);
++        TaskActivityService.report(widget.auth, 'create_project');
+       } else if (_projectId != null) {
+         final project = widget.store.projectById(_projectId);
+         if (project == null) {
+           throw const CodeImportException(CodeImportFailure.projectUnavailable);
+         }
++        final fileName = _fileName.text.trim();
++        final target = CodeImportService.destinationPath(
++          project: project,
++          example: widget.example,
++          fileName: fileName,
++        );
++        var overwrite = false;
++        if (await FileSystemEntity.type(target, followLinks: false) ==
++            FileSystemEntityType.file) {
++          if (!mounted) return;
++          overwrite = await _confirmReplacement(fileName);
++          if (!mounted || !overwrite) return;
++        }
+         imported = await CodeImportService.importIntoProject(
+           project: project,
+           example: widget.example,
+-          fileName: _fileName.text.trim(),
++          fileName: fileName,
++          overwrite: overwrite,
+         );
+       } else {
+         final result = await widget.store.createProjectFromExample(
+@@ -381,6 +414,30 @@ class _CodeImportDialogState extends State<_CodeImportDialog> {
+           _ => '${l10n.importFailed}: $error',
+         };
+       });
++    } finally {
++      if (mounted) setState(() => _saving = false);
+     }
+   }
++
++  Future<bool> _confirmReplacement(String fileName) async {
++    final l10n = StudioLocalizations.of(context);
++    return await showDialog<bool>(
++          context: context,
++          builder: (context) => AlertDialog(
++            title: Text(l10n.replaceExistingResource),
++            content: Text(l10n.replaceResourceMessage(fileName)),
++            actions: [
++              TextButton(
++                onPressed: () => Navigator.of(context).pop(false),
++                child: Text(l10n.cancel),
++              ),
++              FilledButton(
++                onPressed: () => Navigator.of(context).pop(true),
++                child: Text(l10n.replaceResource),
++              ),
++            ],
++          ),
++        ) ??
++        false;
++  }
+ }

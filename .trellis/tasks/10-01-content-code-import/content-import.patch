@@ -1,0 +1,1313 @@
+diff --git a/old/lib/i18n/studio_localizations.dart b/new/lib/i18n/studio_localizations.dart
+index 769d54d..5f1aea6 100644
+--- a/old/lib/i18n/studio_localizations.dart
++++ b/new/lib/i18n/studio_localizations.dart
+@@ -63,6 +63,14 @@ class StudioLocalizations {
+   String get copyExample => _text('copyExample');
+   String get exampleCopied => _text('exampleCopied');
+   String get importExampleProject => _text('importExampleProject');
++  String get importToEditor => _text('importToEditor');
++  String get importToProject => _text('importToProject');
++  String get importAndOpen => _text('importAndOpen');
++  String get fileName => _text('fileName');
++  String get targetProject => _text('targetProject');
++  String get newProject => _text('newProject');
++  String get invalidFileName => _text('invalidFileName');
++  String get exampleSaved => _text('exampleSaved');
+   String get restoreDefault => _text('restoreDefault');
+   String get saveExample => _text('saveExample');
+   String get projectImported => _text('projectImported');
+@@ -116,10 +124,9 @@ class StudioLocalizations {
+       '${_text('missingProjectPath')}$path';
+   String deletedProject(String name) =>
+       _text('deletedProject').replaceAll('{name}', name);
+-  String removeMissingMessage(int count, String names) =>
+-      _text('removeMissingMessage')
+-          .replaceAll('{count}', '$count')
+-          .replaceAll('{names}', names);
++  String removeMissingMessage(int count, String names) => _text(
++    'removeMissingMessage',
++  ).replaceAll('{count}', '$count').replaceAll('{names}', names);
+   String cloudRefreshFailed(String message) =>
+       _text('cloudRefreshFailed').replaceAll('{message}', message);
+   String get refreshProjectsFailed => _text('refreshProjectsFailed');
+@@ -187,6 +194,14 @@ class StudioLocalizations {
+     'copyExample': '复制示例代码',
+     'exampleCopied': '示例代码已复制',
+     'importExampleProject': '导入新建项目',
++    'importToEditor': '导入编辑器',
++    'importToProject': '导入项目',
++    'importAndOpen': '导入并打开',
++    'fileName': '文件名',
++    'targetProject': '目标项目',
++    'newProject': '新建项目',
++    'invalidFileName': '请输入有效文件名，不能包含路径或非法字符',
++    'exampleSaved': '示例已保存',
+     'restoreDefault': '恢复默认',
+     'saveExample': '保存示例',
+     'projectImported': '示例已导入新项目',
+@@ -289,6 +304,14 @@ class StudioLocalizations {
+     'copyExample': '複製範例程式碼',
+     'exampleCopied': '範例程式碼已複製',
+     'importExampleProject': '匯入並建立專案',
++    'importToEditor': '匯入編輯器',
++    'importToProject': '匯入專案',
++    'importAndOpen': '匯入並開啟',
++    'fileName': '檔案名稱',
++    'targetProject': '目標專案',
++    'newProject': '建立專案',
++    'invalidFileName': '請輸入有效檔案名稱，不能包含路徑或無效字元',
++    'exampleSaved': '範例已儲存',
+     'restoreDefault': '還原預設',
+     'saveExample': '儲存範例',
+     'projectImported': '範例已匯入新專案',
+@@ -391,6 +414,15 @@ class StudioLocalizations {
+     'copyExample': 'Copy example code',
+     'exampleCopied': 'Example code copied',
+     'importExampleProject': 'Import into new project',
++    'importToEditor': 'Import to editor',
++    'importToProject': 'Import to project',
++    'importAndOpen': 'Import and open',
++    'fileName': 'File name',
++    'targetProject': 'Target project',
++    'newProject': 'New project',
++    'invalidFileName':
++        'Enter a valid file name without paths or invalid characters',
++    'exampleSaved': 'Example saved',
+     'restoreDefault': 'Restore default',
+     'saveExample': 'Save example',
+     'projectImported': 'Example imported into a new project',
+@@ -409,7 +441,8 @@ class StudioLocalizations {
+     'favoriteProjects': 'Favorite projects',
+     'cloudProjects': 'Cloud projects',
+     'favoriteProjectHint': 'Choose “Favorite” from a project card menu',
+-    'cloudProjectHint': 'Sign in, then create a cloud project from More; source syncs automatically.',
++    'cloudProjectHint':
++        'Sign in, then create a cloud project from More; source syncs automatically.',
+     'searchProjectHint': 'Search project name or path',
+     'allLanguages': 'All languages',
+     'removeFromList': 'Remove from list',
+@@ -423,12 +456,15 @@ class StudioLocalizations {
+     'create': 'Create',
+     'invalidProjectName': r'Name cannot contain \\ / : * ? " < > |',
+     'creatingCloudProject': 'Creating cloud project…',
+-    'cloudProjectCreated': 'Cloud project created. Edits will sync to the server automatically.',
++    'cloudProjectCreated':
++        'Cloud project created. Edits will sync to the server automatically.',
+     'noMatchingProjects': 'No matching projects',
+     'searchProjectsHint': 'Try another keyword. Names and paths are supported.',
+     'noProjects': 'No projects yet',
+-    'desktopCreateProjectHint': 'Create a project or add a folder already on disk',
+-    'mobileCreateProjectHint': 'Tap the button below to create your first project',
++    'desktopCreateProjectHint':
++        'Create a project or add a folder already on disk',
++    'mobileCreateProjectHint':
++        'Tap the button below to create your first project',
+     'importResource': 'Import resource from files',
+     'importPhoto': 'Import image from photos',
+     'replaceExistingResource': 'Resource already exists',
+@@ -437,8 +473,10 @@ class StudioLocalizations {
+     'importFinished': 'Imported {count} resources',
+     'importFailed': 'Some resources failed to import: ',
+     'missingProjectPath': 'Project directory does not exist: ',
+-    'deletedProject': 'Deleted “{name}”. The backup is in app data at recyclebin/projects_bin.',
+-    'removeMissingMessage': 'The directories for these {count} projects no longer exist. Only remove them from the list:\n\n{names}',
++    'deletedProject':
++        'Deleted “{name}”. The backup is in app data at recyclebin/projects_bin.',
++    'removeMissingMessage':
++        'The directories for these {count} projects no longer exist. Only remove them from the list:\n\n{names}',
+     'cloudRefreshFailed': 'Cloud project refresh failed: {message}',
+     'refreshProjectsFailed': 'Unable to refresh projects. Please try again.',
+     'examplesCount': '{count} examples from the bundled tutorial',
+diff --git a/old/lib/pages/home_page.dart b/new/lib/pages/home_page.dart
+index 15a88aa..5dbfd0d 100644
+--- a/old/lib/pages/home_page.dart
++++ b/new/lib/pages/home_page.dart
+@@ -211,7 +211,12 @@ class _HomePageState extends State<HomePage> {
+       ),
+       2 =>
+         offline
+-            ? LocalTutorialsTab(language: profile!.id)
++            ? LocalTutorialsTab(
++                language: profile!.id,
++                store: widget.store,
++                auth: widget.auth,
++                onOpenProject: _openImportedProject,
++              )
+             : TutorialsTab(auth: widget.auth),
+       3 =>
+         offline
+@@ -219,6 +224,7 @@ class _HomePageState extends State<HomePage> {
+                 language: profile!.id,
+                 store: widget.store,
+                 auth: widget.auth,
++                onOpenProject: _openImportedProject,
+               )
+             : ProfileTab(
+                 auth: widget.auth,
+@@ -229,6 +235,23 @@ class _HomePageState extends State<HomePage> {
+     };
+   }
+ 
++  Future<void> _openImportedProject(Project project, String filePath) async {
++    if (!mounted) return;
++    widget.store.touch(project);
++    TaskActivityService.report(widget.auth, 'open_project');
++    await Navigator.of(context).push<void>(
++      MaterialPageRoute<void>(
++        builder: (_) => EditorPage(
++          project: project,
++          auth: widget.auth,
++          store: widget.store,
++          settings: widget.settings,
++          initialOpenPath: filePath,
++        ),
++      ),
++    );
++  }
++
+   bool get _isContentProduct =>
+       StudioProfile.current?.toolsPageBuilder != null ||
+       switch (StudioProfile.current?.productKey) {
+diff --git a/old/lib/pages/local_content_pages.dart b/new/lib/pages/local_content_pages.dart
+index b51e263..d480d57 100644
+--- a/old/lib/pages/local_content_pages.dart
++++ b/new/lib/pages/local_content_pages.dart
+@@ -7,19 +7,34 @@ import '../content/asset_content_repository.dart';
+ import '../content/content_repository.dart';
+ import '../content/local_content_adapter.dart';
+ import '../i18n/studio_localizations.dart';
++import '../models/project.dart';
+ import '../models/tutorial.dart';
++import '../services/example_code_store.dart';
+ import '../services/studio_profile.dart';
+ import '../services/task_activity_service.dart';
+ import '../store/auth_store.dart';
+ import '../store/project_store.dart';
+-import '../services/example_code_store.dart';
++import '../widgets/code_import_dialog.dart';
++
++typedef ContentProjectOpener =
++    Future<void> Function(Project project, String filePath);
+ 
+ /// 离线语言 App 的第二页：从随包 JSON 加载入门教程。
+ class LocalTutorialsTab extends StatefulWidget {
+-  const LocalTutorialsTab({super.key, required this.language, this.repository});
++  const LocalTutorialsTab({
++    super.key,
++    required this.language,
++    this.repository,
++    this.store,
++    this.auth,
++    this.onOpenProject,
++  });
+ 
+   final String language;
+   final ContentRepository? repository;
++  final ProjectStore? store;
++  final AuthStore? auth;
++  final ContentProjectOpener? onOpenProject;
+ 
+   @override
+   State<LocalTutorialsTab> createState() => _LocalTutorialsTabState();
+@@ -70,7 +85,12 @@ class _LocalTutorialsTabState extends State<LocalTutorialsTab> {
+           if (tutorial == null) {
+             return _LocalContentError(message: l10n.localTutorialMissing);
+           }
+-          return _TutorialList(tutorial: tutorial);
++          return _TutorialList(
++            tutorial: tutorial,
++            store: widget.store,
++            auth: widget.auth,
++            onOpenProject: widget.onOpenProject,
++          );
+         },
+       ),
+     );
+@@ -86,6 +106,7 @@ class ExampleCodeTab extends StatefulWidget {
+     this.store,
+     this.auth,
+     this.examples,
++    this.onOpenProject,
+   });
+ 
+   final String language;
+@@ -93,6 +114,7 @@ class ExampleCodeTab extends StatefulWidget {
+   final ProjectStore? store;
+   final AuthStore? auth;
+   final ExampleCodeStore? examples;
++  final ContentProjectOpener? onOpenProject;
+ 
+   @override
+   State<ExampleCodeTab> createState() => _ExampleCodeTabState();
+@@ -147,6 +169,7 @@ class _ExampleCodeTabState extends State<ExampleCodeTab> {
+             store: widget.store,
+             auth: widget.auth,
+             examples: widget.examples,
++            onOpenProject: widget.onOpenProject,
+           );
+         },
+       ),
+@@ -155,9 +178,17 @@ class _ExampleCodeTabState extends State<ExampleCodeTab> {
+ }
+ 
+ class _TutorialList extends StatelessWidget {
+-  const _TutorialList({required this.tutorial});
++  const _TutorialList({
++    required this.tutorial,
++    this.store,
++    this.auth,
++    this.onOpenProject,
++  });
+ 
+   final Tutorial tutorial;
++  final ProjectStore? store;
++  final AuthStore? auth;
++  final ContentProjectOpener? onOpenProject;
+ 
+   @override
+   Widget build(BuildContext context) {
+@@ -165,23 +196,38 @@ class _TutorialList extends StatelessWidget {
+     return ListView(
+       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+       children: [
+-        _RuntimeSummary(tutorial: tutorial),
+-        const SizedBox(height: 12),
+         for (final chapter in tutorial.chapters) ...[
+           Padding(
+-            padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
+-            child: Text(chapter.title, style: theme.textTheme.titleMedium),
++            padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
++            child: Text(
++              chapter.title,
++              style: theme.textTheme.titleSmall?.copyWith(
++                color: theme.colorScheme.onSurfaceVariant,
++              ),
++            ),
+           ),
+           for (final lesson in chapter.lessons)
+-            Card(
+-              child: ListTile(
+-                leading: const Icon(Icons.menu_book_outlined),
+-                title: Text(lesson.title),
+-                subtitle: Text(lesson.summary),
+-                trailing: const Icon(Icons.chevron_right),
+-                onTap: () => Navigator.of(context).push(
+-                  MaterialPageRoute(
+-                    builder: (_) => _LessonPage(lesson: lesson),
++            ListTile(
++              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
++              leading: const Icon(Icons.menu_book_outlined),
++              title: Text(
++                lesson.title,
++                maxLines: 2,
++                overflow: TextOverflow.ellipsis,
++              ),
++              subtitle: Text(
++                lesson.summary,
++                maxLines: 2,
++                overflow: TextOverflow.ellipsis,
++              ),
++              trailing: const Icon(Icons.chevron_right),
++              onTap: () => Navigator.of(context).push(
++                MaterialPageRoute(
++                  builder: (_) => _LessonPage(
++                    lesson: lesson,
++                    store: store,
++                    auth: auth,
++                    onOpenProject: onOpenProject,
+                   ),
+                 ),
+               ),
+@@ -198,12 +244,14 @@ class _ExampleCodeList extends StatelessWidget {
+     this.store,
+     this.auth,
+     this.examples,
++    this.onOpenProject,
+   });
+ 
+   final List<ExampleCode> items;
+   final ProjectStore? store;
+   final AuthStore? auth;
+   final ExampleCodeStore? examples;
++  final ContentProjectOpener? onOpenProject;
+ 
+   @override
+   Widget build(BuildContext context) {
+@@ -220,8 +268,20 @@ class _ExampleCodeList extends StatelessWidget {
+         ),
+         const SizedBox(height: 8),
+         for (final example in items)
+-          _ExampleCodeCard(
+-            example: example,
++          ListTile(
++            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
++            leading: const Icon(Icons.code_outlined),
++            title: Text(
++              example.title,
++              maxLines: 2,
++              overflow: TextOverflow.ellipsis,
++            ),
++            subtitle: Text(
++              example.summary,
++              maxLines: 2,
++              overflow: TextOverflow.ellipsis,
++            ),
++            trailing: const Icon(Icons.chevron_right),
+             onTap: () => Navigator.of(context).push(
+               MaterialPageRoute(
+                 builder: (_) => ExampleDetailPage(
+@@ -229,6 +289,7 @@ class _ExampleCodeList extends StatelessWidget {
+                   store: store,
+                   auth: auth,
+                   examples: examples,
++                  onOpenProject: onOpenProject,
+                 ),
+               ),
+             ),
+@@ -238,76 +299,6 @@ class _ExampleCodeList extends StatelessWidget {
+   }
+ }
+ 
+-class _ExampleCodeCard extends StatelessWidget {
+-  const _ExampleCodeCard({required this.example, this.onTap});
+-
+-  final ExampleCode example;
+-  final VoidCallback? onTap;
+-
+-  @override
+-  Widget build(BuildContext context) {
+-    final theme = Theme.of(context);
+-    final l10n = StudioLocalizations.of(context);
+-    return Card(
+-      child: InkWell(
+-        onTap: onTap,
+-        borderRadius: BorderRadius.circular(8),
+-        child: Padding(
+-          padding: const EdgeInsets.fromLTRB(16, 12, 12, 14),
+-          child: Column(
+-            crossAxisAlignment: CrossAxisAlignment.stretch,
+-            children: [
+-              Row(
+-                children: [
+-                  Expanded(
+-                    child: Text(
+-                      example.title,
+-                      style: theme.textTheme.titleSmall,
+-                    ),
+-                  ),
+-                  Text(example.type),
+-                  IconButton(
+-                    tooltip: l10n.copyExample,
+-                    icon: const Icon(Icons.copy_outlined),
+-                    onPressed: () async {
+-                      await Clipboard.setData(
+-                        ClipboardData(text: example.code),
+-                      );
+-                      if (!context.mounted) return;
+-                      ScaffoldMessenger.of(context).showSnackBar(
+-                        SnackBar(content: Text(l10n.exampleCopied)),
+-                      );
+-                    },
+-                  ),
+-                ],
+-              ),
+-              const SizedBox(height: 8),
+-              DecoratedBox(
+-                decoration: BoxDecoration(
+-                  color: theme.colorScheme.surfaceContainerHighest,
+-                  borderRadius: BorderRadius.circular(6),
+-                ),
+-                child: Padding(
+-                  padding: const EdgeInsets.all(12),
+-                  child: SingleChildScrollView(
+-                    scrollDirection: Axis.horizontal,
+-                    child: SelectableText(
+-                      example.code,
+-                      style: theme.textTheme.bodyMedium?.copyWith(
+-                        fontFamily: EditorFonts.bundledFamily,
+-                      ),
+-                    ),
+-                  ),
+-                ),
+-              ),
+-            ],
+-          ),
+-        ),
+-      ),
+-    );
+-  }
+-}
+-
+ class ExampleDetailPage extends StatefulWidget {
+   const ExampleDetailPage({
+     super.key,
+@@ -315,12 +306,14 @@ class ExampleDetailPage extends StatefulWidget {
+     this.store,
+     this.auth,
+     this.examples,
++    this.onOpenProject,
+   });
+ 
+   final ExampleCode example;
+   final ProjectStore? store;
+   final AuthStore? auth;
+   final ExampleCodeStore? examples;
++  final ContentProjectOpener? onOpenProject;
+ 
+   @override
+   State<ExampleDetailPage> createState() => _ExampleDetailPageState();
+@@ -330,6 +323,7 @@ class _ExampleDetailPageState extends State<ExampleDetailPage> {
+   late final TextEditingController _code = TextEditingController(
+     text: widget.example.code,
+   );
++  bool _saving = false;
+ 
+   @override
+   void dispose() {
+@@ -339,59 +333,55 @@ class _ExampleDetailPageState extends State<ExampleDetailPage> {
+ 
+   @override
+   Widget build(BuildContext context) {
++    final theme = Theme.of(context);
+     final l10n = StudioLocalizations.of(context);
+     return Scaffold(
+-      appBar: AppBar(
+-        title: Text(widget.example.title),
+-        actions: [
+-          IconButton(
+-            tooltip: l10n.copyExample,
+-            icon: const Icon(Icons.copy_outlined),
+-            onPressed: () => Clipboard.setData(ClipboardData(text: _code.text)),
+-          ),
+-        ],
+-      ),
++      appBar: AppBar(title: Text(widget.example.title)),
+       body: ListView(
+         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+         children: [
+-          Text(widget.example.type),
++          Text(
++            widget.example.type,
++            style: theme.textTheme.labelLarge?.copyWith(
++              color: theme.colorScheme.onSurfaceVariant,
++            ),
++          ),
+           const SizedBox(height: 8),
+           Text(widget.example.summary),
+           const SizedBox(height: 16),
+-          TextField(
++          _CodeBlock(
++            example: widget.example,
+             controller: _code,
+-            minLines: 12,
+-            maxLines: 24,
+-            expands: false,
+-            style: const TextStyle(fontFamily: EditorFonts.bundledFamily),
+-            decoration: const InputDecoration(border: OutlineInputBorder()),
++            store: widget.store,
++            auth: widget.auth,
++            onOpenProject: widget.onOpenProject,
+           ),
+-          const SizedBox(height: 16),
+-          Text(l10n.expectedOutput),
+-          const SizedBox(height: 6),
+-          SelectableText(widget.example.output),
+-          const SizedBox(height: 16),
++          const SizedBox(height: 8),
+           Wrap(
+             spacing: 8,
+             runSpacing: 8,
+             children: [
+-              FilledButton.icon(
+-                onPressed: widget.store == null ? null : _importProject,
+-                icon: const Icon(Icons.create_new_folder_outlined),
+-                label: Text(l10n.importExampleProject),
+-              ),
+               OutlinedButton.icon(
+-                onPressed: _reset,
++                onPressed: _saving ? null : _reset,
+                 icon: const Icon(Icons.restore),
+                 label: Text(l10n.restoreDefault),
+               ),
+               OutlinedButton.icon(
+-                onPressed: widget.examples == null ? null : _save,
+-                icon: const Icon(Icons.save_outlined),
++                onPressed: widget.examples == null || _saving ? null : _save,
++                icon: _saving
++                    ? const SizedBox.square(
++                        dimension: 20,
++                        child: CircularProgressIndicator(strokeWidth: 2),
++                      )
++                    : const Icon(Icons.save_outlined),
+                 label: Text(l10n.saveExample),
+               ),
+             ],
+           ),
++          const SizedBox(height: 20),
++          Text(l10n.expectedOutput, style: theme.textTheme.titleMedium),
++          const SizedBox(height: 8),
++          SelectableText(widget.example.output),
+         ],
+       ),
+     );
+@@ -400,62 +390,38 @@ class _ExampleDetailPageState extends State<ExampleDetailPage> {
+   void _reset() => setState(() => _code.text = widget.example.code);
+ 
+   Future<void> _save() async {
+-    await widget.examples!.upsert(widget.example.copyWith(code: _code.text));
+-  }
+-
+-  Future<void> _importProject() async {
+-    final result = await widget.store!.createProjectFromExample(
+-      name: widget.example.title,
+-      example: widget.example.copyWith(code: _code.text),
+-    );
+-    if (result.error == null && widget.auth != null) {
+-      TaskActivityService.report(widget.auth!, 'create_project');
++    final examples = widget.examples;
++    if (_saving || examples == null) return;
++    setState(() => _saving = true);
++    try {
++      await examples.upsert(widget.example.copyWith(code: _code.text));
++      if (!mounted) return;
++      ScaffoldMessenger.of(context).showSnackBar(
++        SnackBar(content: Text(StudioLocalizations.of(context).exampleSaved)),
++      );
++    } catch (error) {
++      if (!mounted) return;
++      ScaffoldMessenger.of(
++        context,
++      ).showSnackBar(SnackBar(content: Text(error.toString())));
++    } finally {
++      if (mounted) setState(() => _saving = false);
+     }
+-    if (!mounted) return;
+-    ScaffoldMessenger.of(context).showSnackBar(
+-      SnackBar(
+-        content: Text(
+-          result.error ?? StudioLocalizations.of(context).projectImported,
+-        ),
+-      ),
+-    );
+-  }
+-}
+-
+-class _RuntimeSummary extends StatelessWidget {
+-  const _RuntimeSummary({required this.tutorial});
+-
+-  final Tutorial tutorial;
+-
+-  @override
+-  Widget build(BuildContext context) {
+-    final theme = Theme.of(context);
+-    final l10n = StudioLocalizations.of(context);
+-    final runtime = tutorial.runtime;
+-    return Card(
+-      child: Padding(
+-        padding: const EdgeInsets.all(16),
+-        child: Column(
+-          crossAxisAlignment: CrossAxisAlignment.start,
+-          children: [
+-            Text(tutorial.displayName, style: theme.textTheme.titleLarge),
+-            const SizedBox(height: 6),
+-            Text(l10n.runMode(runtime.engine)),
+-            if (runtime.limits case final limits? when limits.isNotEmpty) ...[
+-              const SizedBox(height: 4),
+-              Text(l10n.limits(limits)),
+-            ],
+-          ],
+-        ),
+-      ),
+-    );
+   }
+ }
+ 
+ class _LessonPage extends StatelessWidget {
+-  const _LessonPage({required this.lesson});
++  const _LessonPage({
++    required this.lesson,
++    this.store,
++    this.auth,
++    this.onOpenProject,
++  });
+ 
+   final TutorialLesson lesson;
++  final ProjectStore? store;
++  final AuthStore? auth;
++  final ContentProjectOpener? onOpenProject;
+ 
+   @override
+   Widget build(BuildContext context) {
+@@ -470,9 +436,7 @@ class _LessonPage extends StatelessWidget {
+           const SizedBox(height: 12),
+           Text(lesson.explain),
+           const SizedBox(height: 20),
+-          Text(l10n.sampleCode, style: theme.textTheme.titleMedium),
+-          const SizedBox(height: 8),
+-          _ExampleCodeCard(
++          _CodeBlock(
+             example: ExampleCode(
+               id: lesson.id,
+               type: lesson.type,
+@@ -482,6 +446,9 @@ class _LessonPage extends StatelessWidget {
+               output: lesson.output,
+               sourceLessonId: lesson.id,
+             ),
++            store: store,
++            auth: auth,
++            onOpenProject: onOpenProject,
+           ),
+           const SizedBox(height: 16),
+           Text(l10n.expectedOutput, style: theme.textTheme.titleMedium),
+@@ -506,6 +473,179 @@ class _LessonPage extends StatelessWidget {
+   }
+ }
+ 
++class _CodeBlock extends StatefulWidget {
++  const _CodeBlock({
++    required this.example,
++    this.controller,
++    this.store,
++    this.auth,
++    this.onOpenProject,
++  });
++
++  final ExampleCode example;
++  final TextEditingController? controller;
++  final ProjectStore? store;
++  final AuthStore? auth;
++  final ContentProjectOpener? onOpenProject;
++
++  @override
++  State<_CodeBlock> createState() => _CodeBlockState();
++}
++
++class _CodeBlockState extends State<_CodeBlock> {
++  bool _importing = false;
++  bool _copying = false;
++
++  String get _currentCode => widget.controller?.text ?? widget.example.code;
++
++  @override
++  Widget build(BuildContext context) {
++    final theme = Theme.of(context);
++    final l10n = StudioLocalizations.of(context);
++    final canImport =
++        widget.store != null && widget.onOpenProject != null && !_importing;
++    final codeStyle = theme.textTheme.bodyMedium?.copyWith(
++      fontFamily: EditorFonts.bundledFamily,
++    );
++    return DecoratedBox(
++      decoration: BoxDecoration(
++        color: theme.colorScheme.surfaceContainerLow,
++        border: Border.all(color: theme.colorScheme.outlineVariant),
++        borderRadius: BorderRadius.circular(8),
++      ),
++      child: Column(
++        crossAxisAlignment: CrossAxisAlignment.stretch,
++        children: [
++          Padding(
++            padding: const EdgeInsets.fromLTRB(12, 4, 8, 12),
++            child: Column(
++              crossAxisAlignment: CrossAxisAlignment.stretch,
++              children: [
++                Row(
++                  children: [
++                    Expanded(
++                      child: Text(
++                        l10n.sampleCode,
++                        style: theme.textTheme.titleSmall,
++                      ),
++                    ),
++                    IconButton(
++                      tooltip: l10n.copyExample,
++                      onPressed: _copying ? null : _copy,
++                      icon: const Icon(Icons.copy_outlined),
++                    ),
++                  ],
++                ),
++                Wrap(
++                  spacing: 8,
++                  runSpacing: 8,
++                  children: [
++                    FilledButton.tonalIcon(
++                      onPressed: canImport
++                          ? () => _import(toEditor: true)
++                          : null,
++                      icon: const Icon(Icons.edit_note_outlined),
++                      label: Text(l10n.importToEditor),
++                    ),
++                    OutlinedButton.icon(
++                      onPressed: canImport
++                          ? () => _import(toEditor: false)
++                          : null,
++                      icon: const Icon(Icons.drive_file_move_outlined),
++                      label: Text(l10n.importToProject),
++                    ),
++                  ],
++                ),
++              ],
++            ),
++          ),
++          const Divider(height: 1),
++          Padding(
++            padding: const EdgeInsets.all(12),
++            child: widget.controller != null
++                ? SizedBox(
++                    height: 360,
++                    child: TextField(
++                      controller: widget.controller,
++                      expands: true,
++                      minLines: null,
++                      maxLines: null,
++                      style: codeStyle,
++                      textAlignVertical: TextAlignVertical.top,
++                      decoration: const InputDecoration(
++                        border: InputBorder.none,
++                        isCollapsed: true,
++                      ),
++                    ),
++                  )
++                : ConstrainedBox(
++                    constraints: const BoxConstraints(maxHeight: 360),
++                    child: SingleChildScrollView(
++                      primary: false,
++                      child: SingleChildScrollView(
++                        scrollDirection: Axis.horizontal,
++                        child: SelectableText(
++                          widget.example.code,
++                          style: codeStyle,
++                        ),
++                      ),
++                    ),
++                  ),
++          ),
++        ],
++      ),
++    );
++  }
++
++  Future<void> _copy() async {
++    if (_copying) return;
++    setState(() => _copying = true);
++    try {
++      await Clipboard.setData(ClipboardData(text: _currentCode));
++      if (!mounted) return;
++      ScaffoldMessenger.of(context).showSnackBar(
++        SnackBar(content: Text(StudioLocalizations.of(context).exampleCopied)),
++      );
++    } catch (error) {
++      if (!mounted) return;
++      ScaffoldMessenger.of(
++        context,
++      ).showSnackBar(SnackBar(content: Text(error.toString())));
++    } finally {
++      if (mounted) setState(() => _copying = false);
++    }
++  }
++
++  Future<void> _import({required bool toEditor}) async {
++    final store = widget.store;
++    final onOpenProject = widget.onOpenProject;
++    if (_importing || store == null || onOpenProject == null) return;
++    final example = widget.example.copyWith(code: _currentCode);
++    setState(() => _importing = true);
++    try {
++      final result = await showCodeImportDialog(
++        context,
++        store: store,
++        example: example,
++        toEditor: toEditor,
++      );
++      if (result == null || !mounted) return;
++      final auth = widget.auth;
++      if (result.created && auth != null) {
++        TaskActivityService.report(auth, 'create_project');
++      }
++      await onOpenProject(result.project, result.filePath);
++    } catch (error) {
++      if (!mounted) return;
++      ScaffoldMessenger.of(
++        context,
++      ).showSnackBar(SnackBar(content: Text(error.toString())));
++    } finally {
++      if (mounted) setState(() => _importing = false);
++    }
++  }
++}
++
+ class _LocalContentError extends StatelessWidget {
+   const _LocalContentError({required this.message});
+ 
+diff --git a/new/lib/services/example_import_service.dart b/new/lib/services/example_import_service.dart
+new file mode 100644
+index 0000000..c5a9693
+--- /dev/null
++++ b/new/lib/services/example_import_service.dart
+@@ -0,0 +1,80 @@
++import 'dart:io';
++
++import 'package:path/path.dart' as p;
++
++import '../models/project.dart';
++import '../models/tutorial.dart';
++import 'file_service.dart';
++import 'project_templates.dart';
++
++abstract final class ExampleImportService {
++  static ProjectTemplate templateFor(ExampleCode example) =>
++      ProjectTemplate.fromType(example.type) ??
++      ProjectTemplate.fromType(example.type == 'html' ? 'web' : example.type) ??
++      ProjectTemplate.empty;
++
++  static String defaultFileName(ExampleCode example) =>
++      p.basename(templateFor(example).mainFile ?? 'src/example.txt');
++
++  static bool isValidFileName(String name) =>
++      FileService.isValidEntryName(name) && !name.contains('\u0000');
++
++  static String destinationPath({
++    required Project project,
++    required ExampleCode example,
++    required String fileName,
++  }) {
++    if (!isValidFileName(fileName)) {
++      throw const FileSystemException('Invalid file name');
++    }
++    final entry = templateFor(example).mainFile ?? 'src/example.txt';
++    return p.normalize(
++      p.join(p.absolute(project.path), p.dirname(entry), fileName.trim()),
++    );
++  }
++
++  static Future<String> write({
++    required Project project,
++    required ExampleCode example,
++    required String fileName,
++    bool overwrite = false,
++  }) async {
++    if (project.isCloud) {
++      throw const FileSystemException('Select a local project');
++    }
++    final destination = destinationPath(
++      project: project,
++      example: example,
++      fileName: fileName,
++    );
++    if (!await Directory(project.path).exists()) {
++      throw FileSystemException(
++        'Project directory does not exist',
++        project.path,
++      );
++    }
++    final file = File(destination);
++    if (await FileSystemEntity.type(file.parent.path, followLinks: false) ==
++        FileSystemEntityType.link) {
++      throw FileSystemException(
++        'Source directory is a symbolic link',
++        file.parent.path,
++      );
++    }
++    final type = await FileSystemEntity.type(destination, followLinks: false);
++    if (type != FileSystemEntityType.notFound &&
++        type != FileSystemEntityType.file) {
++      throw FileSystemException(
++        'Destination is not a regular file',
++        destination,
++      );
++    }
++    if (type == FileSystemEntityType.file && !overwrite) {
++      throw FileSystemException('File already exists', destination);
++    }
++    await file.parent.create(recursive: true);
++    if (!overwrite) await file.create(exclusive: true);
++    await file.writeAsString(example.code, flush: true);
++    return destination;
++  }
++}
+diff --git a/old/lib/store/project_store.dart b/new/lib/store/project_store.dart
+index e750f60..625fb56 100644
+--- a/old/lib/store/project_store.dart
++++ b/new/lib/store/project_store.dart
+@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
+ import '../models/project.dart';
+ import '../models/tutorial.dart';
+ import '../services/app_paths.dart';
++import '../services/example_import_service.dart';
+ import '../services/file_service.dart';
+ import '../services/project_config.dart';
+ import '../services/project_templates.dart';
+@@ -153,27 +154,41 @@ class ProjectStore extends ChangeNotifier {
+     required String name,
+     required ExampleCode example,
+     String? location,
++    String? fileName,
+   }) async {
++    final sourceName =
++        fileName ?? ExampleImportService.defaultFileName(example);
++    if (!ExampleImportService.isValidFileName(sourceName)) {
++      return (error: '文件名称无效', project: null);
++    }
+     final root = location ?? await AppPaths.projectsRoot(create: true);
+     if (root == null) {
+       return (error: '未找到可写的项目目录', project: null);
+     }
+-    final template =
+-        ProjectTemplate.fromType(example.type) ??
+-        ProjectTemplate.fromType(
+-          example.type == 'html' ? 'web' : example.type,
+-        ) ??
+-        ProjectTemplate.empty;
++    final template = ExampleImportService.templateFor(example);
+     final result = await createProject(
+       name: name,
+       location: root,
+       template: template,
+     );
+     final project = result.project;
+-    final mainFile = template.mainFile;
+-    if (project == null || mainFile == null) return result;
++    if (result.error != null || project == null) return result;
+     try {
+-      await File(p.join(project.path, mainFile)).writeAsString(example.code);
++      final importedPath = await ExampleImportService.write(
++        project: project,
++        example: example,
++        fileName: sourceName,
++        overwrite: true,
++      );
++      final mainFile = template.mainFile;
++      if (mainFile != null) {
++        final generated = File(p.join(project.path, mainFile));
++        if (await generated.exists() &&
++            !await FileSystemEntity.identical(generated.path, importedPath)) {
++          // This entry was generated by the new-project operation itself.
++          await generated.delete();
++        }
++      }
+     } on FileSystemException catch (error) {
+       return (error: '写入示例代码失败：${error.message}', project: project);
+     }
+diff --git a/new/lib/widgets/code_import_dialog.dart b/new/lib/widgets/code_import_dialog.dart
+new file mode 100644
+index 0000000..fec7f99
+--- /dev/null
++++ b/new/lib/widgets/code_import_dialog.dart
+@@ -0,0 +1,316 @@
++import 'dart:io';
++
++import 'package:flutter/material.dart';
++import 'package:path/path.dart' as p;
++
++import '../i18n/studio_localizations.dart';
++import '../models/project.dart';
++import '../models/tutorial.dart';
++import '../services/app_paths.dart';
++import '../services/example_import_service.dart';
++import '../services/file_service.dart';
++import '../store/project_store.dart';
++
++typedef CodeImportResult = ({Project project, String filePath, bool created});
++
++Future<CodeImportResult?> showCodeImportDialog(
++  BuildContext context, {
++  required ProjectStore store,
++  required ExampleCode example,
++  bool toEditor = false,
++  String? projectLocation,
++}) => showDialog<CodeImportResult>(
++  context: context,
++  builder: (_) => _CodeImportDialog(
++    store: store,
++    example: example,
++    toEditor: toEditor,
++    projectLocation: projectLocation,
++  ),
++);
++
++class _CodeImportDialog extends StatefulWidget {
++  const _CodeImportDialog({
++    required this.store,
++    required this.example,
++    required this.toEditor,
++    this.projectLocation,
++  });
++
++  final ProjectStore store;
++  final ExampleCode example;
++  final bool toEditor;
++  final String? projectLocation;
++
++  @override
++  State<_CodeImportDialog> createState() => _CodeImportDialogState();
++}
++
++class _CodeImportDialogState extends State<_CodeImportDialog> {
++  static const _newProject = '@new-project';
++  late final TextEditingController _name;
++  late final TextEditingController _fileName;
++  late String _target;
++  String? _location;
++  String? _error;
++  bool _busy = false;
++  bool _resolving = false;
++
++  List<Project> get _projects =>
++      widget.store.projects.where((project) => !project.isCloud).toList();
++  bool get _creating => _target == _newProject;
++
++  Project? get _selectedProject {
++    for (final project in _projects) {
++      if (project.path == _target) return project;
++    }
++    return null;
++  }
++
++  @override
++  void initState() {
++    super.initState();
++    _name = TextEditingController(text: widget.example.title);
++    _fileName = TextEditingController(
++      text: ExampleImportService.defaultFileName(widget.example),
++    );
++    _target = widget.toEditor || _projects.isEmpty
++        ? _newProject
++        : _projects.first.path;
++    _location = widget.projectLocation;
++    if (_creating) _resolveLocation();
++  }
++
++  @override
++  void dispose() {
++    _name.dispose();
++    _fileName.dispose();
++    super.dispose();
++  }
++
++  Future<void> _resolveLocation() async {
++    if (_location != null || _resolving) return;
++    _resolving = true;
++    try {
++      final location = await AppPaths.projectsRoot(create: true);
++      if (!mounted) return;
++      setState(() {
++        _location = location;
++        if (location == null) {
++          _error = StudioLocalizations.of(context).noWorkingDirectory;
++        }
++      });
++    } finally {
++      if (mounted) setState(() => _resolving = false);
++    }
++  }
++
++  Future<bool> _confirmReplacement(String fileName) async {
++    final l10n = StudioLocalizations.of(context);
++    return await showDialog<bool>(
++          context: context,
++          builder: (context) => AlertDialog(
++            title: Text(l10n.replaceExistingResource),
++            content: Text(l10n.replaceResourceMessage(fileName)),
++            actions: [
++              TextButton(
++                onPressed: () => Navigator.pop(context, false),
++                child: Text(l10n.cancel),
++              ),
++              FilledButton(
++                onPressed: () => Navigator.pop(context, true),
++                child: Text(l10n.replaceResource),
++              ),
++            ],
++          ),
++        ) ??
++        false;
++  }
++
++  Future<void> _submit() async {
++    if (_busy || _resolving) return;
++    final l10n = StudioLocalizations.of(context);
++    final fileName = _fileName.text.trim();
++    if (!ExampleImportService.isValidFileName(fileName)) {
++      setState(() => _error = l10n.invalidFileName);
++      return;
++    }
++    if (_creating &&
++        (!FileService.isValidEntryName(_name.text) ||
++            _name.text.contains('\u0000'))) {
++      setState(() => _error = l10n.invalidProjectName);
++      return;
++    }
++    final selected = _selectedProject;
++    if (!_creating && selected == null) {
++      setState(() => _error = l10n.noProjects);
++      return;
++    }
++    if (_creating && _location == null) {
++      setState(() => _error = l10n.noWorkingDirectory);
++      return;
++    }
++    setState(() {
++      _busy = true;
++      _error = null;
++    });
++    try {
++      late final Project project;
++      late final String filePath;
++      final created = _creating;
++      if (created) {
++        final result = await widget.store.createProjectFromExample(
++          name: _name.text.trim(),
++          example: widget.example,
++          fileName: fileName,
++          location: _location,
++        );
++        if (!mounted) return;
++        if (result.error != null || result.project == null) {
++          setState(() => _error = result.error ?? l10n.importFailed);
++          return;
++        }
++        project = result.project!;
++        filePath = ExampleImportService.destinationPath(
++          project: project,
++          example: widget.example,
++          fileName: fileName,
++        );
++      } else {
++        project = selected!;
++        final target = ExampleImportService.destinationPath(
++          project: project,
++          example: widget.example,
++          fileName: fileName,
++        );
++        var overwrite = false;
++        if (await FileSystemEntity.type(target, followLinks: false) ==
++            FileSystemEntityType.file) {
++          if (!mounted) return;
++          overwrite = await _confirmReplacement(fileName);
++          if (!mounted || !overwrite) return;
++        }
++        filePath = await ExampleImportService.write(
++          project: project,
++          example: widget.example,
++          fileName: fileName,
++          overwrite: overwrite,
++        );
++      }
++      if (!mounted) return;
++      Navigator.of(
++        context,
++      ).pop((project: project, filePath: filePath, created: created));
++    } on Object catch (error) {
++      if (mounted) {
++        setState(() => _error = '${l10n.importFailed}: $error');
++      }
++    } finally {
++      if (mounted) setState(() => _busy = false);
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final l10n = StudioLocalizations.of(context);
++    final projects = _projects;
++    final targets = {_newProject, for (final project in projects) project.path};
++    return PopScope<CodeImportResult>(
++      canPop: !_busy,
++      child: AlertDialog(
++        scrollable: true,
++        title: Text(
++          widget.toEditor ? l10n.importToEditor : l10n.importToProject,
++        ),
++        content: SizedBox(
++          width: 420,
++          child: Column(
++            mainAxisSize: MainAxisSize.min,
++            crossAxisAlignment: CrossAxisAlignment.stretch,
++            children: [
++              if (!widget.toEditor) ...[
++                DropdownButtonFormField<String>(
++                  key: ValueKey(_target),
++                  initialValue: targets.contains(_target) ? _target : null,
++                  isExpanded: true,
++                  decoration: InputDecoration(labelText: l10n.targetProject),
++                  items: [
++                    for (final project in projects)
++                      DropdownMenuItem(
++                        value: project.path,
++                        child: Text(
++                          project.name,
++                          overflow: TextOverflow.ellipsis,
++                        ),
++                      ),
++                    DropdownMenuItem(
++                      value: _newProject,
++                      child: Text(l10n.newProject),
++                    ),
++                  ],
++                  onChanged: _busy
++                      ? null
++                      : (value) {
++                          if (value == null) return;
++                          setState(() {
++                            _target = value;
++                            _error = null;
++                          });
++                          if (_creating) _resolveLocation();
++                        },
++                ),
++                const SizedBox(height: 16),
++              ],
++              if (_creating) ...[
++                TextField(
++                  key: const ValueKey('import-project-name'),
++                  controller: _name,
++                  enabled: !_busy,
++                  decoration: InputDecoration(
++                    labelText: l10n.projectName,
++                    prefixIcon: const Icon(Icons.folder_outlined),
++                  ),
++                ),
++                const SizedBox(height: 16),
++              ],
++              TextField(
++                key: const ValueKey('import-file-name'),
++                controller: _fileName,
++                enabled: !_busy,
++                autofocus: true,
++                decoration: InputDecoration(
++                  labelText: l10n.fileName,
++                  prefixIcon: const Icon(Icons.insert_drive_file_outlined),
++                ),
++                onSubmitted: (_) => _submit(),
++              ),
++              if (_resolving || _busy) ...[
++                const SizedBox(height: 16),
++                const LinearProgressIndicator(),
++              ],
++              if (_error != null) ...[
++                const SizedBox(height: 12),
++                Text(
++                  _error!,
++                  style: TextStyle(color: Theme.of(context).colorScheme.error),
++                ),
++              ],
++            ],
++          ),
++        ),
++        actions: [
++          TextButton(
++            onPressed: _busy ? null : () => Navigator.pop(context),
++            child: Text(l10n.cancel),
++          ),
++          FilledButton.icon(
++            key: const ValueKey('import-code-confirm'),
++            onPressed: _busy || _resolving ? null : _submit,
++            icon: const Icon(Icons.open_in_new),
++            label: Text(l10n.importAndOpen),
++          ),
++        ],
++      ),
++    );
++  }
++}
