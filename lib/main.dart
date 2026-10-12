@@ -11,6 +11,7 @@ import 'package:qfli_studio_core/store/auth_store.dart';
 import 'package:qfli_studio_core/store/project_store.dart';
 import 'package:qfli_studio_core/store/settings_store.dart';
 
+import 'dart_content_repository.dart';
 import 'dart_runner.dart';
 import 'dart_tools_page.dart';
 import 'native_dart_toolchain.dart';
@@ -27,6 +28,7 @@ final StudioProfile dartProfile = StudioProfile(
   templates: [ProjectTemplate.empty, ProjectTemplate.dart],
   runner: DartProgramRunner(),
   toolsPageBuilder: DartToolsPage.forStore,
+  contentRepositoryFactory: DartContentRepository.new,
   isOffline: true,
   productKey: StudioProductCatalog.dartWingKey,
   showHomeTabs: false,

@@ -37,3 +37,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/app_icon.png
+    - assets/content/dart_tutorials.json
+    - assets/content/dart_examples.json

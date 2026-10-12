@@ -18,12 +18,27 @@
     // 不配签名也能构建，只是产出 entry-default-unsigned.hap，装不上设备。
     // 把 bundleName 改回 com.azurekiln.qflistudio 也能立刻用主工程那套签名，
     // 但那样两个 App 会互相覆盖安装。
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_H2qDWxivKxY12fnfT5oAKNge6BdccvdWue_ElLyFlFw=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B5D46C659290562A86D5170155D6ECA9A69D21D716BE70EC4E73EC01BA54CCE60323116546BA7FC",
+          "profile": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_H2qDWxivKxY12fnfT5oAKNge6BdccvdWue_ElLyFlFw=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_H2qDWxivKxY12fnfT5oAKNge6BdccvdWue_ElLyFlFw=.p12",
+          "storePassword": "0000001BB25A296998E01C82F0D9933D9980845CCC547DAD364F183AECB9CA07D921676C0FDD1970283F26"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
         "compatibleSdkVersion": "5.1.0(18)",
         "runtimeOS": "HarmonyOS",
+        "signingConfig": "default",
         "targetSdkVersion": "6.1.1(24)"
       }
     ],
