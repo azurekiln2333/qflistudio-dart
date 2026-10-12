@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/dart-tools.md", "reason": "Dart run/compile/tools contract the curriculum code must satisfy"}
+{"file": ".trellis/spec/frontend/content-code-import.md", "reason": "Catalog/detail/import/editor contracts the 120 lessons and examples must reuse"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index and pre-development checklist for this layer"}
+{"file": ".trellis/spec/backend/dart-native-runtime.md", "reason": "Runtime engine contract: native SDK vs dart_eval, extension gating, exit codes"}
+{"file": ".trellis/tasks/10-12-dart-curriculum-120/research/audit-current-dart-content-and-wiring.md", "reason": "Evidence for current content, engine, and delivery-channel constraints"}
+{"file": ".trellis/tasks/10-12-dart-curriculum-120/prd.md", "reason": "Requirements R1-R6, acceptance criteria AC1-AC13, decisions K1-K3"}
+{"file": ".trellis/tasks/10-12-dart-curriculum-120/design.md", "reason": "Content architecture, K1a minimal core diff, runtime compatibility model"}

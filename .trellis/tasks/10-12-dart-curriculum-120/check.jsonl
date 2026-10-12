@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/content-code-import.md", "reason": "Verify catalog/detail/import/editor navigation against this contract"}
+{"file": ".trellis/spec/frontend/dart-tools.md", "reason": "Verify run/compile/tool lifecycle and error matrix for lesson code"}
+{"file": ".trellis/spec/backend/dart-native-runtime.md", "reason": "Verify engine selection, exit codes, and native vs dart_eval gating"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality standards and required verification commands"}
+{"file": ".trellis/tasks/10-12-dart-curriculum-120/prd.md", "reason": "Acceptance criteria checklist AC1-AC13 to verify against"}
+{"file": ".trellis/tasks/10-12-dart-curriculum-120/research/audit-current-dart-content-and-wiring.md", "reason": "Baseline facts for content correctness and core-isolation checks"}
