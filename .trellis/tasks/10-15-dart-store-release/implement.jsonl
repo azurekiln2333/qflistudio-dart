@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/dart-tools.md","reason":"Terminal and tool action contracts"}
+{"file":".trellis/spec/backend/dart-native-runtime.md","reason":"Native runtime and packaging contracts"}
+{"file":".trellis/spec/frontend/dart-curriculum.md","reason":"Authored curriculum ownership and verification"}
+{"file":".trellis/spec/frontend/content-code-import.md","reason":"Content import and editor integration"}
