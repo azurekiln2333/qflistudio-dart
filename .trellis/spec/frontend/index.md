@@ -25,6 +25,7 @@ explicit Dart null-safe JSON parsing.
 | [Quality Guidelines](./quality-guidelines.md) | Lints, widget tests, forbidden/required patterns | Documented |
 | [Type Safety](./type-safety.md) | Dart null safety, typed models, explicit JSON parsing | Documented |
 | [Dart Tools Contract](./dart-tools.md) | Project files, compiler actions, async lifecycle, and verification | Documented |
+| [Dart Terminal Delegate](./dart-terminal.md) | Embedded terminal `dart` commands, both surfaces, raw-VM vs CLI args, portable limits | Documented |
 | [Dart Curriculum Content](./dart-curriculum.md) | 120-lesson authored source, generator, repository, and content gates | Documented |
 | [Content Code Imports](./content-code-import.md) | Catalogs, persisted examples, file import, and editor navigation | Documented |
 
@@ -33,6 +34,9 @@ explicit Dart null-safe JSON parsing.
 - For Dart tools, read [Dart Tools Contract](./dart-tools.md) before changing
   the page or its integration with the formatter, diagnostics, compiler, and
   runner.
+- For the embedded terminal `dart` command, read
+  [Dart Terminal Delegate](./dart-terminal.md) before changing the delegate,
+  the profile hook, or the Android-vs-desktop argument assembly.
 - For curriculum content, read [Dart Curriculum Content](./dart-curriculum.md)
   before editing `curriculum/`, the generator, the repository, or the content
   tests.
