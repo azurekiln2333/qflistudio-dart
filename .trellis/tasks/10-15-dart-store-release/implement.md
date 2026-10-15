@@ -9,6 +9,8 @@
 - [x] Build Android release APK and OHOS HAP; inspect permissions, ABI completeness and bundled SDK bytes.
 - [x] Complete Android SDK/terminal device smoke (16 checks), install and launch ordinary main; attempt OHOS installation and record signature rejection.
 - [x] Reconcile existing Trellis tasks, update specs, record exact evidence and remaining gates.
+- [x] Explicitly track 09-30-dart-toolchain as the existing signed-OHOS runtime gate; retain it in progress until that acceptance passes.
+- [x] Audit final APK native ABI and16KiB page compatibility, including all17 Flutter/application/SDK ELF libraries and zipalign.
 - [x] Commit verification evidence and record the session journal.
 - [ ] Reinstall the final reduced ARM64 APK and repeat a launch/SDK check after the Web/Python/SQL device queue releases it.
 - [ ] Restore a matching DartWing OHOS signing identity, sign the current HAP, install and verify portable execution on the OHOS device.
