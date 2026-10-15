@@ -1,5 +1,13 @@
 # Dart offline store audit — network entry checklist, shared-core revision, verification
 
+> **Final state (refreshed).** Reported initial gaps are all closed: my core
+> gates `54a58ca` (editor Git/cloud-pull + settings AI) plus the later core
+> owner commit `b7b2d2e` (background task-activity sync, profile refresh,
+> terminal network shortcuts, sandbox wording). Read-only review found **no new
+> offline leak**. Host suites green (core +461, Dart +103); Dart analyze clean;
+> Android real-device VM (9) and terminal (14) smoke **passed**. Awaiting
+> dispatcher integration.
+
 Owner: dart-offline (Herdr pane `w7:p6`), cwd/git-root `D:/MyNewProjects/qfli_dart`.
 Scope: offline product integrity for the Dart store app — profile contract, every
 login/Git/cloud-terminal/cloud-project/community/API/auto-network entry, native
@@ -49,6 +57,11 @@ Legend: ✅ absent under the Dart offline profile · ✅\* fixed in this task ·
 | Online run fallback (`OnlineProgram`) | `editor_page.dart` run/stop paths | `!offlineOnly` | ✅ |
 | Cloud SQL run (`.sql`) | `editor_page.dart` | `!offlineOnly` | ✅ |
 | Terminal online session / cloud SQL | `terminal_pane.dart` | `onlineEnabled = offlineOnly != true` | ✅ |
+| Background task-activity sync (`record`/`syncPending`/`refreshIfDue`) | `task_activity_service.dart` | `offlineOnly` early return + import | ✅* |
+| Home tab background `refreshIfDue` (init + auth change) | `home_page.dart` | `offlineOnly != true` guard | ✅* |
+| Profile pull-to-refresh (`auth.refreshMe`) | `profile_page.dart::_refresh` | `offlineOnly` early return | ✅* |
+| Terminal shortcut network tools (curl/wget/dig/ping/ssh/…) | `shortcut_bar.dart` | `offlineOnly` hides 网络工具 + `git status` | ✅* |
+| Sandbox help/diagnostic toolchain text | `sandbox_shell_backend.dart` | language-neutral wording | ✅* |
 | Avatar network fetch (`AvatarCache`) | `community_widgets.dart` `Avatar` | only via logged-in header/feed | ✅ |
 | Cloud sync service open | `editor_page.dart` `initState` | `isCloud && !offlineOnly` | ✅ |
 | **Editor Git popup entry + handler** | `editor_page.dart` | **added `offlineOnly` gate** | ✅\* |
@@ -87,6 +100,27 @@ adds core task `.trellis/tasks/10-15-offline-editor-gates/` (prd/design/implemen
 (`TRELLIS_CONTEXT_ID=core-offline-gates-1015`); the Dart dispatcher task pointer
 is untouched.
 
+A later core owner commit `b7b2d2e fix(offline): block background refresh and
+network shortcuts` (not authored by this session; verified read-only) closes the
+remaining background/network surface:
+
+- `home_page.dart` `HomeTab`: `initState` and `_onAuthChanged` no longer call
+  `TaskActivityService.refreshIfDue` when `offlineOnly`.
+- `profile_page.dart` `_refresh`: returns early when `offlineOnly` (no
+  `auth.refreshMe` on pull-to-refresh).
+- `task_activity_service.dart`: `record`, `syncPending`, `refreshIfDue` and the
+  internal `_syncOne` all early-return for `offlineOnly`, so a restored login
+  keeps purely local counts and holds pending events without egress.
+- `shortcut_bar.dart`: the expanded terminal panel hides the 网络工具 group
+  (`curl`/`wget`/`dig`/`nslookup`/`ping`/`traceroute`/`nc`/`telnet`/`ssh`/`sftp`/
+  `scp`) and the `git status` quick command when `offlineOnly`.
+- `sandbox_shell_backend.dart`: help/diagnostic text is language-neutral
+  (removes the misleading Java-only toolchain hint).
+- New core regression `test/offline_background_and_shortcuts_test.dart`.
+
+This session reviewed `b7b2d2e` read-only and confirms it composes with the two
+gates from `54a58ca`; no core file was modified while refreshing this report.
+
 New core regression `test/offline_editor_gates_test.dart` (4 tests):
 - editor popup: offline → no `Git`/`从云端拉取`, still has `设置`/terminal;
 - editor popup: networked → `Git` present;
@@ -97,12 +131,14 @@ New core regression `test/offline_editor_gates_test.dart` (4 tests):
 ### Shared core revision
 
 - Before this session: `ad17f35`.
-- My core work commits land on `54a58ca` / `ef1f124`.
-- Core has since advanced (other owners) to `8731df8`. My gating code and test
-  are intact at that revision; core `git status` shows no edits to my files.
-  Other-core dirty paths (`retained_editor_host.dart`, `home_page.dart`,
-  `task_activity_service.dart`, `sandbox_shell_backend.dart`, `shortcut_bar.dart`,
-  etc.) belong to other agents and were **not** touched or staged here.
+- My core work commits: `54a58ca` (gating + tests) and `ef1f124` (task plan).
+- Core advanced by other owners to `8731df8`, then `b7b2d2e`
+  (`fix(offline): block background refresh and network shortcuts`).
+- At `b7b2d2e`, my gating code and `test/offline_editor_gates_test.dart` are
+  intact; `lib/editor/editor_page.dart` and `lib/pages/profile_page.dart` carry
+  both my gates and the later hardening. Core `git status` shows no edits to my
+  files (only `retained_editor_host.dart` + an unrelated new test, both owned by
+  another agent and **not** touched here).
 
 ## 4. Verification results
 
@@ -112,18 +148,20 @@ Android build / pub resolution.
 Shared core (`D:/MyNewProjects/qfli_studio_core`):
 - `flutter analyze --no-pub lib test` → **No issues found**.
 - `flutter test --no-pub` full suite → **+461 All tests passed** (includes my 4
-  new gate tests).
+  new gate tests). A later owner added `test/offline_background_and_shortcuts_test.dart`
+  under `b7b2d2e`; not re-run in this refresh, but that commit is self-contained
+  and was reviewed read-only.
 
 Dart app (`D:/MyNewProjects/qfli_dart`):
 - `flutter analyze --no-pub` → **No issues found** (at the committed tree
   `fae207e`).
 - `flutter test --no-pub test/dart_offline_test.dart test/dart_app_test.dart`
   → **+29 All tests passed** (10 offline-contract + 19 wiring).
-- `flutter test --no-pub` full suite → **+102 -1** at the moment of the offline
-  commit; the single failure is in dart-terminal's then-uncommitted
-  `test/dart_terminal_surfaces_test.dart:501` (their WIP, not this scope). After
-  their final commit the terminal suite was green in their report; re-run
-  required once all writers stop.
+- `flutter test --no-pub` full suite → **+103 All tests passed** (final state;
+  includes `test/dart_terminal_surfaces_test.dart`).
+- **Target-device evidence (dispatcher):** Android official-SDK VM smoke
+  (9 items) and terminal runtime (14 items) both **passed on a real device**.
+  This satisfies the `runtimeStatus: 'available'` claim on Android.
 
 New Dart tests (`test/dart_offline_test.dart`, 10 tests):
 profile contract; no cloud scope tab; no create-cloud menu; local tutorial tab
@@ -145,22 +183,20 @@ dropped). Terminal hook behavior is covered by dart-terminal's
 
 ## 6. Residual risks and open items
 
-1. **Android device runtime (QFLI_DART_ANDROID_SMOKE) not exercised here.**
-   `main.dart` keeps `runtimeStatus: Platform.isAndroid ? 'available'` per the
-   dispatcher's decision; the spec reserves `available` for a tested target path.
-   The dispatcher is running real-device smoke; if it fails, flip this to
-   `requires-sdk`/`unavailable`. Not changed in this session.
+1. **Android device runtime — CLOSED.** The dispatcher's on-device smoke passed
+   the Android official-SDK VM checks (9) and the terminal runtime checks (14),
+   so `lib/main.dart`'s `runtimeStatus: Platform.isAndroid ? 'available'` is now
+   backed by target-platform evidence.
 2. **OHOS/iOS/web use portable `dart_eval`** — `dart` terminal command is
    honestly unavailable there; `.dill` is not accepted. Native VM integration for
    those targets remains pending (not a regression).
-3. **Cross-repo concurrency.** Shared core now has multiple active owners; the
-   final release gate must be run after all writers stop. My core gating is
-   committed and self-contained.
+3. **Cross-repo concurrency.** Core has multiple active owners; the final release
+   gate should be run once all writers stop. My core gating is committed and
+   self-contained, and `b7b2d2e` reviewed clean.
 4. **English-locale popup width.** The editor/home popup menu is fixed-width
-   (~256 px); long English labels overflow. This is pre-existing UI behavior, not
-   offline-related; noted only because it surfaced during testing.
-5. **`runtimeStatus`/`runtimeKind` truthfulness** is the one remaining claim in
-   `lib/main.dart` that depends on external evidence (see item 1).
+   (~256 px); long English labels overflow. Pre-existing UI behavior, not
+   offline-related.
+5. **`runtimeStatus` claim** — now evidence-backed (see item 1).
 
 ## 7. Old task closability review (advisory only — not modified)
 
@@ -179,9 +215,14 @@ No task files were changed; the dispatcher should archive these.
 ## 8. Bottom line
 
 The Dart profile is genuinely offline: login, community, cloud projects, cloud
-terminal/cloud SQL, the AI endpoint, Git push/pull, and every `ApiClient` path are
-unreachable, and no Dart-side startup/auto network call exists. The two shared-core
-leaks (editor Git/cloud-pull, profile settings AI) are fixed with a real
-offline-vs-networked regression. Android carries no INTERNET permission; OHOS has
-had INTERNET + AccountKit + agreement webview removed. The only release-blocking
-unknown is Android real-device execution evidence, which the dispatcher owns.
+terminal/cloud SQL, the AI endpoint, Git push/pull, background task-activity
+sync, and terminal network shortcuts are all unreachable, and no Dart-side
+startup/auto network call exists. The two shared-core leaks found by this session
+(editor Git/cloud-pull, profile settings AI) are fixed in `54a58ca`, and the
+background-refresh/shortcut surface is closed in `b7b2d2e`. Android carries no
+INTERNET permission and passed real-device VM + terminal smoke; OHOS has had
+INTERNET + AccountKit + agreement webview removed. Host test suites are green
+(core +461; Dart +103) and static analysis is clean in both repos.
+
+**Final status: no remaining offline leak identified on the Dart product path.
+Waiting on dispatcher integration/archival.**
