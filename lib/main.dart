@@ -30,6 +30,9 @@ final StudioProfile dartProfile = StudioProfile(
   toolsPageBuilder: DartToolsPage.forStore,
   contentRepositoryFactory: DartContentRepository.new,
   isOffline: true,
+  // 独立终端与编辑器终端共用同一命令引擎；注入 Dart 档位的命令钩子后，
+  // 两个终端表面都能执行 `dart run …` / `dart --version` 等本机命令。
+  terminalCommandDelegate: dartTerminalDelegate,
   productKey: StudioProductCatalog.dartWingKey,
   showHomeTabs: false,
   runtimeKind: NativeDartToolchain.supported

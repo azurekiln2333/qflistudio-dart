@@ -55,6 +55,14 @@ void main() {
     test('产品名使用 QFLIStudio+', () {
       expect(dartProfile.appTitle, 'QFLIDartWing');
     });
+
+    test('两个终端表面都注入了本机 Dart 命令钩子', () {
+      // 独立终端（terminax）和编辑器终端都读同一个档位钩子；
+      // 不接线的话输入 `dart run …` 会落到沙箱的“不支持命令”。
+      // 钩子行为由 dart_terminal_delegate_test.dart 覆盖，
+      // 这里只锁定 main.dart 的档位接线没有丢。
+      expect(dartProfile.terminalCommandDelegate, isNotNull);
+    });
   });
 
   group('入口文件识别', () {
