@@ -40,7 +40,13 @@ void main() {
       );
       expect(runtime.executeLib(compiled.entryUri, 'main'), 42);
     } finally {
-      await project.delete(recursive: true);
+      // Windows may still hold the file briefly; a cleanup failure must not
+      // mask the assertion above.
+      try {
+        await project.delete(recursive: true);
+      } on FileSystemException {
+        // The OS reclaims the temp directory.
+      }
     }
   });
 }

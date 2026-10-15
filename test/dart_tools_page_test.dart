@@ -149,7 +149,13 @@ void main() {
   tearDown(() async {
     StudioProfile.current = previousProfile;
     store.dispose();
-    await workspace.delete(recursive: true);
+    // A child process (native dart) may still hold a handle on Windows; a
+    // transient cleanup failure must not be reported as a test failure.
+    try {
+      await workspace.delete(recursive: true);
+    } on FileSystemException {
+      // The OS reclaims the temp directory.
+    }
   });
 
   testWidgets('real source can be formatted, saved, checked, and compiled', (

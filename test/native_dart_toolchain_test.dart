@@ -12,7 +12,15 @@ void main() {
   setUp(() async {
     project = await Directory.systemTemp.createTemp('qfli-native-dart-test-');
   });
-  tearDown(() async => project.delete(recursive: true));
+  tearDown(() async {
+    // Windows can hold a directory briefly while a child process closes its
+    // handles; a cleanup failure must not be reported as a test failure.
+    try {
+      await project.delete(recursive: true);
+    } on FileSystemException {
+      // The OS reclaims the temp directory.
+    }
+  });
 
   Future<String> source(String content) async {
     final file = File(p.join(project.path, 'main.dart'));
