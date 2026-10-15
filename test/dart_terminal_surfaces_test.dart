@@ -58,8 +58,12 @@ void main() {
   setUp(() {
     previous = StudioProfile.current;
     StudioProfile.current = dartProfile;
-    project = Directory.systemTemp.createTempSync('qfli_dart_terminal_surface_');
-    storage = Directory.systemTemp.createTempSync('qfli_dart_terminal_storage_');
+    project = Directory.systemTemp.createTempSync(
+      'qfli_dart_terminal_surface_',
+    );
+    storage = Directory.systemTemp.createTempSync(
+      'qfli_dart_terminal_storage_',
+    );
     auth = AuthStore(storageFile: File(p.join(storage.path, 'auth.json')));
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pathChannel, (call) async {
@@ -110,7 +114,10 @@ void main() {
       tester,
     ) async {
       if (!_nativeSupported) return;
-      _writeProject(project, "void main() {\n  print('editor-surface-ok');\n}\n");
+      _writeProject(
+        project,
+        "void main() {\n  print('editor-surface-ok');\n}\n",
+      );
       final fixture = await _mountPane(tester, project, auth);
 
       await fixture.submit(tester, 'dart run main.dart');
@@ -144,8 +151,7 @@ void main() {
       await fixture.submit(tester, 'dart run main.dart');
       await _pumpIoUntil(
         tester,
-        () =>
-            _line('exit code 3').evaluate().isNotEmpty && !fixture.pane.busy,
+        () => _line('exit code 3').evaluate().isNotEmpty && !fixture.pane.busy,
       );
 
       expect(_line('boom-diagnostic'), findsOneWidget);
@@ -164,7 +170,7 @@ void main() {
       _writeProject(
         project,
         "import 'dart:io';\nvoid main() {\n  print('long-running-start');\n"
-            "  while (true) {\n    sleep(const Duration(milliseconds: 20));\n  }\n}\n",
+        "  while (true) {\n    sleep(const Duration(milliseconds: 20));\n  }\n}\n",
       );
       final fixture = await _mountPane(tester, project, auth);
 
@@ -201,7 +207,10 @@ void main() {
       tester,
     ) async {
       if (!_nativeSupported) return;
-      _writeProject(project, "void main() {\n  print('first-session-line');\n}\n");
+      _writeProject(
+        project,
+        "void main() {\n  print('first-session-line');\n}\n",
+      );
       final host = _PaneHost(project: project, auth: auth);
       final fixture = await _mountHostedPane(tester, host);
 
@@ -218,7 +227,10 @@ void main() {
       await fixture.newSession(tester);
       expect(_line('first-session-line'), findsNothing);
 
-      _writeProject(project, "void main() {\n  print('second-session-line');\n}\n");
+      _writeProject(
+        project,
+        "void main() {\n  print('second-session-line');\n}\n",
+      );
       await fixture.submit(tester, 'dart run main.dart');
       await _pumpIoUntil(
         tester,
@@ -427,7 +439,9 @@ class _PaneHostState extends State<_PaneHost> {
 }
 
 Future<void> _mountApp(WidgetTester tester, ProjectStore store) async {
-  await tester.pumpWidget(MaterialApp(home: TerminaxTerminalPage(store: store)));
+  await tester.pumpWidget(
+    MaterialApp(home: TerminaxTerminalPage(store: store)),
+  );
   await tester.pump();
 }
 
@@ -485,7 +499,9 @@ String? _activeAppCwd(WidgetTester tester) {
   for (final view in tester.widgetList<TerminalOutputView>(
     find.byType(TerminalOutputView),
   )) {
-    if (activeId == null || view.session.id == activeId) return view.session.cwd;
+    if (activeId == null || view.session.id == activeId) {
+      return view.session.cwd;
+    }
   }
   return null;
 }

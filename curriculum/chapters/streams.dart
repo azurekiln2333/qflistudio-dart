@@ -28,7 +28,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       '在 await for 里 await 别的异步操作会短暂暂停消费，注意背压。',
       '忘记 await for 前加 await 关键字会语法错误，它是 await 加 for。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final stream = Stream<int>.fromIterable(<int>[1, 2, 3, 4, 5]);\n"
@@ -43,7 +44,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 await for 统计 [2, 4, 6, 7] 中偶数的个数。',
         hint: '循环体内 if (v.isEven) count++。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  var count = 0;\n"
@@ -76,7 +78,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       'map 返回的新流元素类型可不同，注意泛型推断。',
       '把 where 写在 map 之后会多算一些最终被丢弃的值。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final result = await Stream<int>.fromIterable(<int>[1, 2, 3, 4, 5, 6])\n"
@@ -90,7 +93,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       DartExercise(
         prompt: '把 [1..6] 里的奇数加 10，收集结果。',
         hint: 'where((v) => v.isOdd).map((v) => v + 10)。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final r = await Stream<int>.fromIterable(<int>[1, 2, 3, 4, 5, 6])\n"
@@ -124,7 +128,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       '单订阅流被消费一次后再 listen 会报 "already listened"。',
       '忘记 close 会让 toList/await for 永远等待。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final controller = StreamController<int>();\n"
@@ -140,7 +145,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 StreamController 推送 "a"、"b" 并 close，收集后打印。',
         hint: '把类型换成 String，其余结构不变。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final c = StreamController<String>();\n"
@@ -175,7 +181,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       '没有订阅者时广播的事件会被直接丢弃。',
       'await controller.close 后要再等一拍，确保订阅回调已执行。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final controller = StreamController<int>.broadcast();\n"
@@ -195,7 +202,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       DartExercise(
         prompt: '给广播流加第三个订阅者，验证它也收到 [1, 2]。',
         hint: '再写一行 controller.stream.listen(third.add)。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final c = StreamController<int>.broadcast();\n"
@@ -232,7 +240,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       '不注册 handleError 时，错误会走订阅的 onError 或变成未捕获异常。',
       '错误后的元素是否继续取决于错误处理方式，默认单订阅流会终止。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final events = <String>[];\n"
@@ -251,7 +260,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       DartExercise(
         prompt: '把坏值换成 3，观察错误在哪个位置被记录。',
         hint: '条件改为 v == 3，其余不变。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final events = <String>[];\n"
@@ -288,7 +298,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       '变换函数必须返回 Future，否则用 map 即可。',
       '某个元素异步失败会中断整个流，需要错误处理兜底。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<int> doubleIt(int v) async {\n"
         "  await Future<void>.delayed(Duration.zero);\n"
@@ -306,7 +317,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 asyncMap 给每个元素异步加前缀 "n="，收集字符串列表。',
         hint: "返回 Future<String>，如 async => 'n=\$v'。",
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final r = await Stream<int>.fromIterable(<int>[1, 2])\n"
@@ -339,7 +351,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       '累积器每次都要返回新值，返回 null 会导致后续计算失败。',
       'reduce 无初始值，空流会抛错；要处理空流请用 fold。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final total = await Stream<int>.fromIterable(<int>[1, 2, 3, 4]).fold(\n"
@@ -356,7 +369,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 fold 计算 [2, 3, 4] 的乘积。',
         hint: '初始值 1，累积器用 *。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final p = await Stream<int>.fromIterable(<int>[2, 3, 4])\n"
@@ -388,7 +402,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       '不取消长期订阅会导致监听器泄漏。',
       '取消后 controller 仍可 add，但该订阅不再收到。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final controller = StreamController<int>();\n"
@@ -407,7 +422,8 @@ const List<DartLesson> streamsLessons = <DartLesson>[
       DartExercise(
         prompt: '在收到第一个元素后立即取消订阅，验证只收到 [1]。',
         hint: 'listen 回调里判断 received.length == 1 时 sub.cancel()。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final c = StreamController<int>();\n"

@@ -29,7 +29,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       '记录是结构类型：字段顺序和名字都是类型的一部分，(int, int) 与 (x: int, y: int) 不是同一类型。',
       '记录是 Dart 3 语法，部分旧的 dart_eval 版本支持有限；本课代码已在官方 SDK 与 dart_eval 0.8.5 上实测通过。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final point = (3, 7);\n"
         "  final named = (x: 3, y: 7);\n"
         "  print(point.\$1);\n"
@@ -45,7 +46,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '创建一个命名记录 (width: 4, height: 5)，解构后打印面积。',
         hint: '用 final (width: w, height: h) = ... 解构，再相乘。',
-        answer: "void main() {\n"
+        answer:
+            "void main() {\n"
             "  final rect = (width: 4, height: 5);\n"
             "  final (width: w, height: h) = rect;\n"
             "  print(w * h);\n"
@@ -75,7 +77,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       'toString 里命名记录字段按名字字母序排列，不要依赖构造时的书写顺序。',
       '记录内若有可变对象，相等性只看该对象的 ==，不递归深比较。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final user = (name: '小明', age: 18);\n"
         "  print(user.name);\n"
         "  print(user.age);\n"
@@ -90,7 +93,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '判断 (x: 1, y: 2) == (y: 2, x: 1) 的结果，并说明原因。',
         hint: '命名记录的相等性只看字段名和值，与书写顺序无关。',
-        answer: "void main() {\n"
+        answer:
+            "void main() {\n"
             "  final a = (x: 1, y: 2);\n"
             "  final b = (y: 2, x: 1);\n"
             "  print(a == b); // true，字段名与值完全一致\n"
@@ -120,7 +124,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       'final 绑定只读取值；要重新赋值需用 var 绑定，但模式里很少这么做。',
       'switch 表达式各分支的返回类型要能统一，否则编译报错。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  for (final point in <(int, int)>[(0, 0), (1, 2), (3, 4)]) {\n"
         "    final message = switch (point) {\n"
         "      (0, 0) => '原点',\n"
@@ -136,7 +141,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '对上例中的 (1, 2) 单独执行，输出会是什么？',
         hint: '它不匹配 (0,0)、(x,0)、(0,y)，落到最后一个分支。',
-        answer: "void main() {\n"
+        answer:
+            "void main() {\n"
             "  final point = (1, 2);\n"
             "  print(switch (point) {\n"
             "    (0, 0) => '原点',\n"
@@ -170,7 +176,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       'rest 是一个新的 List，修改它不影响原列表。',
       '列表模式区分长度：[a, b] 只匹配恰好两个元素，多于两个不会命中。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  for (final list in <List<int>>[\n"
         "    <int>[],\n"
         "    <int>[42],\n"
@@ -189,7 +196,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '写一个函数，用列表模式返回列表的前两个元素之和（不足两个返回 0）。',
         hint: '用 [final a, final b, ...] 匹配并计算。',
-        answer: "int firstTwoSum(List<int> xs) => switch (xs) {\n"
+        answer:
+            "int firstTwoSum(List<int> xs) => switch (xs) {\n"
             "  [final a, final b, ...] => a + b,\n"
             "  _ => 0,\n"
             "};\n"
@@ -220,7 +228,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       '键的类型与值的类型都要匹配：值不是 String 时该分支不会命中。',
       '缺少兜底 _ 分支时，若所有模式都不匹配，switch 会抛错。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final configs = <Map<String, Object?>>[\n"
         "    <String, Object?>{'name': '小明', 'age': 18},\n"
         "    <String, Object?>{'name': '小红'},\n"
@@ -240,7 +249,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: "为 {'score': 90} 增加一个分支，输出\"得分 90\"。",
         hint: "用 {'score': final int s} => '得分 \$s'。",
-        answer: "void main() {\n"
+        answer:
+            "void main() {\n"
             "  final data = <String, Object?>{'score': 90};\n"
             "  print(switch (data) {\n"
             "    {'score': final int s} => '得分 \$s',\n"
@@ -271,7 +281,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       '分支要覆盖所有可能的类型，否则需要 _ 兜底。',
       '对象模式不会调用自定义 ==，只做类型判断和字段读取。',
     ],
-    code: "class Circle {\n"
+    code:
+        "class Circle {\n"
         "  const Circle(this.radius);\n"
         "  final double radius;\n"
         "}\n"
@@ -297,7 +308,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '新增一个 Triangle 类（有 base、height），在 switch 里输出底和高。',
         hint: '加一个 Triangle(base: final b, height: final h) => ... 分支。',
-        answer: "class Triangle {\n"
+        answer:
+            "class Triangle {\n"
             "  const Triangle(this.base, this.height);\n"
             "  final double base;\n"
             "  final double height;\n"
@@ -334,7 +346,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       '条件分支顺序依然重要：更具体的条件要写在前面。',
       'when 不成立时不是报错，而是继续尝试下一个分支。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  for (final value in <int>[3, 8, 15, -4]) {\n"
         "    final label = switch (value) {\n"
         "      final int n when n < 0 => '负数 \$n',\n"
@@ -349,7 +362,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '为 100 以内的数增加规则：能被 5 整除的输出"5 的倍数"，优先于偶数判断。',
         hint: '把 when n % 5 == 0 的分支放在 isEven 之前。',
-        answer: "void main() {\n"
+        answer:
+            "void main() {\n"
             "  final n = 20;\n"
             "  print(switch (n) {\n"
             "    final int v when v % 5 == 0 => '5 的倍数',\n"
@@ -382,7 +396,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       '新增子类后，所有穷尽 switch 会立刻编译报错——这正是它的价值，不是 bug。',
       'sealed 只约束直接子类关系，不表示实例不可变。',
     ],
-    code: "sealed class Shape {\n"
+    code:
+        "sealed class Shape {\n"
         "  const Shape();\n"
         "}\n"
         "\n"
@@ -411,7 +426,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '给 Shape 增加 Triangle 子类并补全 area，使其仍可穷尽。',
         hint: '新增 class Triangle extends Shape，并在 switch 添加对应分支。',
-        answer: "sealed class Shape { const Shape(); }\n"
+        answer:
+            "sealed class Shape { const Shape(); }\n"
             "class Circle extends Shape {\n"
             "  const Circle(this.r); final double r;\n"
             "}\n"
@@ -447,7 +463,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       '枚举值之间不能互相引用构造实参以外的实例状态。',
       'enum 也不能被继承或实现（除非作为 interface 被其它类型实现）。',
     ],
-    code: "enum Planet {\n"
+    code:
+        "enum Planet {\n"
         "  mercury(3.3e23, 2440),\n"
         "  earth(5.97e24, 6371),\n"
         "  mars(6.42e23, 3390);\n"
@@ -474,7 +491,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '给 Planet 增加 moonCount 字段并在 toString 中一并打印月球数量。',
         hint: '在构造里加一个 int 参数，更新各枚举值实参与 toString。',
-        answer: "enum Planet {\n"
+        answer:
+            "enum Planet {\n"
             "  earth(1), mars(2);\n"
             "  const Planet(this.moonCount);\n"
             "  final int moonCount;\n"
@@ -507,7 +525,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       'base 类跨库被继承时，子类也必须标 base/final/sealed。',
       'final 类仍可实现接口（implements），只是不能被 extends。',
     ],
-    code: "final class Temperature {\n"
+    code:
+        "final class Temperature {\n"
         "  const Temperature(this.celsius);\n"
         "  final double celsius;\n"
         "  double get fahrenheit => celsius * 9 / 5 + 32;\n"
@@ -534,9 +553,11 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
     output: '77.0\n旺财 汪汪叫\n',
     exercises: <DartExercise>[
       DartExercise(
-        prompt: '写一个 base class Vehicle（有 brand），派生 final class Car 覆盖 describe。',
+        prompt:
+            '写一个 base class Vehicle（有 brand），派生 final class Car 覆盖 describe。',
         hint: '父类标 base，子类标 final，子类用 super 传参。',
-        answer: "base class Vehicle {\n"
+        answer:
+            "base class Vehicle {\n"
             "  const Vehicle(this.brand);\n"
             "  final String brand;\n"
             "  String describe() => '车辆 \$brand';\n"
@@ -572,7 +593,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       'when 条件不满足时会走 else，而不是报错。',
       'List(length: final len) 用的是 length getter，空列表 length 为 0。',
     ],
-    code: "void describe(Object value) {\n"
+    code:
+        "void describe(Object value) {\n"
         "  if (value case int n when n > 0) {\n"
         "    print('正整数 \$n');\n"
         "  } else if (value case String s) {\n"
@@ -595,7 +617,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '用 if-case 判断一个 num 是否为 double，是则打印它的小数部分形式。',
         hint: 'if (value case double d) 匹配 double。',
-        answer: "void check(num value) {\n"
+        answer:
+            "void check(num value) {\n"
             "  if (value case double d) {\n"
             "    print('double: \$d');\n"
             "  } else {\n"
@@ -630,7 +653,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       'rest 每次是新列表，递归总和复杂度是 O(n)；超长列表考虑迭代写法。',
       '分支顺序：单元素分支要在"首项 + rest"之前，逻辑才清晰。',
     ],
-    code: "int sum(List<int> values) => switch (values) {\n"
+    code:
+        "int sum(List<int> values) => switch (values) {\n"
         "  [] => 0,\n"
         "  [final single] => single,\n"
         "  [final first, ...final rest] => first + sum(rest),\n"
@@ -646,7 +670,8 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
       DartExercise(
         prompt: '用列表模式写一个递归的 count，统计列表中元素个数。',
         hint: '[] 返回 0，[final _, ...final rest] 返回 1 + count(rest)。',
-        answer: "int count(List<int> xs) => switch (xs) {\n"
+        answer:
+            "int count(List<int> xs) => switch (xs) {\n"
             "  [] => 0,\n"
             "  [final _, ...final rest] => 1 + count(rest),\n"
             "};\n"

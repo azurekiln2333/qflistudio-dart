@@ -17,7 +17,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       '忘记给字段写类型会隐式变成 dynamic，应显式声明类型。',
       '修改对象的字段不需要重新创建对象，但要清楚这会改变共享状态。',
     ],
-    code: "class Student {\n"
+    code:
+        "class Student {\n"
         "  String name;\n"
         "  int score;\n"
         "\n"
@@ -39,7 +40,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '定义一个 Point 类含 x, y 字段，方法 sum 返回两者之和。',
         hint: '构造用 Point(this.x, this.y)。',
-        answer: "class Point {\n"
+        answer:
+            "class Point {\n"
             "  Point(this.x, this.y);\n"
             "  final int x;\n"
             "  final int y;\n"
@@ -62,11 +64,9 @@ const List<DartLesson> oopLessons = <DartLesson>[
         '当参数名与字段名不同时，用初始化列表 : field = param 赋值。构造函数不能'
         '有返回值类型。',
     objective: '会用 this 简写构造，并在需要时用初始化列表。',
-    pitfalls: <String>[
-      '初始化列表在构造体之前执行，不能访问 this。',
-      '多个构造方法用命名构造区分，名字不能重复。',
-    ],
-    code: "class Temperature {\n"
+    pitfalls: <String>['初始化列表在构造体之前执行，不能访问 this。', '多个构造方法用命名构造区分，名字不能重复。'],
+    code:
+        "class Temperature {\n"
         "  Temperature.celsius(this.celsius);\n"
         "  Temperature.fahrenheit(double fahrenheit) : celsius = (fahrenheit - 32) * 5 / 9;\n"
         "\n"
@@ -108,7 +108,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       '下划线私有是「库级」而非「类级」，同文件其他类仍可访问。',
       'setter 里做校验失败时应抛异常或忽略，不要静默写入非法值。',
     ],
-    code: "class BankAccount {\n"
+    code:
+        "class BankAccount {\n"
         "  double _balance = 0;\n"
         "\n"
         "  double get balance => _balance;\n"
@@ -137,7 +138,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '给 BankAccount 加 withdraw(amount)，余额不足时抛异常。',
         hint: '先用 _balance 判断再减法。',
-        answer: "void withdraw(double amount) {\n"
+        answer:
+            "void withdraw(double amount) {\n"
             "  if (amount > _balance) throw ArgumentError('余额不足');\n"
             "  _balance -= amount;\n"
             "}",
@@ -161,7 +163,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       '在 static 方法里访问实例字段会编译报错。',
       '静态变量在程序运行期间一直存在，不要用它存会话级临时数据。',
     ],
-    code: "class Counter {\n"
+    code:
+        "class Counter {\n"
         "  static int total = 0;\n"
         "  final String label;\n"
         "\n"
@@ -184,7 +187,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '给类加静态常量 pi 与静态方法 circleArea(r)。',
         hint: 'static const pi = 3.14159。',
-        answer: "class Circle {\n"
+        answer:
+            "class Circle {\n"
             "  static const pi = 3.14159;\n"
             "  static double area(double r) => pi * r * r;\n"
             "}\nprint(Circle.area(2).toStringAsFixed(3));",
@@ -209,7 +213,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       '覆盖方法时签名必须兼容，参数和返回类型不能随意改。',
       '父类构造有必填参数时，子类必须通过 super 传入。',
     ],
-    code: "class Animal {\n"
+    code:
+        "class Animal {\n"
         "  Animal(this.name);\n"
         "  final String name;\n"
         "  String speak() => '...';\n"
@@ -238,7 +243,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '定义 Cat extends Animal 并覆盖 speak 返回「喵」。',
         hint: '用 super.name。',
-        answer: "class Cat extends Animal {\n"
+        answer:
+            "class Cat extends Animal {\n"
             "  Cat(super.name);\n"
             "  @override\n"
             "  String speak() => '\$name 说：喵';\n"
@@ -260,11 +266,9 @@ const List<DartLesson> oopLessons = <DartLesson>[
         '子类必须实现。抽象类常用来定义「模板」：把公共流程写好，把变化的部分留给'
         '子类实现。',
     objective: '会写抽象类并在子类中实现抽象方法。',
-    pitfalls: <String>[
-      '试图直接实例化抽象类会编译报错。',
-      '子类未实现全部抽象方法也会编译报错。',
-    ],
-    code: "abstract class Shape {\n"
+    pitfalls: <String>['试图直接实例化抽象类会编译报错。', '子类未实现全部抽象方法也会编译报错。'],
+    code:
+        "abstract class Shape {\n"
         "  double area();\n"
         "\n"
         "  String describe() => '面积是 \${area().toStringAsFixed(2)}';\n"
@@ -296,7 +300,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '加一个 Triangle 子类，面积 = 底 * 高 / 2。',
         hint: '继承 Shape 并实现 area。',
-        answer: "class Triangle extends Shape {\n"
+        answer:
+            "class Triangle extends Shape {\n"
             "  Triangle(this.base, this.height);\n"
             "  final double base;\n"
             "  final double height;\n"
@@ -324,7 +329,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       'implements 一个具体类时必须实现它的所有方法，包括 getter/setter。',
       '一个类可以 implements 多个接口，用逗号分隔。',
     ],
-    code: "abstract interface class Printable {\n"
+    code:
+        "abstract interface class Printable {\n"
         "  String pretty();\n"
         "}\n"
         "\n"
@@ -355,7 +361,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '定义接口 Greeter { String greet(); } 并让两个类实现。',
         hint: 'implements Greeter。',
-        answer: "abstract interface class Greeter { String greet(); }\n"
+        answer:
+            "abstract interface class Greeter { String greet(); }\n"
             "class En implements Greeter { @override String greet() => 'Hello'; }\n"
             "class Zh implements Greeter { @override String greet() => '你好'; }",
       ),
@@ -379,7 +386,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       'mixin 里引用 this 上的成员时，要确保混入的类确实提供了这些成员。',
       '同名方法冲突时，后混入的或类自身的实现优先。',
     ],
-    code: "mixin Swimmer {\n"
+    code:
+        "mixin Swimmer {\n"
         "  String swim() => '\$name 在游泳';\n"
         "  String get name;\n"
         "}\n"
@@ -406,7 +414,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '定义 mixin Walker 加 walk()，让 Duck 也具备走路能力。',
         hint: 'with Swimmer, Flyer, Walker。',
-        answer: "mixin Walker {\n"
+        answer:
+            "mixin Walker {\n"
             "  String get name;\n"
             "  String walk() => '\$name 在走路';\n"
             "}",
@@ -431,7 +440,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       '向上转型后只能访问父类声明的成员，子类独有方法需要向下转型。',
       '用 is 判断类型比强行 as 更安全。',
     ],
-    code: "class Notification {\n"
+    code:
+        "class Notification {\n"
         "  String render() => '通知';\n"
         "}\n"
         "\n"
@@ -456,7 +466,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '加一个 Push extends Notification 覆盖 render 返回「推送通知」。',
         hint: '放进列表即可统一处理。',
-        answer: "class Push extends Notification {\n"
+        answer:
+            "class Push extends Notification {\n"
             "  @override\n"
             "  String render() => '推送通知';\n"
             "}",
@@ -480,7 +491,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       '只重写 == 不重写 hashCode，会让对象在哈希集合里查不到。',
       '在 == 中比较可变字段会让对象放进 Set 后行为不稳定。',
     ],
-    code: "class Vec {\n"
+    code:
+        "class Vec {\n"
         "  const Vec(this.x, this.y);\n"
         "  final int x;\n"
         "  final int y;\n"
@@ -531,7 +543,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       '枚举的构造是 const，字段必须是 final。',
       '用 index 做持久化存储很脆弱，枚举顺序一变数据就错，建议存 name。',
     ],
-    code: "enum Priority {\n"
+    code:
+        "enum Priority {\n"
         "  low(1, '低'),\n"
         "  medium(2, '中'),\n"
         "  high(3, '高');\n"
@@ -554,7 +567,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       DartExercise(
         prompt: '定义 enum Color { red, green, blue } 并打印每个名字。',
         hint: 'Color.values 加 name。',
-        answer: "enum Color { red, green, blue }\n"
+        answer:
+            "enum Color { red, green, blue }\n"
             "for (final c in Color.values) { print(c.name); }",
       ),
     ],
@@ -576,7 +590,8 @@ const List<DartLesson> oopLessons = <DartLesson>[
       '让外部直接修改内部列表会破坏封装，应提供受控的只读视图。',
       '业务错误用异常表达比返回 null 更清晰，但要在边界捕获。',
     ],
-    code: "enum TxType { deposit, withdraw }\n"
+    code:
+        "enum TxType { deposit, withdraw }\n"
         "\n"
         "class Transaction {\n"
         "  const Transaction(this.type, this.amount);\n"
@@ -621,8 +636,10 @@ const List<DartLesson> oopLessons = <DartLesson>[
     exercises: <DartExercise>[
       DartExercise(
         prompt: '尝试取出 1000，捕获 StateError 并打印错误信息。',
-        hint: 'try { account.withdraw(1000); } on StateError catch (e) { print(e.message); }。',
-        answer: "try {\n"
+        hint:
+            'try { account.withdraw(1000); } on StateError catch (e) { print(e.message); }。',
+        answer:
+            "try {\n"
             "  account.withdraw(1000);\n"
             "} on StateError catch (e) {\n"
             "  print(e.message);\n"

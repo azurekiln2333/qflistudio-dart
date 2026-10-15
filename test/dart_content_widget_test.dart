@@ -39,9 +39,7 @@ Future<void> _settle(WidgetTester tester) async {
 /// the resolved catalog in a repository whose futures complete synchronously.
 /// The catalog itself is the genuine 120-lesson Dart content.
 Future<ContentRepository> _preloaded(WidgetTester tester) async {
-  final catalog = await tester.runAsync(
-    () => DartContentRepository().load(),
-  );
+  final catalog = await tester.runAsync(() => DartContentRepository().load());
   return _ImmediateRepository(catalog!);
 }
 
@@ -103,7 +101,10 @@ void main() {
     final listFinder = find.byType(ListView);
     expect(listFinder, findsWidgets);
     expect(
-      tester.widgetList<ListView>(listFinder).first.childrenDelegate
+      tester
+          .widgetList<ListView>(listFinder)
+          .first
+          .childrenDelegate
           .estimatedChildCount,
       greaterThanOrEqualTo(120),
       reason: 'catalog should list all 120 authored lessons',

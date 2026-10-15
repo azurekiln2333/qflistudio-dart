@@ -26,7 +26,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       'jsonDecode 返回 dynamic，取字段前需 as 成具体类型。',
       '只有可 JSON 化的类型能编码，自定义对象需先转成 Map。',
     ],
-    code: "import 'dart:convert';\n"
+    code:
+        "import 'dart:convert';\n"
         "\n"
         "void main() {\n"
         "  final map = <String, Object>{'name': '小明', 'age': 18};\n"
@@ -42,7 +43,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       DartExercise(
         prompt: '编码 [1, 2, 3] 并打印得到的 JSON 字符串。',
         hint: 'jsonEncode(<int>[1, 2, 3])。',
-        answer: "import 'dart:convert';\n"
+        answer:
+            "import 'dart:convert';\n"
             "\n"
             "void main() {\n"
             "  print(jsonEncode(<int>[1, 2, 3]));\n"
@@ -71,7 +73,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       '某一层缺失会让 as 或 ! 抛错，生产代码应做空值判断。',
       '索引与键名拼写错误会导致 null 或异常。',
     ],
-    code: "import 'dart:convert';\n"
+    code:
+        "import 'dart:convert';\n"
         "\n"
         "void main() {\n"
         "  final data = <String, Object>{\n"
@@ -94,7 +97,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       DartExercise(
         prompt: '打印上面第二个学生的 score。',
         hint: 'students[1] as Map 后取 score。',
-        answer: "import 'dart:convert';\n"
+        answer:
+            "import 'dart:convert';\n"
             "\n"
             "void main() {\n"
             "  final data = jsonDecode(\n"
@@ -127,7 +131,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       '缺字段用 json[key]! 会在 null 上抛错，需考虑默认值。',
       '工厂构造不能访问 this，必须先凑齐参数再调用主构造。',
     ],
-    code: "class User {\n"
+    code:
+        "class User {\n"
         "  User(this.name, this.age);\n"
         "\n"
         "  factory User.fromJson(Map<String, Object?> json) {\n"
@@ -147,7 +152,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       DartExercise(
         prompt: '为 Point 类写 fromJson，读取 x、y 并打印它们。',
         hint: '工厂里 as int 取 x、y。',
-        answer: "class Point {\n"
+        answer:
+            "class Point {\n"
             "  Point(this.x, this.y);\n"
             "  factory Point.fromJson(Map<String, Object?> j) =>\n"
             "      Point(j['x']! as int, j['y']! as int);\n"
@@ -184,7 +190,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       '键名要与读取端约定一致，改名字会破坏往返。',
       '别把内部临时字段也塞进 toJson，按需要裁剪。',
     ],
-    code: "import 'dart:convert';\n"
+    code:
+        "import 'dart:convert';\n"
         "\n"
         "class Point {\n"
         "  Point(this.x, this.y);\n"
@@ -205,7 +212,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       DartExercise(
         prompt: '给 User(name, age) 写 toJson 并编码打印。',
         hint: '返回 {"name": name, "age": age}。',
-        answer: "import 'dart:convert';\n"
+        answer:
+            "import 'dart:convert';\n"
             "\n"
             "class User {\n"
             "  User(this.name, this.age);\n"
@@ -244,7 +252,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       '字段可能是 null 或类型不符，直接用 ! 有风险。',
       '数组为空时 reduce 会抛错，注意空集合处理。',
     ],
-    code: "import 'dart:convert';\n"
+    code:
+        "import 'dart:convert';\n"
         "\n"
         "void main() {\n"
         "  const text = '[{\"price\": 5}, {\"price\": 8}, {\"price\": 12}]';\n"
@@ -260,7 +269,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       DartExercise(
         prompt: "对 [{\"n\":1},{\"n\":2},{\"n\":3}] 求 n 的最大值。",
         hint: 'map 取 n 后用 reduce 取较大者。',
-        answer: "import 'dart:convert';\n"
+        answer:
+            "import 'dart:convert';\n"
             "\n"
             "void main() {\n"
             "  final items = jsonDecode('[{\"n\":1},{\"n\":2},{\"n\":3}]') as List<Object?>;\n"
@@ -293,7 +303,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       '只捕获 Exception 会漏掉部分错误类型，尽量捕获具体类型。',
       '捕获后要给出替代路径，否则等于静默失败。',
     ],
-    code: "import 'dart:convert';\n"
+    code:
+        "import 'dart:convert';\n"
         "\n"
         "void main() {\n"
         "  try {\n"
@@ -310,7 +321,8 @@ const List<DartLesson> jsonLessons = <DartLesson>[
       DartExercise(
         prompt: '写一个安全解析函数，输入非法时返回 null，合法时返回 Map。',
         hint: 'try 里 return jsonDecode(...) as Map，catch 里 return null。',
-        answer: "import 'dart:convert';\n"
+        answer:
+            "import 'dart:convert';\n"
             "\n"
             "Map<String, Object?>? safeParse(String t) {\n"
             "  try {\n"

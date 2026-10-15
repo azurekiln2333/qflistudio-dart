@@ -34,38 +34,42 @@ void main() {
     return;
   }
 
-  test('every lesson and example compiles, runs, and matches output', () async {
-    final failures = <String>[];
-    var checked = 0;
+  test(
+    'every lesson and example compiles, runs, and matches output',
+    () async {
+      final failures = <String>[];
+      var checked = 0;
 
-    for (final lesson in dartCurriculum) {
-      checked++;
-      await _verify(
-        runner: runner,
-        lesson: lesson,
-        code: lesson.code,
-        label: 'lesson',
-        expected: lesson.output,
-        failures: failures,
-      );
-      if (lesson.resolvedExampleCode != lesson.code) {
+      for (final lesson in dartCurriculum) {
+        checked++;
         await _verify(
           runner: runner,
           lesson: lesson,
-          code: lesson.resolvedExampleCode,
-          label: 'example',
+          code: lesson.code,
+          label: 'lesson',
           expected: lesson.output,
           failures: failures,
         );
+        if (lesson.resolvedExampleCode != lesson.code) {
+          await _verify(
+            runner: runner,
+            lesson: lesson,
+            code: lesson.resolvedExampleCode,
+            label: 'example',
+            expected: lesson.output,
+            failures: failures,
+          );
+        }
       }
-    }
 
-    expect(
-      failures,
-      isEmpty,
-      reason: 'checked=$checked\n${failures.join('\n')}',
-    );
-  }, timeout: const Timeout(Duration(minutes: 30)));
+      expect(
+        failures,
+        isEmpty,
+        reason: 'checked=$checked\n${failures.join('\n')}',
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 30)),
+  );
 }
 
 Future<void> _verify({

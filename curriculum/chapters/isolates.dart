@@ -28,7 +28,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       '闭包必须能发送，捕获不可发送对象（如打开的 Socket）会报错。',
       '启动隔离区有开销，超小任务不必用 isolate。',
     ],
-    code: "import 'dart:isolate';\n"
+    code:
+        "import 'dart:isolate';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final result = await Isolate.run(() {\n"
@@ -45,7 +46,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       DartExercise(
         prompt: '用 Isolate.run 计算 1 到 10 的乘积并打印。',
         hint: '返回 product，初值 1。',
-        answer: "import 'dart:isolate';\n"
+        answer:
+            "import 'dart:isolate';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final p = await Isolate.run(() {\n"
@@ -83,7 +85,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       '不可发送对象（打开的文件、端口等）不能作为参数或返回值。',
       '返回的记录字段在接收端用命名访问，类型要保持一致。',
     ],
-    code: "import 'dart:isolate';\n"
+    code:
+        "import 'dart:isolate';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final config = <String, int>{'a': 2, 'b': 3};\n"
@@ -100,7 +103,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       DartExercise(
         prompt: '传一个 List<int> 进隔离区，返回它的元素个数。',
         hint: '捕获列表并在隔离区里 return values.length。',
-        answer: "import 'dart:isolate';\n"
+        answer:
+            "import 'dart:isolate';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final values = <int>[5, 6, 7, 8];\n"
@@ -133,7 +137,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       'worker 入口函数必须是顶层或静态函数，不能是捕获了状态的实例方法。',
       '端口消息是异步的，first/await 之前不要遗漏 await。',
     ],
-    code: "import 'dart:isolate';\n"
+    code:
+        "import 'dart:isolate';\n"
         "\n"
         "void worker(SendPort reply) {\n"
         "  var total = 0;\n"
@@ -155,7 +160,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       DartExercise(
         prompt: '让 worker 回发两个消息（和与元素个数），主隔离区各取一个。',
         hint: 'reply.send(sum); reply.send(count); 再 await receive.first 两次。',
-        answer: "import 'dart:isolate';\n"
+        answer:
+            "import 'dart:isolate';\n"
             "\n"
             "void worker(SendPort reply) {\n"
             "  reply.send(1 + 2 + 3);\n"
@@ -198,7 +204,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       '任何一路失败都会让 Future.wait 整体失败。',
       '过度并行（远超 CPU 核数）反而因调度开销变慢。',
     ],
-    code: "import 'dart:isolate';\n"
+    code:
+        "import 'dart:isolate';\n"
         "\n"
         "Future<int> sumTo(int n) {\n"
         "  return Isolate.run(() {\n"
@@ -220,7 +227,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       DartExercise(
         prompt: '并行计算 1 到 5 与 1 到 6 两段和，打印两项结果。',
         hint: 'Future.wait([sumTo(5), sumTo(6)])。',
-        answer: "import 'dart:isolate';\n"
+        answer:
+            "import 'dart:isolate';\n"
             "\n"
             "Future<int> sumTo(int n) => Isolate.run(() {\n"
             "  var s = 0;\n"
@@ -258,7 +266,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       '未捕获的隔离区错误若没人 await，可能成为未处理异常。',
       '异常传播后隔离区即结束，不会继续执行剩余代码。',
     ],
-    code: "import 'dart:isolate';\n"
+    code:
+        "import 'dart:isolate';\n"
         "\n"
         "Future<void> main() async {\n"
         "  try {\n"
@@ -274,7 +283,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       DartExercise(
         prompt: '在隔离区里对 int.parse("x") 触发 FormatException 并在主隔离区捕获 message。',
         hint: 'on FormatException catch (e) => print(e.message)。',
-        answer: "import 'dart:isolate';\n"
+        answer:
+            "import 'dart:isolate';\n"
             "\n"
             "Future<void> main() async {\n"
             "  try {\n"
@@ -308,7 +318,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       '合并时注意各结果在列表中的固定位置，别错位。',
       '每个隔离区各自复制数据，大对象会带来内存开销。',
     ],
-    code: "import 'dart:isolate';\n"
+    code:
+        "import 'dart:isolate';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final sum = Isolate.run(() {\n"
@@ -330,7 +341,8 @@ const List<DartLesson> isolateLessons = <DartLesson>[
       DartExercise(
         prompt: '再加一个隔离区求这段数据的平均值（取整），合并打印三项。',
         hint: '返回 sum ~/ length，追加到 Future.wait 列表。',
-        answer: "import 'dart:isolate';\n"
+        answer:
+            "import 'dart:isolate';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final values = <int>[4, 8, 15, 16];\n"

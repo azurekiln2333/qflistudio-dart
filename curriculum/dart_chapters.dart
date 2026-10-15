@@ -100,7 +100,8 @@ abstract final class DartCurriculum {
   };
 
   /// Short engine tag for example summaries (compact catalog subtitle).
-  static String engineTag(String lessonId) => dartEvalVerifiedIds.contains(lessonId)
+  static String engineTag(String lessonId) =>
+      dartEvalVerifiedIds.contains(lessonId)
       ? '[引擎：官方 SDK / dart_eval 均可]'
       : '[引擎：需官方 Dart SDK]';
 

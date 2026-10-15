@@ -21,7 +21,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       '漏写行尾分号会编译报错，报错位置常在下一行开头。',
       '一个文件里写两个 main 会报 "main is already declared"。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  print('Hello, Dart!');\n"
         "  print('这是我的第一个程序');\n"
         "  print(1 + 2);\n"
@@ -31,7 +32,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '打印三行：你的姓名、年龄、所在城市。',
         hint: '写三个 print，每行一个字符串。',
-        answer: "void main() {\n"
+        answer:
+            "void main() {\n"
             "  print('小明');\n"
             "  print(18);\n"
             "  print('杭州');\n"
@@ -47,7 +49,15 @@ const List<DartLesson> basicsLessons = <DartLesson>[
     level: 'beginner',
     title: '变量与类型',
     summary: '用 var 推断类型，用 final 和 const 表达不可变。',
-    concepts: <String>['var', 'final', 'const', 'int', 'double', 'String', 'bool'],
+    concepts: <String>[
+      'var',
+      'final',
+      'const',
+      'int',
+      'double',
+      'String',
+      'bool',
+    ],
     explain:
         'var 让编译器根据初始值推断静态类型，写出的是确定类型而不是动态类型。'
         'final 表示变量只能赋值一次，const 更严格，要求编译期就能确定值。'
@@ -58,7 +68,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       '想整除却用了 /，结果拿到 8.5 这样的 double。',
       '对 const 变量赋新值会编译报错，需要改值时应使用 var 或 final。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  var age = 20;\n"
         "  final name = '小明';\n"
         "  const pi = 3.14159;\n"
@@ -77,7 +88,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '把 100 秒换算成「几分几秒」并打印。',
         hint: '整除用 ~/，取余用 %。',
-        answer: "const total = 100;\n"
+        answer:
+            "const total = 100;\n"
             "print('\${total ~/ 60} 分 \${total % 60} 秒');",
       ),
     ],
@@ -100,7 +112,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       '在插值里写复数表达式时忘了花括号，例如写成 \$a + b 会得到「a 的值再拼上 + b」。',
       '多行字符串首行若不是紧跟三引号，前面会多出一行空行。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  const name = '小明';\n"
         "  const score = 88;\n"
         "\n"
@@ -116,7 +129,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '打印「商品：苹果 单价 5.5 数量 3 合计 16.5」。',
         hint: '合计用 \${price * count} 直接算。',
-        answer: "const price = 5.5;\n"
+        answer:
+            "const price = 5.5;\n"
             "const count = 3;\n"
             "print('商品：苹果 单价 \$price 数量 \$count 合计 \${price * count}');",
       ),
@@ -140,7 +154,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       '逻辑运算没有短路预期待：&& 和 || 本身就短路，但把赋值写进条件容易出错。',
       '把 == 误写成 =，在 Dart 里是编译错误，能及早发现。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  const a = 7;\n"
         "  const b = 2;\n"
         "  print(a + b);\n"
@@ -159,7 +174,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '判断 2024 是否闰年并打印结果。',
         hint: '闰年：能被 4 整除且不能被 100 整除，或能被 400 整除。',
-        answer: "const year = 2024;\n"
+        answer:
+            "const year = 2024;\n"
             "final leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);\n"
             "print('\$year 是闰年：\$leap');",
       ),
@@ -183,7 +199,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       '对可能非法的输入直接用 int.parse，程序会因异常中断，优先用 tryParse。',
       'double.parse(\'3\') 可以成功，但 int.parse(\'3.0\') 会失败，整数解析不接受小数点。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  const text = '42';\n"
         "  final number = int.parse(text);\n"
         "  print(number + 1);\n"
@@ -202,7 +219,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '把字符串 \'3.14159\' 转成 double，保留两位小数打印。',
         hint: '先 double.parse，再 toStringAsFixed(2)。',
-        answer: "final value = double.parse('3.14159');\nprint(value.toStringAsFixed(2));",
+        answer:
+            "final value = double.parse('3.14159');\nprint(value.toStringAsFixed(2));",
       ),
     ],
     exampleTitle: '示例 005：类型转换',
@@ -224,7 +242,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       '把变量写成 studentName 之外的大写或下划线风格，会触发 lint 警告。',
       '把常量定义在函数内部却想被外部引用，作用域不允许，应提到顶层。',
     ],
-    code: "const double taxRate = 0.06;\n"
+    code:
+        "const double taxRate = 0.06;\n"
         "const String appName = 'QFLIDartWing';\n"
         "\n"
         "class OrderItem {\n"
@@ -245,7 +264,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '定义一个顶层常量 maxScore = 100，并在 main 里用它计算百分比。',
         hint: '百分比 = 得分 / maxScore * 100。',
-        answer: "const maxScore = 100;\n"
+        answer:
+            "const maxScore = 100;\n"
             "void main() {\n"
             "  print(85 / maxScore * 100);\n"
             "}",
@@ -269,7 +289,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       '用注释把过期代码注释掉而不是删除，容易误导后来者。',
       '文档注释写成语法错误的 Markdown 方括号，会导致 dart doc 报警告。',
     ],
-    code: "// 这是一个单行注释。\n"
+    code:
+        "// 这是一个单行注释。\n"
         "/* 这是一个\n   块注释。 */\n"
         "\n"
         "/// 把整数转成带单位的字符串。\n"
@@ -289,7 +310,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '给上面 formatBytes 增加 MB 分支（>= 1024*1024）。',
         hint: '再加一个 if，返回除以 1024*1024 的结果。',
-        answer: "if (bytes < 1024 * 1024) return '\${(bytes / 1024).toStringAsFixed(1)} KB';\n"
+        answer:
+            "if (bytes < 1024 * 1024) return '\${(bytes / 1024).toStringAsFixed(1)} KB';\n"
             "return '\${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';",
       ),
     ],
@@ -312,7 +334,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       'const 列表不可修改，add 会抛异常；需要可变集合应使用 final 加 []。',
       'const 构造要求所有字段都是 final。',
     ],
-    code: "const weekdays = ['周一', '周二', '周三'];\n"
+    code:
+        "const weekdays = ['周一', '周二', '周三'];\n"
         "const scores = {'math': 90, 'english': 85};\n"
         "\n"
         "class Point {\n"
@@ -334,7 +357,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 const 列表存三天温度，打印最大值。',
         hint: 'const 列表可用 reduce 或直接比较。',
-        answer: "const temps = [21, 25, 19];\n"
+        answer:
+            "const temps = [21, 25, 19];\n"
             "print(temps.reduce((a, b) => a > b ? a : b));",
       ),
     ],
@@ -347,7 +371,13 @@ const List<DartLesson> basicsLessons = <DartLesson>[
     level: 'beginner',
     title: '字符串常用方法',
     summary: '大小写、包含、分割、替换与去空白。',
-    concepts: <String>['toUpperCase', 'contains', 'split', 'replaceAll', 'trim'],
+    concepts: <String>[
+      'toUpperCase',
+      'contains',
+      'split',
+      'replaceAll',
+      'trim',
+    ],
     explain:
         '字符串有一批常用方法：toUpperCase/toLowerCase 改大小写，contains 判断包含，'
         'startsWith/endsWith 判断首尾，split 拆分成列表，replaceAll 替换，trim 去掉'
@@ -357,7 +387,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       '误以为 replaceAll 会改原字符串；它返回新值，需重新赋值。',
       'split 传空字符串会按每个字符拆分，传逗号等分隔符才是按段拆分。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  const raw = '  Dart Language  ';\n"
         "  final trimmed = raw.trim();\n"
         "  print(trimmed);\n"
@@ -371,7 +402,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
         "  print(parts);\n"
         "  print(csv.replaceAll(',', ' | '));\n"
         "}\n",
-    output: 'Dart Language\nDART LANGUAGE\ndart language\ntrue\ntrue\n'
+    output:
+        'Dart Language\nDART LANGUAGE\ndart language\ntrue\ntrue\n'
         '[apple, banana, cherry]\napple | banana | cherry\n',
     exercises: <DartExercise>[
       DartExercise(
@@ -395,11 +427,9 @@ const List<DartLesson> basicsLessons = <DartLesson>[
         '原始文本，解析成结构化信息，再格式化输出。综合练习的目的不是引入新语法，'
         '而是把分散的知识点连成可用的流程。',
     objective: '能把多种基础语法组合成完整的小程序。',
-    pitfalls: <String>[
-      '解析固定格式文本时没有处理多余空格，应先用 trim。',
-      '拼接时忘记转义引号导致语法错误。',
-    ],
-    code: "void main() {\n"
+    pitfalls: <String>['解析固定格式文本时没有处理多余空格，应先用 trim。', '拼接时忘记转义引号导致语法错误。'],
+    code:
+        "void main() {\n"
         "  const raw = '小明,20,杭州';\n"
         "  final parts = raw.split(',');\n"
         "  final name = parts[0].trim();\n"
@@ -416,7 +446,8 @@ const List<DartLesson> basicsLessons = <DartLesson>[
       DartExercise(
         prompt: '对 \'  小红 , 18 , 上海  \' 做同样处理，验证 trim 生效。',
         hint: '先整体 trim，再逐段 trim。',
-        answer: "final raw = '  小红 , 18 , 上海  '.trim();\n"
+        answer:
+            "final raw = '  小红 , 18 , 上海  '.trim();\n"
             "final parts = raw.split(',').map((s) => s.trim()).toList();\n"
             "print('\${parts[0]} \${parts[1]} \${parts[2]}');",
       ),

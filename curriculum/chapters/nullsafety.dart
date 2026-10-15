@@ -18,7 +18,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       '把可空值当非空用（例如直接调用方法）会编译报错。',
       '给非空变量赋 null 会编译报错，这是有意设计，不是麻烦。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  String name = '小明';\n"
         "  String? nickname;\n"
         "  print(name);\n"
@@ -55,7 +56,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       '?? 只在左值为 null 时生效，空字符串或 0 不会触发右值。',
       '?. 返回的仍是可空值，继续取值要接着用 ?. 或做判空。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  String? input;\n"
         "  print(input ?? '默认值');\n"
         "  input ??= '填入了';\n"
@@ -94,7 +96,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       '对确实为 null 的值用 ! 会抛运行时异常，! 只是把编译期检查推迟到运行期。',
       '对字段（而非局部变量）做 null 检查后，编译器可能不提升，因为字段可被并发修改。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  String? name = '小明';\n"
         "  if (name != null) {\n"
         "    print(name.length);\n"
@@ -109,7 +112,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       DartExercise(
         prompt: '可空字符串 s，若非空则打印反转，否则打印「空」。',
         hint: '用 if (s != null) 做类型提升。',
-        answer: "String? s = 'dart';\n"
+        answer:
+            "String? s = 'dart';\n"
             "if (s != null) {\n"
             "  print(s.split('').reversed.join());\n"
             "} else {\n"
@@ -136,7 +140,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       '访问未初始化的 late 变量会运行时报错，要保证使用前已赋值。',
       '能用普通判空解决时不要滥用 late，它把检查推迟到了运行期。',
     ],
-    code: "class Config {\n"
+    code:
+        "class Config {\n"
         "  late String appName;\n"
         "  late final int buildNumber = 42;\n"
         "\n"
@@ -177,7 +182,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       '对 List<int?> 求和时直接相加会因 null 编译报错，要先过滤或设默认值。',
       '把 List<int?> 当成 List<int> 传递会类型不匹配。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final List<int?> maybeNums = [1, null, 3, null, 5];\n"
         "  final nums = maybeNums.whereType<int>().toList();\n"
         "  print(nums);\n"
@@ -193,7 +199,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       DartExercise(
         prompt: '把 [null, 2, null, 4] 的 null 去掉后求平均。',
         hint: 'whereType<int>() 后 fold。',
-        answer: "final nums = [null, 2, null, 4].whereType<int>().toList();\n"
+        answer:
+            "final nums = [null, 2, null, 4].whereType<int>().toList();\n"
             "print(nums.fold<int>(0, (a, b) => a + b) / nums.length);",
       ),
     ],
@@ -216,7 +223,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       '对同一可空字段反复判空显得啰嗦，可以用局部变量或 ?? 降噪。',
       '把缺失值显示成 null 不友好，应统一转成可读文案。',
     ],
-    code: "class Profile {\n"
+    code:
+        "class Profile {\n"
         "  Profile({this.name, this.city, this.age});\n"
         "  final String? name;\n"
         "  final String? city;\n"
@@ -237,7 +245,8 @@ const List<DartLesson> nullSafetyLessons = <DartLesson>[
       DartExercise(
         prompt: "给 profile 的 city 赋值 'hangzhou' 后重新打印。",
         hint: '传入 city 参数。',
-        answer: "final p = Profile(city: 'hangzhou');\n"
+        answer:
+            "final p = Profile(city: 'hangzhou');\n"
             "print(p.city?.toUpperCase() ?? '未知城市');",
       ),
     ],

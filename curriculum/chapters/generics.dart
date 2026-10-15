@@ -18,7 +18,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       '泛型不是动态：T 在编译期确定，不能在一个泛型方法里随意改变类型。',
       '从空列表推断泛型会失败，需要显式写出类型参数。',
     ],
-    code: "T firstOf<T>(List<T> items) => items.first;\n"
+    code:
+        "T firstOf<T>(List<T> items) => items.first;\n"
         "\n"
         "T? lastOrNull<T>(List<T> items) => items.isEmpty ? null : items.last;\n"
         "\n"
@@ -35,7 +36,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       DartExercise(
         prompt: '写泛型方法 second<T>(List<T>) 返回第二个元素。',
         hint: '返回 items[1]。',
-        answer: "T second<T>(List<T> items) => items[1];\nprint(second([1, 2, 3]));",
+        answer:
+            "T second<T>(List<T> items) => items[1];\nprint(second([1, 2, 3]));",
       ),
     ],
     exampleTitle: '示例 047：泛型方法',
@@ -57,7 +59,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       '泛型类内部不能 new T()，因为不知道 T 是否有无参构造。',
       '同一泛型类的不同类型参数实例是不同类型，不能互相赋值。',
     ],
-    code: "class Box<T> {\n"
+    code:
+        "class Box<T> {\n"
         "  Box(this.value);\n"
         "  T value;\n"
         "\n"
@@ -109,7 +112,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       '约束写成 T extends Comparable 后，传入非 Comparable 类型会编译报错。',
       '多个约束用 & 组合（类型别名场景），普通参数只写一个 extends。',
     ],
-    code: "T maxOf<T extends Comparable<T>>(List<T> items) {\n"
+    code:
+        "T maxOf<T extends Comparable<T>>(List<T> items) {\n"
         "  var best = items.first;\n"
         "  for (final item in items) {\n"
         "    if (item.compareTo(best) > 0) best = item;\n"
@@ -131,7 +135,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       DartExercise(
         prompt: '写泛型方法 minOf<T extends Comparable<T>>(List<T>)。',
         hint: '比较用 compareTo < 0。',
-        answer: "T minOf<T extends Comparable<T>>(List<T> items) {\n"
+        answer:
+            "T minOf<T extends Comparable<T>>(List<T> items) {\n"
             "  var best = items.first;\n"
             "  for (final item in items) {\n"
             "    if (item.compareTo(best) < 0) best = item;\n"
@@ -159,7 +164,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       'typedef 只是别名，不产生新类型，不会带来额外的类型安全。',
       '函数类型参数要写全参数和返回类型，否则容易不匹配。',
     ],
-    code: "typedef IntOp = int Function(int a, int b);\n"
+    code:
+        "typedef IntOp = int Function(int a, int b);\n"
         "typedef Mapper<T> = T Function(T value);\n"
         "\n"
         "int apply(IntOp op, int a, int b) => op(a, b);\n"
@@ -177,7 +183,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 typedef Predicate<T> = bool Function(T) 过滤出偶数。',
         hint: 'where 接受 bool Function(T)。',
-        answer: "typedef Predicate<T> = bool Function(T value);\n"
+        answer:
+            "typedef Predicate<T> = bool Function(T value);\n"
             "List<T> filter<T>(List<T> items, Predicate<T> test) =>\n"
             "    items.where(test).toList();\n"
             "print(filter([1, 2, 3, 4], (n) => n.isEven));",
@@ -202,7 +209,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       '返回值写成 List<dynamic> 会丢失类型，调用方每次都要强转。',
       '用 whereType 可以在混合集合里安全地取指定类型。',
     ],
-    code: "Map<K, List<T>> groupBy<T, K>(List<T> items, K Function(T) keyOf) {\n"
+    code:
+        "Map<K, List<T>> groupBy<T, K>(List<T> items, K Function(T) keyOf) {\n"
         "  final result = <K, List<T>>{};\n"
         "  for (final item in items) {\n"
         "    result.putIfAbsent(keyOf(item), () => <T>[]).add(item);\n"
@@ -231,7 +239,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 groupBy 把 [1,2,3,4,5,6] 按奇偶分组。',
         hint: 'keyOf 返回 n % 2。',
-        answer: "final g = groupBy([1, 2, 3, 4, 5, 6], (n) => n % 2);\n"
+        answer:
+            "final g = groupBy([1, 2, 3, 4, 5, 6], (n) => n % 2);\n"
             "print(g[0]);\nprint(g[1]);",
       ),
     ],
@@ -254,7 +263,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       '把 List<int> 向上转型成 List<num> 后写入 double 会抛类型错误。',
       '需要读写混合时应显式复制成目标类型的新列表。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  List<int> ints = [1, 2, 3];\n"
         "  List<num> nums = ints;\n"
         "  print(nums.fold<num>(0, (a, b) => a + b));\n"
@@ -272,7 +282,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       DartExercise(
         prompt: '把 List<num> 里的整数元素用 whereType<int> 取出。',
         hint: '混合列表用 whereType 过滤。',
-        answer: "final nums = <num>[1, 2.5, 3];\nprint(nums.whereType<int>().toList());",
+        answer:
+            "final nums = <num>[1, 2.5, 3];\nprint(nums.whereType<int>().toList());",
       ),
     ],
     exampleTitle: '示例 052：协变与类型边界',
@@ -294,7 +305,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       'T 和 T? 不等价：T 由调用方决定，T? 一定允许空。',
       '对返回 T? 的结果直接用要判空或用 ??。',
     ],
-    code: "T? firstOrNull<T>(List<T> items) => items.isEmpty ? null : items.first;\n"
+    code:
+        "T? firstOrNull<T>(List<T> items) => items.isEmpty ? null : items.first;\n"
         "\n"
         "void main() {\n"
         "  print(firstOrNull([1, 2, 3]));\n"
@@ -309,7 +321,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       DartExercise(
         prompt: '写 lastOrNull<T>(List<T>) 并对空列表返回 null。',
         hint: 'items.isEmpty ? null : items.last。',
-        answer: "T? lastOrNull<T>(List<T> items) => items.isEmpty ? null : items.last;",
+        answer:
+            "T? lastOrNull<T>(List<T> items) => items.isEmpty ? null : items.last;",
       ),
     ],
     exampleTitle: '示例 053：可空泛型与默认类型',
@@ -331,7 +344,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       'get 不存在的键返回 null，与「值本身就是 null」无法区分，必要时用 containsKey 判断。',
       '缓存容量无限增长会占内存，真实场景要加淘汰策略。',
     ],
-    code: "class Cache<K, V> {\n"
+    code:
+        "class Cache<K, V> {\n"
         "  final _store = <K, V>{};\n"
         "  int hits = 0;\n"
         "  int misses = 0;\n"
@@ -365,7 +379,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
       DartExercise(
         prompt: '用缓存存字符串到列表的映射，并取回一个键。',
         hint: 'Cache<String, List<int>>。',
-        answer: "final c = Cache<String, List<int>>();\n"
+        answer:
+            "final c = Cache<String, List<int>>();\n"
             "c.put('nums', [1, 2, 3]);\n"
             "print(c.get('nums'));",
       ),

@@ -28,7 +28,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '断言失败应抛错而不是返回 false，否则容易被忽略。',
       '真实项目不要自己造轮子，直接用 package:test。',
     ],
-    code: "void expectEquals(Object? actual, Object? expected, String label) {\n"
+    code:
+        "void expectEquals(Object? actual, Object? expected, String label) {\n"
         "  if (actual != expected) {\n"
         "    throw StateError('\$label 失败：期望 \$expected，实际 \$actual');\n"
         "  }\n"
@@ -53,7 +54,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '再加一条断言：检查 "hello".contains("ell") 为 true。',
         hint: 'check(() => expectEquals("hello".contains("ell"), true, "包含"))。',
-        answer: "void expectEquals(Object? a, Object? b, String l) {\n"
+        answer:
+            "void expectEquals(Object? a, Object? b, String l) {\n"
             "  if (a != b) throw StateError(l);\n"
             "  print('通过 \$l');\n"
             "}\n"
@@ -85,7 +87,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '组名要能表达主题，避免"测试1/测试2"这类无信息命名。',
       '嵌套分组可表达层级，但过深会难以阅读。',
     ],
-    code: "class TestCase {\n"
+    code:
+        "class TestCase {\n"
         "  TestCase(this.name, this.body);\n"
         "  final String name;\n"
         "  final void Function() body;\n"
@@ -119,7 +122,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '新增一组"集合"，含一条用例检查 [1,2,3].length == 3。',
         hint: '再调一次 runGroup，传入一个 TestCase。',
-        answer: "void expect(bool c) {\n"
+        answer:
+            "void expect(bool c) {\n"
             "  if (!c) throw StateError('断言失败');\n"
             "}\n"
             "\n"
@@ -154,7 +158,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '空白字符串要 trim 后再判断，否则 int.parse 抛错信息不明确。',
       '异常用例要显式验证"确实抛了正确类型"，而不是笼统 catch。',
     ],
-    code: "int parseScore(String text) {\n"
+    code:
+        "int parseScore(String text) {\n"
         "  final trimmed = text.trim();\n"
         "  if (trimmed.isEmpty) throw const FormatException('空输入');\n"
         "  return int.parse(trimmed);\n"
@@ -174,7 +179,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '为 parseScore 增加空字符串用例，验证抛出 FormatException。',
         hint: 'try { parseScore("") } on FormatException { print("空输入被拒"); }。',
-        answer: "int parseScore(String t) {\n"
+        answer:
+            "int parseScore(String t) {\n"
             "  final s = t.trim();\n"
             "  if (s.isEmpty) throw const FormatException('空输入');\n"
             "  return int.parse(s);\n"
@@ -212,7 +218,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '抛错信息要包含可诊断的上下文，而不是空消息。',
       '捕获时应指定具体类型，避免吞掉其它异常。',
     ],
-    code: "class ValidationError implements Exception {\n"
+    code:
+        "class ValidationError implements Exception {\n"
         "  ValidationError(this.message);\n"
         "  final String message;\n"
         "  @override\n"
@@ -237,7 +244,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '定义一个 ValidationError 并对空用户名抛出、捕获打印。',
         hint: 'if (name.isEmpty) throw ValidationError("用户名不能为空")。',
-        answer: "class ValidationError implements Exception {\n"
+        answer:
+            "class ValidationError implements Exception {\n"
             "  ValidationError(this.message);\n"
             "  final String message;\n"
             "  @override\n"
@@ -280,7 +288,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '可空字段的 copyWith 无法把值"改回 null"，需要额外哨兵或 Optional。',
       '忘记给新字段传默认值会导致字段丢失。',
     ],
-    code: "class Config {\n"
+    code:
+        "class Config {\n"
         "  const Config(this.host, this.port);\n"
         "  final String host;\n"
         "  final int port;\n"
@@ -301,7 +310,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '为 Config 加 name 字段并扩展 copyWith 支持改 name。',
         hint: '构造加 name，copyWith 加 {String? name}。',
-        answer: "class Config {\n"
+        answer:
+            "class Config {\n"
             "  const Config(this.name, this.port);\n"
             "  final String name;\n"
             "  final int port;\n"
@@ -337,7 +347,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       'hashCode 必须只依赖参与 == 比较的字段。',
       '可变对象不要作为 Map 的键，字段变了哈希会失配。',
     ],
-    code: "class Point {\n"
+    code:
+        "class Point {\n"
         "  const Point(this.x, this.y);\n"
         "  final int x;\n"
         "  final int y;\n"
@@ -367,7 +378,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '把 Point 用作 Map 的键，取值验证内容相等的键命中同一项。',
         hint: 'map[Point(1,2)] = "a"; 再读 map[Point(1,2)]。',
-        answer: "class Point {\n"
+        answer:
+            "class Point {\n"
             "  const Point(this.x, this.y);\n"
             "  final int x, y;\n"
             "  @override\n"
@@ -406,7 +418,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '服务直接 new 仓储会写死依赖，难以替换为假实现。',
       '层与层职责要清晰，仓储不要掺业务规则。',
     ],
-    code: "class UserRepository {\n"
+    code:
+        "class UserRepository {\n"
         "  final Map<int, String> _store = <int, String>{1: '小明', 2: '小红'};\n"
         "  String? findName(int id) => _store[id];\n"
         "}\n"
@@ -430,7 +443,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '定义仓储接口 UserRepository（抽象），并写内存实现注入到 Service。',
         hint: 'abstract class UserRepository { String? findName(int id); }。',
-        answer: "abstract class UserRepository {\n"
+        answer:
+            "abstract class UserRepository {\n"
             "  String? findName(int id);\n"
             "}\n"
             "\n"
@@ -467,7 +481,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '默认值本身也不能为 null，否则 ?? 链末端仍为空。',
       '敏感配置不要写死在源码，应通过环境注入。',
     ],
-    code: "class AppConfig {\n"
+    code:
+        "class AppConfig {\n"
         "  AppConfig(this.values);\n"
         "\n"
         "  final Map<String, String> values;\n"
@@ -492,7 +507,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '给配置加 debug 开关（默认 false），覆盖为 true 时打印它。',
         hint: '用 values["debug"] ?? defaults["debug"]，再 == "true" 解析。',
-        answer: "class AppConfig {\n"
+        answer:
+            "class AppConfig {\n"
             "  AppConfig(this.values);\n"
             "  final Map<String, String> values;\n"
             "  bool get debug => (values['debug'] ?? 'false') == 'true';\n"
@@ -525,7 +541,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '计数要界定"什么算一次操作"，否则数字含义模糊。',
       '小规模差异可能被常数掩盖，观察趋势比绝对值更有意义。',
     ],
-    code: "int countOperations(int n) {\n"
+    code:
+        "int countOperations(int n) {\n"
         "  var operations = 0;\n"
         "  var sum = 0;\n"
         "  for (var i = 1; i <= n; i++) {\n"
@@ -545,7 +562,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       DartExercise(
         prompt: '统计嵌套循环（外层 n、内层 n）的操作次数，验证是 n²。',
         hint: '双重 for，内层 operations++。',
-        answer: "int nestedOps(int n) {\n"
+        answer:
+            "int nestedOps(int n) {\n"
             "  var ops = 0;\n"
             "  for (var i = 0; i < n; i++) {\n"
             "    for (var j = 0; j < n; j++) {\n"
@@ -583,7 +601,8 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
       '把下标 i 与 ++i 混用要小心，确保跳到 value 后不重复处理。',
       '缺少命令属非法输入，应显式抛错而不是返回空对象。',
     ],
-    code: "class Args {\n"
+    code:
+        "class Args {\n"
         "  Args(this.command, this.flags);\n"
         "  final String command;\n"
         "  final Map<String, String> flags;\n"
@@ -611,13 +630,14 @@ const List<DartLesson> engineeringLessons = <DartLesson>[
         "  print('mode=\${args.flags['mode']}');\n"
         "  print('参数个数 \${args.flags.length}');\n"
         "}\n",
-    output:
-        '命令 build\ntarget=ohos\nmode=release\n参数个数 2\n',
+    output: '命令 build\ntarget=ohos\nmode=release\n参数个数 2\n',
     exercises: <DartExercise>[
       DartExercise(
         prompt: '对空参数列表调用 Args.parse，验证抛出 ArgumentError。',
-        hint: 'try { Args.parse([]) } on ArgumentError catch (e) { print(e.message); }。',
-        answer: "class Args {\n"
+        hint:
+            'try { Args.parse([]) } on ArgumentError catch (e) { print(e.message); }。',
+        answer:
+            "class Args {\n"
             "  Args(this.command);\n"
             "  final String command;\n"
             "  static Args parse(List<String> input) {\n"

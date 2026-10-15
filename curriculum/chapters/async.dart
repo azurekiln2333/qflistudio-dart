@@ -28,7 +28,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       'await 只能在 async 函数内使用，且 main 也要声明 async。',
       'await 不会阻塞其它任务，不要把"等待"理解为"卡住整个程序"。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  print('开始');\n"
@@ -43,7 +44,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '写一个 async 函数返回 7，await 后打印它的两倍。',
         hint: '函数体用 return 7; 调用处 await。',
-        answer: "Future<int> seven() async => 7;\n"
+        answer:
+            "Future<int> seven() async => 7;\n"
             "\n"
             "Future<void> main() async {\n"
             "  print(await seven() * 2);\n"
@@ -73,7 +75,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       'async 函数里 return Future 不会自动 flatten 的直觉要小心，直接 return 值即可。',
       '忘记 await 第二个调用会得到 Future 而非数值。',
     ],
-    code: "Future<String> fetchName() async {\n"
+    code:
+        "Future<String> fetchName() async {\n"
         "  await Future<void>.delayed(Duration.zero);\n"
         "  return '小明';\n"
         "}\n"
@@ -94,7 +97,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '再加一个异步函数返回城市名，串行 await 后打印"姓名 城市"。',
         hint: '照抄 fetchName 的结构，改返回值即可。',
-        answer: "Future<String> fetchCity() async => '杭州';\n"
+        answer:
+            "Future<String> fetchCity() async => '杭州';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final name = '小明';\n"
@@ -126,7 +130,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       '列表中任一 Future 抛错都会让整组失败，需按需自行捕获。',
       '传入空列表会立即返回空结果列表。',
     ],
-    code: "Future<int> task(int n) async {\n"
+    code:
+        "Future<int> task(int n) async {\n"
         "  await Future<void>.delayed(Duration.zero);\n"
         "  return n * n;\n"
         "}\n"
@@ -141,7 +146,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '用 Future.wait 并发计算 1..5 的平方，并打印总和。',
         hint: '生成 Future 列表再 wait，用 reduce 求和。',
-        answer: "Future<int> sq(int n) async => n * n;\n"
+        answer:
+            "Future<int> sq(int n) async => n * n;\n"
             "\n"
             "Future<void> main() async {\n"
             "  final xs = await Future.wait(<Future<int>>[\n"
@@ -174,7 +180,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       'on 子句写错类型会导致不匹配，落到通用 catch 或直接抛出。',
       'catch 里若再 await，仍要保证该错误被捕获，避免二次逃逸。',
     ],
-    code: "Future<int> risky(bool fail) async {\n"
+    code:
+        "Future<int> risky(bool fail) async {\n"
         "  await Future<void>.delayed(Duration.zero);\n"
         "  if (fail) {\n"
         "    throw StateError('计算失败');\n"
@@ -196,7 +203,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '把抛出类型换成 FormatException，并捕获后打印其 message。',
         hint: 'on FormatException catch (e) => print(e.message)。',
-        answer: "Future<void> main() async {\n"
+        answer:
+            "Future<void> main() async {\n"
             "  try {\n"
             "    await Future<void>.error(FormatException('格式错误'));\n"
             "  } on FormatException catch (e) {\n"
@@ -228,7 +236,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       '时限过短会频繁误报超时，需结合实际场景设置。',
       'timeout 抛出的 TimeoutException 必须被捕获，否则流程中断。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  try {\n"
@@ -250,7 +259,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '给一个 Duration.zero 完成的 Future 设置 1 秒超时，打印结果。',
         hint: '时限远大于完成时间，会正常返回。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final r = await Future<int>.delayed(\n"
@@ -284,7 +294,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       'then 回调里返回新值会形成新的 Future，层层叠加要留意。',
       '把 Future 当值传给需要 int 的地方会类型报错。',
     ],
-    code: "Future<int> value() async => 10;\n"
+    code:
+        "Future<int> value() async => 10;\n"
         "\n"
         "Future<void> main() async {\n"
         "  final future = value();\n"
@@ -299,7 +310,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '写 async 函数返回字符串 "dart"，用 then 把它转成大写再打印。',
         hint: "then((s) => s.toUpperCase())。",
-        answer: "Future<String> word() async => 'dart';\n"
+        answer:
+            "Future<String> word() async => 'dart';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final upper = await word().then((s) => s.toUpperCase());\n"
@@ -330,7 +342,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       '把 catchError 放错位置可能漏掉后半段的错误。',
       'catchError 不 rethrow 时错误就被"吞掉"，需确认这是预期行为。',
     ],
-    code: "Future<int> parse(String text) async => int.parse(text);\n"
+    code:
+        "Future<int> parse(String text) async => int.parse(text);\n"
         "\n"
         "Future<void> main() async {\n"
         "  final result = await parse('21').then((v) => v + 1);\n"
@@ -345,7 +358,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '对 parse("abc") 用 catchError 兜底为 0，并打印。',
         hint: '回调返回 0，类型与 Future<int> 一致。',
-        answer: "Future<int> parse(String t) async => int.parse(t);\n"
+        answer:
+            "Future<int> parse(String t) async => int.parse(t);\n"
             "\n"
             "Future<void> main() async {\n"
             "  print(await parse('abc').catchError((Object _) => 0));\n"
@@ -375,7 +389,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       '后台任务抛错可能无人捕获，导致进程级未处理异常。',
       '程序若在后台任务完成前退出，任务可能来不及执行。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "void fireAndForget() {\n"
         "  unawaited(\n"
@@ -393,7 +408,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '用 unawaited 启动一个打印"已记录"的 Future，主流程先打印"开始"。',
         hint: '先 unawaited(...)，再 print("开始")，结尾 await 一次。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  unawaited(Future<void>.delayed(Duration.zero, () => print('已记录')));\n"
@@ -425,7 +441,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       '单订阅流只能被消费一次，重复 toList 会报错。',
       '流是惰性的：不消费就不产生元素。',
     ],
-    code: "import 'dart:async';\n"
+    code:
+        "import 'dart:async';\n"
         "\n"
         "Future<void> main() async {\n"
         "  final stream = Stream<int>.fromIterable(<int>[1, 2, 3, 4]);\n"
@@ -438,7 +455,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: "把 ['a', 'b', 'c'] 变成流，收集后打印首元素。",
         hint: 'fromIterable 后 toList，取 first。',
-        answer: "import 'dart:async';\n"
+        answer:
+            "import 'dart:async';\n"
             "\n"
             "Future<void> main() async {\n"
             "  final list = await Stream<String>.fromIterable(\n"
@@ -471,7 +489,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       'finally 里再抛错会覆盖原异常，需谨慎处理。',
       'finally 中的 await 会延迟错误外传，行为仍正确但要心里有数。',
     ],
-    code: "Future<void> withResource() async {\n"
+    code:
+        "Future<void> withResource() async {\n"
         "  print('打开资源');\n"
         "  try {\n"
         "    await Future<void>.delayed(Duration.zero);\n"
@@ -493,7 +512,8 @@ const List<DartLesson> asyncLessons = <DartLesson>[
       DartExercise(
         prompt: '改写为正常返回（不抛错），验证 finally 仍打印"关闭资源"。',
         hint: '删掉 throw，finally 依旧执行。',
-        answer: "Future<void> main() async {\n"
+        answer:
+            "Future<void> main() async {\n"
             "  print('打开资源');\n"
             "  try {\n"
             "    await Future<void>.delayed(Duration.zero);\n"

@@ -85,8 +85,6 @@ Future<String> _runPortable(String source) async {
   return buffer.toString();
 }
 
-
-
 String _normalize(String value) => value.replaceAll('\r\n', '\n').trimRight();
 
 String _escape(String value) => value.replaceAll('\n', r'\n');

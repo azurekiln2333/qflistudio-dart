@@ -29,7 +29,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       'lengthSync 返回字节数，中文不是以字符数计。',
       '同步 I/O 会阻塞事件循环，大文件应改用异步 API。',
     ],
-    code: "import 'dart:io';\n"
+    code:
+        "import 'dart:io';\n"
         "\n"
         "void main() {\n"
         "  final dir = Directory.systemTemp.createTempSync('qfli_io_097_');\n"
@@ -47,7 +48,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       DartExercise(
         prompt: '写一个文件内容为 "abc"，打印它的长度。',
         hint: '"abc" 是 3 个 ASCII 字节。',
-        answer: "import 'dart:io';\n"
+        answer:
+            "import 'dart:io';\n"
             "\n"
             "void main() {\n"
             "  final dir = Directory.systemTemp.createTempSync('qfli_ex_');\n"
@@ -83,7 +85,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       '不同平台原始换行不同，按行读取能屏蔽这个差异。',
       '空文件会返回空列表，取 first/last 前要判空。',
     ],
-    code: "import 'dart:io';\n"
+    code:
+        "import 'dart:io';\n"
         "\n"
         "void main() {\n"
         "  final dir = Directory.systemTemp.createTempSync('qfli_io_098_');\n"
@@ -103,7 +106,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       DartExercise(
         prompt: '写入两行并打印第二行。',
         hint: 'readAsLinesSync()[1]。',
-        answer: "import 'dart:io';\n"
+        answer:
+            "import 'dart:io';\n"
             "\n"
             "void main() {\n"
             "  final dir = Directory.systemTemp.createTempSync('qfli_ex_');\n"
@@ -140,7 +144,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       'listSync 默认不递归，子目录内容需递归处理。',
       'whereType<File>() 会排除子目录，注意区分。',
     ],
-    code: "import 'dart:io';\n"
+    code:
+        "import 'dart:io';\n"
         "\n"
         "void main() {\n"
         "  final dir = Directory.systemTemp.createTempSync('qfli_io_099_');\n"
@@ -166,7 +171,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       DartExercise(
         prompt: '统计目录中 .txt 文件的数量。',
         hint: '把过滤条件改成 endsWith(".txt")。',
-        answer: "import 'dart:io';\n"
+        answer:
+            "import 'dart:io';\n"
             "\n"
             "void main() {\n"
             "  final dir = Directory.systemTemp.createTempSync('qfli_ex_');\n"
@@ -204,7 +210,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       '复制会覆盖同名目标，必要时先检查 existsSync。',
       '复制是字节级操作，不涉及编码转换。',
     ],
-    code: "import 'dart:io';\n"
+    code:
+        "import 'dart:io';\n"
         "\n"
         "void main() {\n"
         "  final dir = Directory.systemTemp.createTempSync('qfli_io_100_');\n"
@@ -223,7 +230,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       DartExercise(
         prompt: '复制一个文件后，用 existsSync 打印目标是否存在的布尔值。',
         hint: 'copySync 后用 existsSync。',
-        answer: "import 'dart:io';\n"
+        answer:
+            "import 'dart:io';\n"
             "\n"
             "void main() {\n"
             "  final dir = Directory.systemTemp.createTempSync('qfli_ex_');\n"
@@ -260,7 +268,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       '目标已存在时行为依平台而异，稳妥做法是先删或先检查。',
       '对已 rename 的旧 File 对象调用方法会因路径不存在而失败。',
     ],
-    code: "import 'dart:io';\n"
+    code:
+        "import 'dart:io';\n"
         "\n"
         "void main() {\n"
         "  final dir = Directory.systemTemp.createTempSync('qfli_io_101_');\n"
@@ -280,7 +289,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       DartExercise(
         prompt: '把 a.txt 改名为 a.bak，打印新文件名。',
         hint: 'renameSync 后用 uri.pathSegments.last。',
-        answer: "import 'dart:io';\n"
+        answer:
+            "import 'dart:io';\n"
             "\n"
             "void main() {\n"
             "  final dir = Directory.systemTemp.createTempSync('qfli_ex_');\n"
@@ -317,7 +327,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       '文件不是合法 JSON 时 jsonDecode 抛 FormatException。',
       '中文写入用 UTF-8，读取时也要按 UTF-8 解（默认即是）。',
     ],
-    code: "import 'dart:convert';\n"
+    code:
+        "import 'dart:convert';\n"
         "import 'dart:io';\n"
         "\n"
         "void main() {\n"
@@ -341,7 +352,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       DartExercise(
         prompt: '把 [1, 2, 3] 编码写入文件再读回，打印长度。',
         hint: 'jsonDecode 后 as List 取 length。',
-        answer: "import 'dart:convert';\n"
+        answer:
+            "import 'dart:convert';\n"
             "import 'dart:io';\n"
             "\n"
             "void main() {\n"
@@ -380,7 +392,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       '统计时别把子目录本身也算成文件。',
       '深层目录递归可能栈开销大，超深树考虑显式栈。',
     ],
-    code: "import 'dart:io';\n"
+    code:
+        "import 'dart:io';\n"
         "\n"
         "int countFiles(Directory dir) {\n"
         "  var count = 0;\n"
@@ -412,7 +425,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       DartExercise(
         prompt: '写递归函数统计目录树中 .txt 文件的数量。',
         hint: '在递归里对文件名判断 endsWith(".txt")。',
-        answer: "import 'dart:io';\n"
+        answer:
+            "import 'dart:io';\n"
             "\n"
             "int countTxt(Directory dir) {\n"
             "  var n = 0;\n"
@@ -456,7 +470,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       'lengthSync 是字节数；statSync 也不返回字符数。',
       '对不存在的文件调用 lengthSync 会抛错，先 existsSync 判断。',
     ],
-    code: "import 'dart:convert';\n"
+    code:
+        "import 'dart:convert';\n"
         "import 'dart:io';\n"
         "\n"
         "void main() {\n"
@@ -476,7 +491,8 @@ const List<DartLesson> ioLessons = <DartLesson>[
       DartExercise(
         prompt: '写一个空文件，打印它的 lengthSync()。',
         hint: '空文件长度为 0。',
-        answer: "import 'dart:io';\n"
+        answer:
+            "import 'dart:io';\n"
             "\n"
             "void main() {\n"
             "  final dir = Directory.systemTemp.createTempSync('qfli_ex_');\n"

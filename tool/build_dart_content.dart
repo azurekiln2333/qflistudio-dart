@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import '../curriculum/dart_chapters.dart';
 import '../curriculum/dart_curriculum.dart';
 import '../curriculum/dart_lesson.dart';
+
 /// Emits the two Dart-only aggregate content assets from the authored
 /// [dartCurriculum] source of truth.
 ///
@@ -30,14 +31,8 @@ Future<void> main(List<String> args) async {
   final tutorials = _tutorialsDocument(dartCurriculum);
   final examples = _examplesDocument(dartCurriculum);
 
-  await _writeJson(
-    File(p.join(outDir.path, 'dart_tutorials.json')),
-    tutorials,
-  );
-  await _writeJson(
-    File(p.join(outDir.path, 'dart_examples.json')),
-    examples,
-  );
+  await _writeJson(File(p.join(outDir.path, 'dart_tutorials.json')), tutorials);
+  await _writeJson(File(p.join(outDir.path, 'dart_examples.json')), examples);
 
   stdout.writeln(
     'Emitted ${dartCurriculum.length} Dart lessons and '
@@ -94,9 +89,7 @@ void _checkCurriculum(List<DartLesson> lessons) {
 
     final priorExplain = explainSeen[lesson.explain];
     if (priorExplain != null) {
-      problems.add(
-        '$lesson.id: explain duplicates $priorExplain',
-      );
+      problems.add('$lesson.id: explain duplicates $priorExplain');
     } else {
       explainSeen[lesson.explain] = lesson.id;
     }
@@ -104,9 +97,7 @@ void _checkCurriculum(List<DartLesson> lessons) {
     final normalizedLessonCode = _normalize(lesson.code);
     final priorLessonCode = lessonCodeSeen[normalizedLessonCode];
     if (priorLessonCode != null) {
-      problems.add(
-        '$lesson.id: lesson code duplicates $priorLessonCode',
-      );
+      problems.add('$lesson.id: lesson code duplicates $priorLessonCode');
     } else {
       lessonCodeSeen[normalizedLessonCode] = lesson.id;
     }
@@ -114,9 +105,7 @@ void _checkCurriculum(List<DartLesson> lessons) {
     final normalizedExampleCode = _normalize(lesson.resolvedExampleCode);
     final priorExampleCode = exampleCodeSeen[normalizedExampleCode];
     if (priorExampleCode != null) {
-      problems.add(
-        '$lesson.id: example code duplicates $priorExampleCode',
-      );
+      problems.add('$lesson.id: example code duplicates $priorExampleCode');
     } else {
       exampleCodeSeen[normalizedExampleCode] = lesson.id;
     }
@@ -152,23 +141,25 @@ void _checkCurriculum(List<DartLesson> lessons) {
   }
 }
 
-Map<String, Object> _tutorialsDocument(List<DartLesson> lessons) => <String, Object>{
-  'schemaVersion': 1,
-  'kind': 'tutorials',
-  'updatedAt': _updatedAt(lessons),
-  'entries': <Object>[
-    for (final lesson in _sorted(lessons)) _tutorialEntry(lesson),
-  ],
-};
+Map<String, Object> _tutorialsDocument(List<DartLesson> lessons) =>
+    <String, Object>{
+      'schemaVersion': 1,
+      'kind': 'tutorials',
+      'updatedAt': _updatedAt(lessons),
+      'entries': <Object>[
+        for (final lesson in _sorted(lessons)) _tutorialEntry(lesson),
+      ],
+    };
 
-Map<String, Object> _examplesDocument(List<DartLesson> lessons) => <String, Object>{
-  'schemaVersion': 1,
-  'kind': 'examples',
-  'updatedAt': _updatedAt(lessons),
-  'entries': <Object>[
-    for (final lesson in _sorted(lessons)) _exampleEntry(lesson),
-  ],
-};
+Map<String, Object> _examplesDocument(List<DartLesson> lessons) =>
+    <String, Object>{
+      'schemaVersion': 1,
+      'kind': 'examples',
+      'updatedAt': _updatedAt(lessons),
+      'entries': <Object>[
+        for (final lesson in _sorted(lessons)) _exampleEntry(lesson),
+      ],
+    };
 
 Map<String, Object> _tutorialEntry(DartLesson lesson) => <String, Object>{
   'id': lesson.id,
@@ -230,8 +221,7 @@ List<DartLesson> _sorted(List<DartLesson> lessons) {
   return copy;
 }
 
-String _normalize(String code) =>
-    code.replaceAll(RegExp(r'\s+'), ' ').trim();
+String _normalize(String code) => code.replaceAll(RegExp(r'\s+'), ' ').trim();
 
 /// Repository-consistent source/license. These mirror the exact values already
 /// used by the bundled Dart content, so no new license is introduced.

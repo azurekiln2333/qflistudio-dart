@@ -17,7 +17,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       '用 fruits[-1] 取最后一个元素会运行时报错，应该用 fruits.last。',
       '越界访问会抛 RangeError，遍历时用 length 做边界。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final fruits = ['苹果', '香蕉', '橙子'];\n"
         "  fruits.add('葡萄');\n"
         "  print(fruits);\n"
@@ -55,7 +56,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       'sublist 的结束下标是开区间，不含该位置。',
       'reversed 返回的是可迭代对象，要 toList 才是列表。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final scores = [88, 92, 79, 95];\n"
         "  for (var i = 0; i < scores.length; i++) {\n"
         "    print('第 \${i + 1} 名：\${scores[i]}');\n"
@@ -66,7 +68,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
         "  print(scores.sublist(1, 3));\n"
         "  print(scores.reversed.toList());\n"
         "}\n",
-    output: '第 1 名：88\n第 2 名：92\n第 3 名：79\n第 4 名：95\n'
+    output:
+        '第 1 名：88\n第 2 名：92\n第 3 名：79\n第 4 名：95\n'
         '优秀分：92\n优秀分：95\n[92, 79]\n[95, 79, 92, 88]\n',
     exercises: <DartExercise>[
       DartExercise(
@@ -93,7 +96,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       'sort 是就地排序，会修改原列表；想保留原序应先复制。',
       'indexOf 返回 -1 代表不存在，别把它当成有效下标使用。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final nums = [88, 92, 79, 95, 67];\n"
         "  nums.sort();\n"
         "  print(nums);\n"
@@ -109,7 +113,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       DartExercise(
         prompt: '把 [3, 1, 2] 排序并判断是否所有元素都大于 0。',
         hint: 'sort 后 every。',
-        answer: "final nums = [3, 1, 2]..sort();\nprint(nums);\nprint(nums.every((n) => n > 0));",
+        answer:
+            "final nums = [3, 1, 2]..sort();\nprint(nums);\nprint(nums.every((n) => n > 0));",
       ),
     ],
     exampleTitle: '示例 021：列表排序与查找',
@@ -131,7 +136,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       '对不存在的键直接取再当非空用，会拿到 null 引发错误。',
       'Map 的键要能稳定哈希，用可变对象做键容易出问题。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final student = <String, Object>{\n"
         "    'name': '小明',\n"
         "    'age': 18,\n"
@@ -150,7 +156,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 Map 存三种水果的价格，打印苹果价格（缺失时打印「未知」）。',
         hint: '用 ?? 兜底。',
-        answer: "final prices = {'apple': 5.5, 'banana': 3.0, 'cherry': 12.0};\n"
+        answer:
+            "final prices = {'apple': 5.5, 'banana': 3.0, 'cherry': 12.0};\n"
             "print(prices['apple'] ?? '未知');",
       ),
     ],
@@ -169,11 +176,9 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
         'Set 支持 intersection（交集）、union（并集）、difference（差集），在统计场景'
         '很有用。',
     objective: '会用 Set 去重并做集合运算。',
-    pitfalls: <String>[
-      'Set 无序，不要依赖它的遍历顺序。',
-      '用 Set 去重会丢失重复次数，需要计数时应改用 Map。',
-    ],
-    code: "void main() {\n"
+    pitfalls: <String>['Set 无序，不要依赖它的遍历顺序。', '用 Set 去重会丢失重复次数，需要计数时应改用 Map。'],
+    code:
+        "void main() {\n"
         "  final nums = [1, 2, 2, 3, 3, 3];\n"
         "  final unique = nums.toSet();\n"
         "  print(unique);\n"
@@ -190,7 +195,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       DartExercise(
         prompt: '用 Set 判断两个列表是否有公共元素。',
         hint: 'intersection 非空即有。',
-        answer: "final x = [1, 2, 3].toSet();\n"
+        answer:
+            "final x = [1, 2, 3].toSet();\n"
             "final y = [3, 4, 5].toSet();\n"
             "print(x.intersection(y).isNotEmpty);",
       ),
@@ -214,7 +220,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       '忘记 toList 会得到 lazy 的 Iterable，多次遍历可能重复计算。',
       'map 里尽量保持纯函数，不要在变换过程中修改外部状态。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final nums = [1, 2, 3, 4, 5, 6];\n"
         "  final doubled = nums.map((n) => n * 2).toList();\n"
         "  print(doubled);\n"
@@ -229,7 +236,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       DartExercise(
         prompt: '把 [1,2,3,4,5] 里的奇数平方后收集成列表。',
         hint: 'where 奇数再 map 平方。',
-        answer: "final result = [1, 2, 3, 4, 5]\n"
+        answer:
+            "final result = [1, 2, 3, 4, 5]\n"
             "    .where((n) => n.isOdd)\n"
             "    .map((n) => n * n)\n"
             "    .toList();\nprint(result);",
@@ -253,7 +261,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       '对空列表调用 reduce 会抛 StateError，先用 fold 或判空。',
       'fold 的初始值类型决定了结果类型，写 fold<int>(...) 可以避免类型推断歧义。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final nums = [3, 1, 4, 1, 5, 9, 2, 6];\n"
         "  final total = nums.fold<int>(0, (a, b) => a + b);\n"
         "  print('总和 \$total');\n"
@@ -289,7 +298,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       '对可能为 null 的集合用 ... 会报错，应改用 ...?。',
       '展开只是浅拷贝，嵌套的子集合仍是共享引用。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final base = [1, 2, 3];\n"
         "  final extended = [0, ...base, 4];\n"
         "  print(extended);\n"
@@ -332,7 +342,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       'update 不带 ifAbsent 时，键不存在会抛异常。',
       'addAll 会覆盖同名键，合并前要确认这是期望行为。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  final counts = {'a': 1, 'b': 2};\n"
         "  counts.update('a', (v) => v + 10);\n"
         "  counts.update('c', (v) => v + 1, ifAbsent: () => 5);\n"
@@ -350,7 +361,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       DartExercise(
         prompt: '给 Map 的每个值加 1 并返回新 Map。',
         hint: '用 map + MapEntry。',
-        answer: "final m = {'x': 1, 'y': 2};\n"
+        answer:
+            "final m = {'x': 1, 'y': 2};\n"
             "print(m.map((k, v) => MapEntry(k, v + 1)));",
       ),
     ],
@@ -369,11 +381,9 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
         '用 Map 统计每个单词出现次数，再按次数排序输出。这是集合与字符串配合的'
         '典型实战。',
     objective: '能把字符串处理和集合统计组合成完整流程。',
-    pitfalls: <String>[
-      '没做大小写归一化会把 The 和 the 分成两个词。',
-      '排序比较器写反会导致结果顺序相反。',
-    ],
-    code: "void main() {\n"
+    pitfalls: <String>['没做大小写归一化会把 The 和 the 分成两个词。', '排序比较器写反会导致结果顺序相反。'],
+    code:
+        "void main() {\n"
         "  const text = 'the cat the dog the bird';\n"
         "  final words = text.toLowerCase().split(' ');\n"
         "  final counts = <String, int>{};\n"
@@ -391,7 +401,8 @@ const List<DartLesson> collectionsLessons = <DartLesson>[
       DartExercise(
         prompt: "统计 'a b a c a' 里出现最多的单词。",
         hint: 'Map 计数后取最大 value 的 key。',
-        answer: "final words = 'a b a c a'.split(' ');\n"
+        answer:
+            "final words = 'a b a c a'.split(' ');\n"
             "final counts = <String, int>{};\n"
             "for (final w in words) { counts[w] = (counts[w] ?? 0) + 1; }\n"
             "final top = counts.entries.reduce((a, b) => a.value >= b.value ? a : b);\n"

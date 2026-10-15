@@ -61,7 +61,8 @@ void main() {
       );
     });
 
-    test('authored source matches the fixed chapter allocation', () {      final perChapter = <String, int>{};
+    test('authored source matches the fixed chapter allocation', () {
+      final perChapter = <String, int>{};
       for (final lesson in dartCurriculum) {
         perChapter[lesson.chapter] = (perChapter[lesson.chapter] ?? 0) + 1;
       }
@@ -99,7 +100,11 @@ void main() {
           reason: '${tutorial.id} objective',
         );
         expect(lesson.pitfalls, isNotEmpty, reason: '${tutorial.id} pitfalls');
-        expect(lesson.exercises, isNotEmpty, reason: '${tutorial.id} exercises');
+        expect(
+          lesson.exercises,
+          isNotEmpty,
+          reason: '${tutorial.id} exercises',
+        );
         expect(tutorial.concepts, isNotEmpty, reason: tutorial.id);
       }
     });
@@ -122,7 +127,10 @@ void main() {
 
     test('lesson and example summaries are distinct after normalization', () {
       final lessonSummaries = catalog.tutorials
-          .map((t) => t.lessons.first.summary.replaceAll(RegExp(r'\s+'), ' ').trim())
+          .map(
+            (t) =>
+                t.lessons.first.summary.replaceAll(RegExp(r'\s+'), ' ').trim(),
+          )
           .toList();
       expect(lessonSummaries.toSet(), hasLength(120));
       final exampleSummaries = catalog.examples
@@ -234,9 +242,7 @@ void main() {
     test('no whitelist lesson body contradicts its engine note', () {
       // A dart_eval-verified lesson must not still say, in its authored prose,
       // that it requires the official SDK.
-      final contradictory = RegExp(
-        r'需要官方 Dart SDK|必须在官方|在官方 Dart SDK 引擎上运行',
-      );
+      final contradictory = RegExp(r'需要官方 Dart SDK|必须在官方|在官方 Dart SDK 引擎上运行');
       for (final tutorial in catalog.tutorials) {
         if (!DartCurriculum.dartEvalVerifiedIds.contains(tutorial.id)) continue;
         final explain = tutorial.lessons.first.explain;
@@ -251,23 +257,26 @@ void main() {
   });
 
   group('adapter projection (what the pages actually render)', () {
-    test('adapter yields 120 lessons with the new Chinese runtime labels', () async {
-      final previous = StudioProfile.current;
-      StudioProfile.current = null;
-      addTearDown(() => StudioProfile.current = previous);
+    test(
+      'adapter yields 120 lessons with the new Chinese runtime labels',
+      () async {
+        final previous = StudioProfile.current;
+        StudioProfile.current = null;
+        addTearDown(() => StudioProfile.current = previous);
 
-      final tutorial = await LocalContentAdapter.loadTutorial(
-        repository: DartContentRepository(),
-        language: 'dart',
-        displayName: 'Dart',
-      );
-      expect(tutorial, isNotNull);
-      expect(tutorial!.lessonCount, 120);
-      final first = tutorial.allLessons.first;
-      expect(first.objective.trim(), isNotEmpty);
-      expect(first.pitfalls, isNotEmpty);
-      expect(first.explain.trim(), isNotEmpty);
-    });
+        final tutorial = await LocalContentAdapter.loadTutorial(
+          repository: DartContentRepository(),
+          language: 'dart',
+          displayName: 'Dart',
+        );
+        expect(tutorial, isNotNull);
+        expect(tutorial!.lessonCount, 120);
+        final first = tutorial.allLessons.first;
+        expect(first.objective.trim(), isNotEmpty);
+        expect(first.pitfalls, isNotEmpty);
+        expect(first.explain.trim(), isNotEmpty);
+      },
+    );
 
     test('adapter yields 120 examples', () async {
       final examples = await LocalContentAdapter.loadExamples(

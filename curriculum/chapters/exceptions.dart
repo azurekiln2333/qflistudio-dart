@@ -18,7 +18,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       'finally 里 return 会吞掉 try 的返回值或异常，尽量避免。',
       '只写空的 catch 会静默吞错，至少记录或重新抛出。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  try {\n"
         "    final result = int.parse('abc');\n"
         "    print(result);\n"
@@ -34,7 +35,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       DartExercise(
         prompt: "用 try/catch 安全地对 '42' 和 'x' 做 int.parse。",
         hint: '循环里逐个 try。',
-        answer: "for (final s in ['42', 'x']) {\n"
+        answer:
+            "for (final s in ['42', 'x']) {\n"
             "  try {\n"
             "    print(int.parse(s));\n"
             "  } on FormatException {\n"
@@ -61,7 +63,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       '不要用 Exception 当万能类型，具体异常更利于分类处理。',
       'Error 表示程序缺陷，通常不应被业务代码捕获，业务异常用 Exception。',
     ],
-    code: "class ValidationException implements Exception {\n"
+    code:
+        "class ValidationException implements Exception {\n"
         "  const ValidationException(this.field, this.reason);\n"
         "  final String field;\n"
         "  final String reason;\n"
@@ -88,7 +91,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       DartExercise(
         prompt: '定义 NotPositiveException，写函数要求参数 > 0，否则抛出。',
         hint: 'implements Exception。',
-        answer: "class NotPositiveException implements Exception {}\n"
+        answer:
+            "class NotPositiveException implements Exception {}\n"
             "void check(int n) {\n"
             "  if (n <= 0) throw NotPositiveException();\n"
             "}",
@@ -112,7 +116,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       '把 on FormatException 放在 on Exception 之后会永远不命中。',
       'throw e 会重置栈追踪，应优先用 rethrow。',
     ],
-    code: "int parsePositive(String s) {\n"
+    code:
+        "int parsePositive(String s) {\n"
         "  final value = int.parse(s);\n"
         "  if (value <= 0) throw ArgumentError('必须为正');\n"
         "  return value;\n"
@@ -136,7 +141,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       DartExercise(
         prompt: '写 safeDivide(a, b)，b 为 0 时抛 ArgumentError 并在调用处捕获。',
         hint: 'throw ArgumentError 后 try/catch。',
-        answer: "double safeDivide(int a, int b) {\n"
+        answer:
+            "double safeDivide(int a, int b) {\n"
             "  if (b == 0) throw ArgumentError('除数不能为 0');\n"
             "  return a / b;\n"
             "}",
@@ -161,7 +167,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       'catch (e) 会连 Error 一起吞掉，掩盖真正的程序缺陷。',
       '把业务异常定义成 Error 会被调用方忽略，应使用 Exception。',
     ],
-    code: "void main() {\n"
+    code:
+        "void main() {\n"
         "  try {\n"
         "    final list = <int>[1, 2, 3];\n"
         "    print(list[5]);\n"
@@ -203,7 +210,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       '结果类型会让调用链变长，简单场景用异常更直接。',
       '既要显式处理又用了 Result，却忘了判 ok 就访问 value，会抛异常。',
     ],
-    code: "sealed class Result<T> {\n"
+    code:
+        "sealed class Result<T> {\n"
         "  const Result();\n"
         "}\n"
         "\n"
@@ -239,7 +247,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       DartExercise(
         prompt: '写 Result<double> divide(a, b)，b 为 0 返回 Err。',
         hint: '用 Ok/Err 包装。',
-        answer: "Result<double> divide(double a, double b) =>\n"
+        answer:
+            "Result<double> divide(double a, double b) =>\n"
             "    b == 0 ? const Err('除数为 0') : Ok(a / b);",
       ),
     ],
@@ -261,7 +270,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       '遇到第一处错误就中断会丢失后续信息，收集错误更友好。',
       '静默跳过非法行会让用户以为配置生效了，应显式列出。',
     ],
-    code: "class ConfigResult {\n"
+    code:
+        "class ConfigResult {\n"
         "  ConfigResult(this.values, this.errors);\n"
         "  final Map<String, String> values;\n"
         "  final List<String> errors;\n"
@@ -301,7 +311,8 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
       DartExercise(
         prompt: '给解析器加一层校验：缺 port 时在 errors 里加一条提示。',
         hint: "解析后检查 values.containsKey('port')。",
-        answer: "if (!values.containsKey('port')) {\n"
+        answer:
+            "if (!values.containsKey('port')) {\n"
             "  errors.add('缺少必填项：port');\n"
             "}",
       ),
