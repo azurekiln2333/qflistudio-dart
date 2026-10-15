@@ -117,6 +117,10 @@ Android layout and is not verified as a runnable entry.
 - `native` run cancellation kills the VM (`SIGTERM`, then `SIGKILL` after 3 s) and
   reports exit **130**. Portable cancellation kills the worker isolate and reports
   **130**. `kProgramNotRunExitCode` (127) is used when the program never started.
+- The shared shell clears `lastExitCode` on interruption and emits `^C`; neither
+  terminal surface promises to display the runner's cancellation code. Verify
+  the runner's 130 separately, then verify that the shell releases its busy state
+  and can execute another command.
 - `dartTerminalDelegate` awaits `runStreams` before returning, so the sandbox's
   `busy` state spans the whole command and Stop stays wired for its duration.
 
@@ -135,7 +139,7 @@ Android layout and is not verified as a runnable entry.
 | `compile kernel` on a portable target | honest "no official SDK; portable only runs" |
 | Compile failure | `编译失败：<stderr>`, no success line |
 | Program runtime failure | native stderr + native nonzero exit code |
-| Stop during a run | VM/worker terminated; exit 130; pipe released |
+| Stop during a run | VM/worker terminated; runner returns 130; shell emits `^C`, clears status and releases busy state |
 | `.dill` on a portable target | runner returns null → `无法运行 …（该文件类型不受支持）` |
 | `.dart` file on any target | runner accepts it (native or portable) |
 
