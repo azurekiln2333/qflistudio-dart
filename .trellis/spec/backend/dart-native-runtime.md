@@ -35,6 +35,11 @@ shares concurrent preparation and caches only a successful native version probe.
   The actual VM ELF determines the data ABI, and background Kotlin installation
   creates SDK-native symlinks to installed code. Missing inputs fail packaging;
   unsupported 32-bit targets fail rather than packaging an evaluator.
+- Android Gradle uses the same `target-platform` list for SDK validation,
+  build-type ABI filters and SDK data assets. Flutter supplies build-type ABI
+  defaults, so changing only `defaultConfig.ndk.abiFilters` is insufficient.
+  Inspect the final APK: every advertised ABI must contain `libflutter.so`,
+  `libapp.so` and `libqfli_dartvm.so`; omit unrequested SDK ZIPs/manifests.
 - Android executes dartvm directly, with `--snapshot-kind=kernel` for compilation.
   Its embedded frontend/platform resources avoid launcher-relative discovery.
   Both platforms feed input.txt to stdin and close with EOF when absent.

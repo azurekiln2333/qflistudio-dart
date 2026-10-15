@@ -36,6 +36,13 @@ Stage all requested ABIs before packaging. Unsupported 32-bit targets and
 missing images fail the build. An installed NDK can be selected with the Gradle
 property `qfliDartNdkVersion`; otherwise the Flutter default remains in use.
 
+The requested Flutter targets also select the packaged JNI ABIs and SDK data.
+For an ARM64 release, use `--target-platform android-arm64`. The resulting APK
+must advertise only `arm64-v8a`, with `libflutter.so`, `libapp.so` and
+`libqfli_dartvm.so` present, and must omit the x86_64 SDK ZIP/manifest. A combined
+ARM64/x64 build must contain all three libraries for both ABIs. Check the APK
+itself, because Flutter's build-type filters can override default-config filters.
+
 ## Installed layout and execution
 
 Staging validates every ELF's architecture and 16 KiB LOAD compatibility,
