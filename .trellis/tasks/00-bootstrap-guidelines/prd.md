@@ -21,9 +21,12 @@ the rest conversationally.
 
 ## Status (update the checkboxes as you complete each item)
 
-- [ ] Fill backend guidelines
-- [ ] Fill frontend guidelines
-- [ ] Add code examples
+- [x] Fill backend guidelines
+- [x] Fill frontend guidelines
+- [x] Add code examples
+
+See `.trellis/tasks/10-15-dart-store-release/research/spec-audit.md` for the
+file-by-file evidence and verification record.
 
 ---
 
