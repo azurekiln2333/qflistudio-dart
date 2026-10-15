@@ -21,14 +21,14 @@ project, choose a filename, and open the project with that file selected.
 
 ## Acceptance Criteria
 
-- [ ] Tutorial and example catalog tests prove source code is absent from outer lists.
-- [ ] Details display their actual code and both import commands.
-- [ ] Import to Editor writes a customized filename and opens its project/file.
-- [ ] Import to an existing project writes a customized filename and opens its project/file.
-- [ ] New-project import works from lesson and example details.
-- [ ] Invalid names, cancellation, conflict rejection, and I/O failure cannot be reported as success or open an editor.
-- [ ] Compact and desktop layouts, including enlarged text, have no overlap or overflow.
-- [ ] Meaningful workflow tests and static analysis pass against the actual app/core integration.
+- [x] Tutorial and example catalog tests prove source code is absent from outer lists.
+- [x] Details display their actual code and both import commands.
+- [x] Import to Editor writes a customized filename and opens its project/file.
+- [x] Import to an existing project writes a customized filename and opens its project/file.
+- [x] New-project import works from lesson and example details.
+- [x] Invalid names, cancellation, conflict rejection, and I/O failure cannot be reported as success or open an editor.
+- [x] Compact and desktop layouts, including enlarged text, have no overlap or overflow.
+- [x] Meaningful workflow tests and static analysis pass against the actual app/core integration.
 
 ## Scope and Constraints
 
@@ -37,3 +37,15 @@ uncommitted edits. The current writable root is `qfli_dart`. Prepare an incremen
 patch against the current core sources inside this task directory, check it, and
 request filesystem approval before applying it to the sibling repository. Preserve
 all existing user changes. The Dart compiler work is a separate ongoing task.
+
+## Release reconciliation — 2026-10-15
+
+Verified against the current source and real assets in
+`10-15-dart-store-release/research/content-audit.md`. Shared-core
+`content_code_import_test.dart`, `home_content_repository_test.dart`,
+`editor_run_test.dart` and `terminal_manager_delegate_test.dart` passed together
+(55 tests). The import suite includes real file writes, exact editor navigation,
+conflict/cancellation/error handling and 320px/1280px layouts at 2x text.
+Existing core content edits owned by other language sessions were preserved.
+All work was committed directly on main, without a PR branch; archive uses the
+documented --skip-branch-validation option.

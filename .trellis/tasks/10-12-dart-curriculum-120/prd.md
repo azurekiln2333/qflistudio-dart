@@ -160,39 +160,39 @@ testing / capstone, and each lesson runs on the real engine the editor uses.
 
 ## Acceptance Criteria
 
-- [ ] AC1: Exactly 120 Dart tutorial entries and 120 Dart example entries in the
+- [x] AC1: Exactly 120 Dart tutorial entries and 120 Dart example entries in the
   repository-owned catalog, with unique ids and titles.
-- [ ] AC2: 120 distinct knowledge points per type; a lesson and its own paired
+- [x] AC2: 120 distinct knowledge points per type; a lesson and its own paired
   example MAY share code, but no two lessons share a knowledge point, and no two
   examples share a knowledge point.
-- [ ] AC3: All 120 lessons have non-empty title/summary/explain/code/output/
+- [x] AC3: All 120 lessons have non-empty title/summary/explain/code/output/
   objective, non-empty pitfalls, non-empty concepts, ≥1 exercise.
-- [ ] AC4: All 120 `explain` values are distinct; normalized lesson code bodies are
+- [x] AC4: All 120 `explain` values are distinct; normalized lesson code bodies are
   distinct; normalized example code bodies are distinct.
-- [ ] AC5: On a host with the Dart SDK, **all 120 lessons and all 120 examples**
+- [x] AC5: On a host with the Dart SDK, **all 120 lessons and all 120 examples**
   compile, execute, and match their declared output; no skip is counted as pass.
-- [ ] AC6: Exactly 120 examples pair 1:1 to the 120 lessons via `sourceLessonId`;
+- [x] AC6: Exactly 120 examples pair 1:1 to the 120 lessons via `sourceLessonId`;
   exactly one introductory Hello-World topic exists.
-- [ ] AC7: Level labels span beginner/intermediate/advanced and match difficulty.
-- [ ] AC8: Dart 3 / async / streams / isolates / IO lessons are labeled as
+- [x] AC7: Level labels span beginner/intermediate/advanced and match difficulty.
+- [x] AC8: Dart 3 / async / streams / isolates / IO lessons are labeled as
   requiring the official SDK engine via rendered fields; none are deleted.
-- [ ] AC9: No placeholder/TODO/ellipsis markers; all 120 counted programs are
+- [x] AC9: No placeholder/TODO/ellipsis markers; all 120 counted programs are
   self-contained (no real stdin, no network); IO lessons use program-created
   temporary files with `finally` cleanup; stdin is explained with the real
   `input.txt` preparation step, with no `inputFixtures` used to fake it.
-- [ ] AC10: Every authored field is displayed by the existing detail pages (no
+- [x] AC10: Every authored field is displayed by the existing detail pages (no
   invisible field, no `engine` key); compatibility is visible in `explain`.
-- [ ] AC11: A `dart_content_test.dart`-style suite loads the real assets and runs
+- [x] AC11: A `dart_content_test.dart`-style suite loads the real assets and runs
   the real `DartProgramRunner`; `flutter analyze --no-pub` and
   `flutter test --no-pub` pass in `qfli_dart`.
-- [ ] AC12: A widget/integration test proves **catalog → detail → import to
+- [x] AC12: A widget/integration test proves **catalog → detail → import to
   editor/project → editor Run** through the existing pages, with no new detail
   Run button.
-- [ ] AC13: The delivered diff changes **only** the two authorized core files
+- [x] AC13: The delivered diff changes **only** the two authorized core files
   (after approval) plus `qfli_dart` files; the legacy
   `core/assets/tutorials/dart.json` and all other-language content are
   byte-identical; pre-existing dirty files are preserved.
-- [ ] AC14: Dart content uses the repository's existing license string, with no
+- [x] AC14: Dart content uses the repository's existing license string, with no
   newly introduced license.
 
 ## Key Decisions
@@ -208,6 +208,20 @@ testing / capstone, and each lesson runs on the real engine the editor uses.
 
 ## Status
 
-Planning complete. **Awaiting final approval of K1a and external-write
-authorization for the two core files.** No implementation or product-code change
-has begun.
+Completed and reverified on 2026-10-15. The local catalog, shared repository
+factory seam, generation and all execution gates are implemented. The current
+release request explicitly authorizes shared-core coordination. See the release
+task research/content-audit.md for 120/120 integrity and 240-program execution
+evidence; target-device execution is tracked separately by the release task.
+
+## Release reconciliation — 2026-10-15
+
+Verified against the current source and real assets in
+`10-15-dart-store-release/research/content-audit.md`. Shared-core
+`content_code_import_test.dart`, `home_content_repository_test.dart`,
+`editor_run_test.dart` and `terminal_manager_delegate_test.dart` passed together
+(55 tests). The import suite includes real file writes, exact editor navigation,
+conflict/cancellation/error handling and 320px/1280px layouts at 2x text.
+Existing core content edits owned by other language sessions were preserved.
+All work was committed directly on main, without a PR branch; archive uses the
+documented --skip-branch-validation option.
