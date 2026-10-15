@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "Local UI batch committed as 4292be0. Full suite 28/28 passed; flutter analyze no issues; format and whitespace checks passed. Final HAP build generated unsigned output only and exited 1 for missing signed HAP. User chose local verification and commit first; retain in_progress for target execution and semantic/compatibility gaps.",
+  "notes": "2026-10-15 release reconciliation supersedes historical28-test baseline: native Android/desktop SDK and portable OHOS paths, both terminals, parser/formatter/compiler/stop tools committed. Dart103/core479 tests pass; Android SDK/terminal16 checks passed on real ARM64. Final ARM64 packaging38e082c built with complete Flutter+VM and no x64 payload; final APK device reinstall queued. OHOS unsigned release builds, but device rejects9568320. Legacy own-bundle profile was recovered and verified; configured matching private keystore remains missing. Keep in_progress for current signed OHOS installation and portable runtime verification. See ../10-15-dart-store-release/research/platform-verification.md.",
   "meta": {}
 }

@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "Release source audit complete: 120 lessons/120 examples real, Dart103/core479 tests green, Android SDK+terminal16 device checks passed. Final Android ARM64 APK153.0MiB and OHOS unsigned HAP39.8MiB built against core 8b33443 snapshot. Final APK reinstallation queued behind Web/Python/SQL; no more Android foreground/install operations. OHOS device rejects unsigned HAP9568320; own legacy DartWing profile recovered but matching configured private keystore is missing. Keep in_progress for signed OHOS execution and final reduced-APK device confirmation. Android store signing also remains required. Exact evidence: research/platform-verification.md.",
   "meta": {}
 }

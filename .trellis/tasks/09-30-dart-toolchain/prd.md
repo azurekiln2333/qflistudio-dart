@@ -22,8 +22,10 @@
 The OHOS device rejected the unsigned package with code 9568320, no signature
 file. The previous machine-specific signing paths did not exist; the available
 profiles bind other applications and cannot sign com.azurekiln.qfli.dartwing.
-A DartWing-specific signing identity is needed before this final criterion can
-be completed. Do not mark this task fully complete from a host test or HAP build.
+A valid own-bundle debug profile was recovered from the historical signed HAP,
+but its configured private keystore file is missing and available local signing
+certificates do not match it. A matching or newly provisioned DartWing signing
+identity is needed. Do not mark this task fully complete from a host test or HAP build.
 
 ## Engine limits
 OHOS dart_eval verifies 43/120 curriculum lessons; 77 lessons visibly require

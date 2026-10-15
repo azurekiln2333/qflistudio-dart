@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/dart-native-runtime.md", "reason": "Native versus portable runner and packaging contracts"}
+{"file": ".trellis/spec/frontend/dart-terminal.md", "reason": "Both terminal surfaces use one profile delegate"}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/dart-native-runtime.md", "reason": "Keep host, build and target runtime evidence separate"}
+{"file": ".trellis/tasks/10-15-dart-store-release/research/platform-verification.md", "reason": "Exact current verification results and outstanding signing gate"}

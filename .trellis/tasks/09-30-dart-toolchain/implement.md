@@ -10,8 +10,9 @@
 - [x] Build Android release and verify the official VM on the physical ARM64 device.
 - [x] Build OHOS release unsigned; remove unused network/account/webview packaging.
 - [x] Commit validated changes with Conventional Commits.
-- [ ] Supply a DartWing-specific OHOS signing profile, install and execute representative
-  portable-engine programs. Device currently rejects the unsigned HAP (9568320).
+- [ ] Restore a matching DartWing OHOS signing identity, install and execute
+  representative portable-engine programs. Device rejects unsigned HAP (9568320);
+  the recovered own-bundle legacy profile has no matching available private key.
 
 See ../10-15-dart-store-release/research/platform-verification.md for current
 evidence. The historical unsigned build and 28-test baseline are superseded by
