@@ -2,11 +2,11 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "module description"
+      "value": "Offline Dart programming, tutorials and examples"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "description"
+      "value": "Dart code editor and local terminal"
     },
     {
       "name": "EntryAbility_label",

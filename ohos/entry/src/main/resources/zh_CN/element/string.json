@@ -2,11 +2,11 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "模块描述"
+      "value": "离线 Dart 编程、教程与示例"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "description"
+      "value": "Dart 代码编辑器与本地终端"
     },
     {
       "name": "EntryAbility_label",
