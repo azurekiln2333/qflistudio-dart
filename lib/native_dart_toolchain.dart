@@ -59,6 +59,46 @@ class NativeDartToolchain {
     throw StateError('没有找到 Dart SDK，请配置本地 SDK。');
   }
 
+  /// The VM/CLI arguments for running [entry].
+  ///
+  /// On Android [resolveExecutable] returns the raw `dartvm`, which takes the
+  /// script as its positional operand; the desktop `dart` CLI is invoked the
+  /// same way (a bare script operand is the documented run shorthand), so no
+  /// CLI subcommand is ever passed. Exposed for the mobile argument regression.
+  static List<String> buildRunArguments({
+    required String entry,
+    String? packageConfig,
+  }) => [
+    '--disable-dart-dev',
+    if (packageConfig != null) '--packages=$packageConfig',
+    entry,
+  ];
+
+  /// The VM/CLI arguments for compiling [entry] to Kernel at [artifact].
+  ///
+  /// Android's `dartvm` compiles through `--snapshot-kind=kernel`; the desktop
+  /// `dart` CLI uses the `compile kernel` subcommand. Neither is a CLI
+  /// subcommand handed to the VM on Android. Exposed for the mobile argument
+  /// regression.
+  static List<String> buildKernelArguments({
+    required String entry,
+    required String artifact,
+    String? packageConfig,
+    required bool android,
+  }) => [
+    if (android) ...[
+      '--disable-dart-dev',
+      '--snapshot-kind=kernel',
+      '--snapshot=$artifact',
+    ] else ...[
+      'compile',
+      'kernel',
+    ],
+    if (packageConfig != null) '--packages=$packageConfig',
+    entry,
+    if (!android) ...['-o', artifact],
+  ];
+
   Future<ProgramRunResult> run({
     required String projectPath,
     required String entryFile,
@@ -70,11 +110,7 @@ class NativeDartToolchain {
     try {
       process = await Process.start(
         sdk,
-        [
-          '--disable-dart-dev',
-          if (packages.path != null) '--packages=${packages.path}',
-          entry,
-        ],
+        buildRunArguments(entry: entry, packageConfig: packages.path),
         workingDirectory: p.absolute(projectPath),
         environment: Platform.isAndroid
             ? (await AndroidDartSdk.prepare()).environment
@@ -116,78 +152,41 @@ class NativeDartToolchain {
     );
   }
 
-  /// Runs the SDK with [arguments] inside [workingDirectory].
+  /// The SDK version string, probed from the real executable.
   ///
-  /// Used by the terminal's `dart` hook so an interactive command such as
-  /// `dart run src/main.dart`, `dart --version` or `dart analyze` reaches the
-  /// official VM/CLI with the sandbox session's real working directory.
-  /// [workingDirectory] is the containment root: the process must not silently
-  /// start somewhere else, so a missing directory fails like the SDK does.
-  ///
-  /// Refuses the flag forms that would let a caller reload packages from
-  /// another location, write a snapshot outside the project or open a network
-  /// service. This is deliberately enforced here as well as in the terminal
-  /// policy, so a future caller cannot silently bypass it.
-  Future<ProgramRunResult> runCommand({
-    required String workingDirectory,
-    required List<String> arguments,
-  }) async {
-    final forbidden = _forbiddenFlag(arguments);
-    if (forbidden != null) {
-      throw ArgumentError.value(arguments, 'arguments', forbidden);
-    }
+  /// The raw VM accepts `--version` on every platform (Android `dartvm` and the
+  /// desktop `dart`), so this is the one CLI-shaped request the terminal can
+  /// forward safely.
+  Future<String> version() async {
     final sdk = await resolveExecutable();
-    final root = p.normalize(p.absolute(workingDirectory));
-    if (!await Directory(root).exists()) {
-      throw FileSystemException('工作目录不存在', root);
-    }
-    final packages = await _packages(root);
-    late final Process process;
-    try {
-      process = await Process.start(
-        sdk,
-        [
-          '--disable-dart-dev',
-          if (packages.path != null) '--packages=${packages.path}',
-          ...arguments,
-        ],
-        workingDirectory: root,
-        environment: Platform.isAndroid
-            ? (await AndroidDartSdk.prepare()).environment
-            : null,
-      );
-    } catch (_) {
-      await packages.dispose();
-      rethrow;
-    }
-    unawaited(_feedInput(process.stdin, File(p.join(root, 'input.txt'))));
-    var finished = false;
-    var cancelled = false;
-    final status = process.exitCode.then((code) async {
-      finished = true;
-      await packages.dispose();
-      return cancelled ? 130 : code;
-    });
-    return ProgramRunResult(
-      title: 'dart ${arguments.join(' ')}'.trim(),
-      stdout: process.stdout
-          .transform(const Utf8Decoder(allowMalformed: true))
-          .transform(const LineSplitter()),
-      stderr: process.stderr
-          .transform(const Utf8Decoder(allowMalformed: true))
-          .transform(const LineSplitter()),
-      exitCode: status,
-      cancel: () async {
-        if (finished) return;
-        cancelled = process.kill();
-        try {
-          await status.timeout(const Duration(seconds: 3));
-        } on TimeoutException {
-          cancelled = process.kill(ProcessSignal.sigkill) || cancelled;
-          await status;
-        }
-      },
+    final process = await Process.start(
+      sdk,
+      ['--version'],
+      workingDirectory: await _sdkWorkingDirectory(),
+      environment: Platform.isAndroid
+          ? (await AndroidDartSdk.prepare()).environment
+          : null,
     );
+    unawaited(process.stdin.close());
+    final stdout = process.stdout
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .join();
+    final stderr = process.stderr
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .join();
+    final code = await process.exitCode.timeout(const Duration(seconds: 30));
+    final text = '${await stdout}\n${await stderr}'.trim();
+    if (code != 0 || text.isEmpty) {
+      throw StateError('无法读取 Dart SDK 版本：$text');
+    }
+    return text;
+  }
+
+  /// A directory the SDK probe may start in. Android needs the SDK home (its
+  /// `tmp` lives there); other platforms are fine in the process directory.
+  Future<String> _sdkWorkingDirectory() async {
+    if (Platform.isAndroid) return (await AndroidDartSdk.prepare()).home;
+    return Directory.current.path;
   }
 
   Future<Uint8List> compileKernel({
@@ -202,19 +201,12 @@ class NativeDartToolchain {
       final artifact = File(p.join(output.path, 'program.dill'));
       final process = await Process.start(
         sdk,
-        [
-          if (Platform.isAndroid) ...[
-            '--disable-dart-dev',
-            '--snapshot-kind=kernel',
-            '--snapshot=${artifact.path}',
-          ] else ...[
-            'compile',
-            'kernel',
-          ],
-          if (packages.path != null) '--packages=${packages.path}',
-          entry,
-          if (!Platform.isAndroid) ...['-o', artifact.path],
-        ],
+        buildKernelArguments(
+          entry: entry,
+          artifact: artifact.path,
+          packageConfig: packages.path,
+          android: Platform.isAndroid,
+        ),
         workingDirectory: p.absolute(projectPath),
         environment: Platform.isAndroid
             ? (await AndroidDartSdk.prepare()).environment
@@ -265,28 +257,6 @@ class NativeDartToolchain {
       throw ArgumentError.value(entryFile, 'entryFile', '入口文件不在项目目录内');
     }
     return entry;
-  }
-
-  /// A refusal reason when [arguments] contains a flag that would let the
-  /// runtime leave the project or open a network service, or null when safe.
-  static String? _forbiddenFlag(List<String> arguments) {
-    const forbidden = <String>[
-      '--packages',
-      '--packages-file',
-      '--snapshot',
-      '--snapshot-kind',
-      '--enable-vm-service',
-      '--observe',
-      '--disable-service-auth-codes',
-    ];
-    for (final argument in arguments) {
-      for (final flag in forbidden) {
-        if (argument == flag || argument.startsWith('$flag=')) {
-          return 'refused runtime flag $flag';
-        }
-      }
-    }
-    return null;
   }
 
   static Future<_PackageConfiguration> _packages(String projectPath) async {

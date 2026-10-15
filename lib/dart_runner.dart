@@ -12,129 +12,30 @@ import 'package:qfli_studio_core/terminal/shell/command_parser.dart';
 import 'package:qfli_studio_core/terminal/shell/sandbox_shell_backend.dart';
 
 import 'dart_project_sources.dart';
+import 'dart_tools.dart';
 import 'native_dart_toolchain.dart';
-
-/// Offline policy for the terminal's `dart` hook.
-///
-/// The Dart app is an offline product: the embedded terminal must never reach
-/// the network or act outside the sandbox project. The official CLI exposes
-/// both (`dart pub get` downloads packages; `--packages=`, `--snapshot=` and
-/// `--enable-vm-service` let a caller redirect loading or open a listener), so
-/// the hook only claims an explicit allowlist of local subcommands and rejects
-/// the flag forms that would redefine them.
-///
-/// Pure so it can be unit-tested without spawning a process or a backend.
-abstract final class DartTerminalPolicy {
-  /// Subcommands the offline terminal may run. Everything else is refused,
-  /// including all of `dart pub` (package management is a network feature),
-  /// `dart create`/`dart test` (may resolve dependencies) and any future
-  /// command this app has not vetted.
-  static const Set<String> allowedSubcommands = <String>{
-    'run',
-    'compile',
-    'format',
-    'analyze',
-    'fix',
-    'help',
-  };
-
-  /// Top-level `dart` options the offline hook still permits. They only print
-  /// local information; everything else starting with `-` is refused so a VM
-  /// flag cannot redefine package loading, write outside the project or open a
-  /// network service (e.g. `--packages=`, `--snapshot=`, `--enable-vm-service`).
-  static const Set<String> allowedTopLevelOptions = <String>{
-    '--version',
-    '-v',
-    '--help',
-    '-h',
-    '--disable-analytics',
-  };
-
-  /// The subcommand token for [arguments], or null when the line is refused.
-  ///
-  /// A leading allowed option (e.g. `dart --version`) is recognised before the
-  /// subcommand check, so `dart --version` passes while `dart --snapshot=x run`
-  /// does not. A bare `.dart`/`.dill` operand (the `dart <script>` shorthand)
-  /// is reported as `run`, because that is what the VM does with it.
-  static String? subcommand(List<String> arguments) {
-    if (arguments.isEmpty) return null;
-    final first = arguments.first;
-    if (!first.startsWith('-')) {
-      if (allowedSubcommands.contains(first)) return first;
-      return _scriptOperand(first) ? 'run' : null;
-    }
-    return allowedTopLevelOptions.contains(first) ? first : null;
-  }
-
-  /// A human-readable refusal reason for [arguments], or null when allowed.
-  static String? reject(List<String> arguments) {
-    if (arguments.isEmpty) {
-      return '请在命令中给出子命令（例如 dart run src/main.dart）。';
-    }
-    final first = arguments.first;
-    if (first.startsWith('-')) {
-      if (allowedTopLevelOptions.contains(first)) return null;
-      return '离线版终端不接受 VM 参数 $first；只允许 dart run/compile/format/analyze/fix/--version。';
-    }
-    if (first == 'pub' || first == 'global') {
-      return '离线版终端禁用 dart $first：包管理与发布需要网络。';
-    }
-    // `dart <script.dart>` is the VM's run shorthand; keep it available so the
-    // terminal behaves like the CLI for the most common local command.
-    if (!allowedSubcommands.contains(first) && !_scriptOperand(first)) {
-      return '离线版终端不支持 dart $first；只允许 dart run/compile/format/analyze/fix/--version。';
-    }
-    // `dart run/compile ...` must not let the VM reload packages from another
-    // location or write a snapshot outside the sandbox, so refuse any embedded
-    // `--packages=`/`--snapshot=`/observatory flag in the remaining operands.
-    for (final argument in arguments.skip(1)) {
-      final forbidden = _forbiddenFlag(argument);
-      if (forbidden != null) return forbidden;
-    }
-    return null;
-  }
-
-  static bool _scriptOperand(String token) {
-    final lower = token.toLowerCase();
-    return lower.endsWith('.dart') || lower.endsWith('.dill');
-  }
-
-  static String? _forbiddenFlag(String argument) {
-    if (!argument.startsWith('-')) return null;
-    const forbidden = <String>[
-      '--packages',
-      '--packages-file',
-      '--snapshot',
-      '--snapshot-kind',
-      '--enable-vm-service',
-      '--observe',
-      '--disable-service-auth-codes',
-      '--enable-asserts',
-    ];
-    for (final flag in forbidden) {
-      if (argument == flag || argument.startsWith('$flag=')) {
-        return '离线版终端禁用 $flag：它会让运行时越过项目或打开网络服务。';
-      }
-    }
-    return null;
-  }
-}
 
 /// Terminal hook for the Dart toolchain.
 ///
-/// Claims a plain `dart <...>` line and routes it through the official SDK in
-/// the terminal session's real working directory, streaming stdout, stderr and
-/// the native exit status back into the sandbox. Returns false for anything
-/// else so the sandbox reports its own honest message.
+/// Routes a plain `dart` line onto the same already-verified code paths the
+/// editor Run button uses, in the terminal session's working directory. The
+/// raw VM (`dartvm`) cannot accept CLI subcommands (`dartvm run x.dart` treats
+/// `run` as a script name), so no subcommand is ever handed to the VM directly:
 ///
-/// The sandbox always classifies with a literal backslash (Windows path
-/// separator), so tokenize the same way; a `C:\dir` operand must not be
-/// mangled. Compound lines (pipes/redirection/chaining/globs) are deliberately
-/// **not** claimed: the sandbox cannot evaluate them, so they must fall through
-/// to the sandbox's construct message instead of being misread as arguments.
+/// - `dart run <file.dart>` / `dart <file.dart>` -> [DartProgramRunner.run]
+///   (native VM on desktop/Android with packages + input; portable `dart_eval`
+///   on OHOS/iOS/web).
+/// - `dart run <file.dill>` -> the same runner's native compiled-program path.
+/// - `dart compile kernel <file.dart>` -> [NativeDartToolchain.compileKernel],
+///   saving the artifact beside the source and pointing at `dart run`.
+/// - `dart format <file>` -> [DartTools.format], written in place.
+/// - `dart analyze` -> [DartTools.syntaxDiagnostics] (scanner/parser level).
+/// - `dart --version` -> the real SDK version.
 ///
-/// On platforms without the native toolchain (portable dart_eval targets) the
-/// hook reports the platform limitation instead of silently doing nothing.
+/// `dart pub`/`dart global` are refused (an offline product has no network).
+/// Flags other than the ones parsed here are not forwarded, so no VM flag can
+/// reload packages elsewhere or open a port. Returns false for anything that is
+/// not a `dart` line so the sandbox keeps its own honest message.
 Future<bool> dartTerminalDelegate(
   SandboxShellBackend backend,
   String command,
@@ -149,73 +50,297 @@ Future<bool> dartTerminalDelegate(
   final tokens = parsed.tokens.map((token) => token.text).toList();
   if (tokens.first != 'dart') return false;
   final arguments = tokens.sublist(1);
-  final refusal = DartTerminalPolicy.reject(arguments);
-  if (refusal != null) {
-    backend.error('dart: $refusal');
+  if (arguments.isEmpty) {
+    backend.error('dart: 请在命令中给出子命令（例如 dart run src/main.dart）。');
     return true;
   }
-  if (!NativeDartToolchain.supported) {
-    backend.error('dart: 当前平台没有官方 Dart SDK，无法执行该命令（便携运行时只支持编辑器运行按钮）。');
+
+  final verb = arguments.first;
+  if (verb == 'pub' || verb == 'global') {
+    backend.error('dart: 离线版终端禁用 dart $verb（包管理与发布需要网络）。');
     return true;
   }
-  // Reject a path operand that would leave the sandbox before spawning, so a
-  // `dart run /somewhere/else/main.dart` cannot read a project the session is
-  // not confined to.
-  if (!_withinSandbox(backend, arguments)) {
+  if (verb == '--version' || verb == '-v') {
+    await _runVersion(backend);
     return true;
   }
-  final ProgramRunResult run;
-  try {
-    run = await const NativeDartToolchain().runCommand(
-      workingDirectory: backend.cwd,
-      arguments: arguments,
-    );
-  } on StateError catch (error) {
-    backend.error('dart: ${error.message}');
-    return true;
-  } on ArgumentError catch (error) {
-    backend.error('dart: ${error.message}');
-    return true;
-  } on FileSystemException catch (error) {
-    backend.error('dart: ${error.message}');
-    return true;
-  } on ProcessException catch (error) {
-    backend.error('dart: ${error.message}');
+  if (verb == '--help' || verb == '-h' || verb == 'help') {
+    backend.line(dartTerminalHelp);
     return true;
   }
-  await backend.runStreams(
-    title: run.title,
-    stdout: run.stdout,
-    stderr: run.stderr,
-    exitCode: run.exitCode,
-    cancel: run.cancel,
+  if (verb == 'run' || _isScript(verb)) {
+    await _runScript(backend, arguments, shorthand: verb != 'run');
+    return true;
+  }
+  if (verb == 'compile') {
+    await _runCompile(backend, arguments.skip(1).toList());
+    return true;
+  }
+  if (verb == 'format') {
+    await _runFormat(backend, arguments.skip(1).toList());
+    return true;
+  }
+  if (verb == 'analyze') {
+    await _runAnalyze(backend, arguments.skip(1).toList());
+    return true;
+  }
+  backend.error(
+    'dart: 离线版终端不支持 dart $verb；支持 run/compile/format/analyze/--version。',
   );
   return true;
 }
 
-/// True when every path-looking operand stays inside the sandbox root.
+/// Help text listing exactly what the terminal hook implements.
+const String dartTerminalHelp =
+    'dart（本地 SDK，离线）\n'
+    '  dart run <文件.dart>            运行源文件（与编辑器运行按钮相同）\n'
+    '  dart <文件.dart>               运行源文件的简写\n'
+    '  dart run <文件.dill>           运行已编译的 Kernel 产物\n'
+    '  dart compile kernel <文件.dart>  编译为 build/<入口>.dill\n'
+    '  dart format <文件>             就地格式化\n'
+    '  dart analyze                   语法检查（扫描/解析级，非语义分析）\n'
+    '  dart --version                 显示 SDK 版本\n'
+    'dart pub / dart global 等联网命令在离线版被禁用。';
+
+bool _isScript(String token) {
+  final lower = token.toLowerCase();
+  return lower.endsWith('.dart') || lower.endsWith('.dill');
+}
+
+/// The single non-flag operand of a `run`/shorthand line, or a message.
 ///
-/// Flags are skipped (the policy already vetted their names) and so are plain
-/// words that are not files; only `dart:...` URIs and actual escapes are
-/// refused. Emits the reason itself when it refuses.
-bool _withinSandbox(SandboxShellBackend backend, List<String> arguments) {
-  for (final argument in arguments.skip(1)) {
-    if (argument.startsWith('-')) continue;
-    if (argument.contains('://')) continue;
-    if (!argument.contains('/') &&
-        !argument.contains(r'\') &&
-        !argument.endsWith('.dart') &&
-        !argument.endsWith('.dill')) {
-      continue;
+/// Returns the path when exactly one file operand is present; otherwise reports
+/// the usage error and returns null.
+Future<String?> _singleFileOperand(
+  SandboxShellBackend backend,
+  List<String> operands,
+  String usage,
+) async {
+  if (operands.length != 1) {
+    backend.error('dart: 用法：$usage');
+    return null;
+  }
+  final operand = operands.single;
+  if (operand.startsWith('-')) {
+    backend.error('dart: 离线版终端不接受参数 $operand。');
+    return null;
+  }
+  return backend.resolveSandboxPath(operand);
+}
+
+Future<void> _runScript(
+  SandboxShellBackend backend,
+  List<String> arguments, {
+  required bool shorthand,
+}) async {
+  final operands = shorthand ? arguments : arguments.skip(1).toList();
+  final String path;
+  try {
+    final resolved = await _singleFileOperand(
+      backend,
+      operands,
+      'dart ${shorthand ? '<文件.dart>' : 'run <文件.dart>'}',
+    );
+    if (resolved == null) return;
+    path = resolved;
+  } on SandboxEscapeException {
+    backend.error('dart: 不能越出沙盒目录：${operands.single}');
+    return;
+  }
+  if (!await File(path).exists()) {
+    backend.error('dart: 文件不存在：${operands.single}');
+    return;
+  }
+  await _stream(
+    backend,
+    () => const DartProgramRunner().run(
+      projectPath: backend.cwd,
+      entryFile: path,
+    ),
+    fallbackMessage: 'dart: 无法运行 ${operands.single}（该文件类型不受支持）。',
+  );
+}
+
+Future<void> _runCompile(
+  SandboxShellBackend backend,
+  List<String> arguments,
+) async {
+  if (arguments.isEmpty || arguments.first != 'kernel') {
+    // `dart compile exe/js/wasm` are not available offline (native target or
+    // downloads); keep the honest message instead of a partial implementation.
+    backend.error('dart: 离线版终端只支持 dart compile kernel <文件.dart>。');
+    return;
+  }
+  if (!NativeDartToolchain.supported) {
+    backend.error('dart: 当前平台没有官方 Dart SDK，无法编译 Kernel（便携运行时只支持直接运行）。');
+    return;
+  }
+  final operands = arguments.skip(1).toList();
+  final String path;
+  try {
+    final resolved = await _singleFileOperand(
+      backend,
+      operands,
+      'dart compile kernel <文件.dart>',
+    );
+    if (resolved == null) return;
+    path = resolved;
+  } on SandboxEscapeException {
+    backend.error('dart: 不能越出沙盒目录：${operands.single}');
+    return;
+  }
+  final relative = p.relative(path, from: backend.cwd);
+  final artifact = File(
+    p.join(backend.cwd, 'build', '${p.withoutExtension(relative)}.dill'),
+  );
+  backend.line(
+    '编译 $relative -> ${p.relative(artifact.path, from: backend.cwd)}',
+  );
+  try {
+    final bytes = await const NativeDartToolchain().compileKernel(
+      projectPath: backend.cwd,
+      entryFile: path,
+    );
+    await artifact.parent.create(recursive: true);
+    await artifact.writeAsBytes(bytes, flush: true);
+    backend.line(
+      '已生成 ${p.relative(artifact.path, from: backend.cwd)}；用 dart run 运行该 .dill。',
+    );
+  } on StateError catch (error) {
+    backend.error('dart: 编译失败：${error.message}');
+  } on FileSystemException catch (error) {
+    backend.error('dart: 编译失败：${error.message}');
+  }
+}
+
+Future<void> _runFormat(
+  SandboxShellBackend backend,
+  List<String> arguments,
+) async {
+  if (arguments.isEmpty) {
+    backend.error('dart: 用法：dart format <文件.dart>');
+    return;
+  }
+  for (final operand in arguments) {
+    if (operand.startsWith('-')) {
+      backend.error('dart: 离线版终端不接受参数 $operand。');
+      return;
+    }
+    final String path;
+    try {
+      path = backend.resolveSandboxPath(operand);
+    } on SandboxEscapeException {
+      backend.error('dart: 不能越出沙盒目录：$operand');
+      return;
+    }
+    final file = File(path);
+    if (!await file.exists()) {
+      backend.error('dart: 文件不存在：$operand');
+      return;
     }
     try {
-      backend.resolveSandboxPath(argument);
-    } on SandboxEscapeException {
-      backend.error('dart: 不能越出沙盒目录: $argument');
-      return false;
+      final formatted = DartTools.format(await file.readAsString());
+      await file.writeAsString(formatted, flush: true);
+      backend.line('已格式化 $operand');
+    } on Object catch (error) {
+      backend.error('dart: 格式化失败：$error');
+      return;
     }
   }
-  return true;
+}
+
+Future<void> _runAnalyze(
+  SandboxShellBackend backend,
+  List<String> arguments,
+) async {
+  final targets = arguments.isEmpty ? <String>[backend.cwd] : arguments;
+  for (final target in targets) {
+    if (target.startsWith('-')) {
+      backend.error('dart: 离线版终端不接受参数 $target。');
+      return;
+    }
+    final String path;
+    try {
+      path = backend.resolveSandboxPath(target);
+    } on SandboxEscapeException {
+      backend.error('dart: 不能越出沙盒目录：$target');
+      return;
+    }
+    final entity = FileSystemEntity.typeSync(path);
+    if (entity == FileSystemEntityType.notFound) {
+      backend.error('dart: 路径不存在：$target');
+      return;
+    }
+    final files = entity == FileSystemEntityType.directory
+        ? _dartFilesUnder(Directory(path))
+        : <String>[path];
+    var issues = 0;
+    for (final file in files) {
+      final diagnostics = DartTools.syntaxDiagnostics(
+        await File(file).readAsString(),
+      );
+      for (final diagnostic in diagnostics) {
+        issues++;
+        backend.error(
+          '${p.relative(file, from: backend.cwd)}:${diagnostic.line}:${diagnostic.column}: '
+          '${diagnostic.message} (${diagnostic.code})',
+        );
+      }
+    }
+    backend.line(
+      issues == 0
+          ? '${p.relative(path, from: backend.cwd)}: 没有语法错误（语法检查）'
+          : '语法检查完成：$issues 个问题（扫描/解析级，未做语义与依赖分析）',
+    );
+  }
+}
+
+List<String> _dartFilesUnder(Directory directory) {
+  final result = <String>[];
+  for (final entity in directory.listSync(followLinks: false)) {
+    final name = p.basename(entity.path);
+    if (name.startsWith('.') || name == 'build') continue;
+    if (entity is Directory) {
+      result.addAll(_dartFilesUnder(entity));
+    } else if (entity is File && p.extension(name).toLowerCase() == '.dart') {
+      result.add(entity.path);
+    }
+  }
+  return result;
+}
+
+Future<void> _runVersion(SandboxShellBackend backend) async {
+  try {
+    final version = await const NativeDartToolchain().version();
+    backend.line(version);
+  } on Object catch (error) {
+    backend.error('dart: 无法获取 SDK 版本：$error');
+  }
+}
+
+/// Streams a runner result into the backend, or reports [fallbackMessage] when
+/// the runner declined the file (returned null).
+Future<void> _stream(
+  SandboxShellBackend backend,
+  Future<ProgramRunResult?> Function() run, {
+  required String fallbackMessage,
+}) async {
+  try {
+    final result = await run();
+    if (result == null) {
+      backend.error(fallbackMessage);
+      return;
+    }
+    await backend.runStreams(
+      title: result.title,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+      cancel: result.cancel,
+    );
+  } on Object catch (error) {
+    backend.error('dart: $error');
+  }
 }
 
 class DartProgramRunner implements ProgramRunner {
