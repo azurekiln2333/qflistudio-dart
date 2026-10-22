@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:qfli_dart/dart_code_analyzer.dart';
 import 'package:qfli_dart/main.dart' show dartProfile;
 import 'package:qfli_studio_core/services/project_templates.dart';
 import 'package:qfli_studio_core/services/runner_service.dart';
@@ -62,6 +63,12 @@ void main() {
       // 钩子行为由 dart_terminal_delegate_test.dart 覆盖，
       // 这里只锁定 main.dart 的档位接线没有丢。
       expect(dartProfile.terminalCommandDelegate, isNotNull);
+    });
+
+    test('工具直接嵌入工具页并接入离线语法诊断', () {
+      expect(dartProfile.toolsTabBuilder, isNotNull);
+      expect(dartProfile.codeAnalyzer, isA<DartCodeAnalyzer>());
+      expect(dartProfile.isOffline, isTrue);
     });
   });
 

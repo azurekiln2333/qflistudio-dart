@@ -12,6 +12,7 @@ import 'package:qfli_studio_core/store/project_store.dart';
 import 'package:qfli_studio_core/store/settings_store.dart';
 
 import 'dart_content_repository.dart';
+import 'dart_code_analyzer.dart';
 import 'dart_runner.dart';
 import 'dart_tools_page.dart';
 import 'native_dart_toolchain.dart';
@@ -28,6 +29,8 @@ final StudioProfile dartProfile = StudioProfile(
   templates: [ProjectTemplate.empty, ProjectTemplate.dart],
   runner: DartProgramRunner(),
   toolsPageBuilder: DartToolsPage.forStore,
+  toolsTabBuilder: DartToolsPage.forTab,
+  codeAnalyzer: const DartCodeAnalyzer(),
   contentRepositoryFactory: DartContentRepository.new,
   isOffline: true,
   // 独立终端与编辑器终端共用同一命令引擎；注入 Dart 档位的命令钩子后，

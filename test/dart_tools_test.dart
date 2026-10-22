@@ -19,7 +19,67 @@ void main() {
     expect(diagnostics, isNotEmpty);
     expect(diagnostics.any((item) => item.line > 1), isTrue);
     expect(diagnostics.every((item) => item.code.isNotEmpty), isTrue);
+    expect(diagnostics.every((item) => item.offset >= 0), isTrue);
   });
+
+  test('AST outline ignores code-shaped comments and strings', () {
+    const source = '''
+import 'dart:math';
+export 'helper.dart';
+// class Fake {}
+const text = 'void imaginary() {}';
+class Meter {
+  int value() => 1;
+  int get size => 2;
+}
+enum Choice { first, second }
+mixin Useful { void work() {} }
+extension TextInfo on String { int count() => length; }
+void main() { print(text); }
+''';
+    final overview = DartTools.sourceOverview(source);
+    expect(overview.directives.map((item) => item.label), [
+      'dart:math',
+      'helper.dart',
+    ]);
+    expect(overview.directives.map((item) => item.kind), ['import', 'export']);
+    expect(overview.outline.map((item) => item.label), [
+      'Meter',
+      'value',
+      'size',
+      'Choice',
+      'Useful',
+      'work',
+      'TextInfo',
+      'count',
+      'main',
+    ]);
+    for (final item in overview.outline) {
+      expect(
+        source.substring(item.offset, item.offset + item.length),
+        contains(item.label),
+      );
+      expect(item.line, greaterThan(1));
+    }
+  });
+
+  test(
+    'source locations preserve UTF-16 offsets and Unicode character count',
+    () {
+      const source = "// 😀\nvoid main() { print(\n}\n";
+      final overview = DartTools.sourceOverview(source);
+      expect(overview.characters, source.runes.length);
+      expect(overview.lines, 4);
+      expect(overview.outline.single.offset, source.indexOf('void'));
+      final errors = DartTools.syntaxDiagnostics(source);
+      expect(errors, isNotEmpty);
+      for (final error in errors) {
+        expect(error.offset, inInclusiveRange(0, source.length));
+        expect(error.length, greaterThanOrEqualTo(0));
+        expect(error.line, greaterThanOrEqualTo(2));
+      }
+    },
+  );
 
   test('compiled EVC bytecode can be loaded and executed', () async {
     final project = await Directory.systemTemp.createTemp('qfli_dart_compile');

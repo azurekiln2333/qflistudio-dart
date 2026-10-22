@@ -422,4 +422,112 @@ void main() {
     expect(find.byIcon(Icons.error_outline), findsWidgets);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('tools tab embeds real source and common tools without a route', (
+    tester,
+  ) async {
+    var terminalOpened = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FunctionsTab(
+          store: store,
+          toolsTabBuilder: dartProfile.toolsTabBuilder,
+          onOpenTerminal: () => terminalOpened = true,
+        ),
+      ),
+    );
+    await _waitFor(
+      tester,
+      () =>
+          find.byType(TextField).evaluate().isNotEmpty &&
+          find.byType(CircularProgressIndicator).evaluate().isEmpty,
+      reason: 'Inline source must load',
+    );
+    expect(find.byType(Scaffold), findsOneWidget);
+    expect(find.text('Dart 本地工具'), findsOneWidget);
+    expect(find.text('JSON 格式化'), findsOneWidget);
+    expect(find.byTooltip('结构与导入'), findsOneWidget);
+    await tester.tap(find.text('终端'));
+    expect(terminalOpened, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'hidden retained tools preserve edits without guarding route back',
+    (tester) async {
+      final active = ValueNotifier<bool>(true);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        active.dispose();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<bool>(
+              valueListenable: active,
+              builder: (context, enabled, child) =>
+                  TickerMode(enabled: enabled, child: child!),
+              child: DartToolsPage.forTab(store, () {}),
+            ),
+          ),
+        ),
+      );
+      await _waitFor(
+        tester,
+        () =>
+            find.byType(CircularProgressIndicator).evaluate().isEmpty &&
+            find.byType(TextField).evaluate().isNotEmpty,
+        reason: 'Embedded project must load',
+      );
+      const unsaved = 'void main() { print("keep-buffer"); }';
+      await tester.enterText(find.byType(TextField), unsaved);
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('未保存的更改'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+
+      active.value = false;
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+
+      active.value = true;
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        unsaved,
+      );
+      expect(await tester.runAsync(mainFile.readAsString), isNot(unsaved));
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('未保存的更改'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets('outline uses unsaved source and jumps without invalidating it', (
+    tester,
+  ) async {
+    await _mountTools(tester, store);
+    const source = "import 'dart:math';\nvoid first() {}\nvoid main() {}\n";
+    await tester.enterText(find.byType(TextField), source);
+    await _performAction(tester, '结构与导入');
+    expect(find.text('dart:math'), findsOneWidget);
+    final field = tester.widget<TextField>(find.byType(TextField));
+    await tester.ensureVisible(find.text('first'));
+    await tester.tap(find.text('first'));
+    await tester.pump();
+    final selection = field.controller!.selection;
+    expect(selection.textInside(source), 'void first() {}');
+    expect(find.text('first'), findsOneWidget);
+    expect(await tester.runAsync(mainFile.readAsString), isNot(source));
+    await tester.enterText(find.byType(TextField), 'void replacement() {}');
+    await tester.pump();
+    expect(find.text('first'), findsNothing);
+    expect(find.text('dart:math'), findsNothing);
+  });
 }

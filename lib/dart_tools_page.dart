@@ -6,16 +6,31 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:qfli_studio_core/services/studio_profile.dart';
 import 'package:qfli_studio_core/store/project_store.dart';
+import 'package:qfli_studio_core/pages/tools_grid.dart';
+import 'package:qfli_studio_core/widgets/tool_widgets.dart';
 
 import 'dart_runner.dart';
 import 'dart_tools.dart';
 
 class DartToolsPage extends StatefulWidget {
-  const DartToolsPage({super.key, required this.store});
+  const DartToolsPage({
+    super.key,
+    required this.store,
+    this.embedded = false,
+    this.onOpenTerminal,
+  });
 
   final ProjectStore store;
+  final bool embedded;
+  final VoidCallback? onOpenTerminal;
 
   static Widget forStore(ProjectStore store) => DartToolsPage(store: store);
+  static Widget forTab(ProjectStore store, VoidCallback onOpenTerminal) =>
+      DartToolsPage(
+        store: store,
+        embedded: true,
+        onOpenTerminal: onOpenTerminal,
+      );
 
   @override
   State<DartToolsPage> createState() => _DartToolsPageState();
@@ -23,11 +38,13 @@ class DartToolsPage extends StatefulWidget {
 
 class _DartToolsPageState extends State<DartToolsPage> {
   final _source = TextEditingController();
+  final _sourceFocus = FocusNode();
   String _observedSource = '';
   String? _projectPath;
   String? _filePath;
   List<String> _files = [];
   List<DartDiagnostic>? _diagnostics;
+  DartSourceOverview? _overview;
   List<String> _output = [];
   String? _artifact;
   String? _error;
@@ -57,6 +74,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
     unawaited(_stderrSubscription?.cancel());
     unawaited(_run?.cancel?.call());
     _source.dispose();
+    _sourceFocus.dispose();
     super.dispose();
   }
 
@@ -67,6 +85,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
     setState(() {
       _dirty = true;
       _diagnostics = null;
+      _overview = null;
       _artifact = null;
     });
   }
@@ -161,6 +180,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
         _filePath = null;
         _files = [];
         _diagnostics = null;
+        _overview = null;
         _output = [];
         _artifact = null;
         _error = null;
@@ -200,6 +220,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
         _filePath = path;
         _replaceSource(text);
         _diagnostics = null;
+        _overview = null;
         _output = [];
         _artifact = null;
         _error = null;
@@ -257,6 +278,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
     final source = _source.text;
     setState(() {
       _diagnostics = null;
+      _overview = null;
       _artifact = null;
       _output = [];
       _exitCode = null;
@@ -273,6 +295,34 @@ class _DartToolsPageState extends State<DartToolsPage> {
     }
   }
 
+  Future<void> _inspectSource() async {
+    if (!_beginOperation()) return;
+    final source = _source.text;
+    try {
+      final overview = await compute(DartTools.sourceOverview, source);
+      if (!mounted || _source.text != source) return;
+      setState(() {
+        _overview = overview;
+        _diagnostics = null;
+        _output = [];
+        _exitCode = null;
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      _finishOperation();
+    }
+  }
+
+  void _selectSource(int offset, int length) {
+    final start = offset.clamp(0, _source.text.length);
+    _source.selection = TextSelection(
+      baseOffset: start,
+      extentOffset: (start + length).clamp(start, _source.text.length),
+    );
+    _sourceFocus.requestFocus();
+  }
+
   Future<void> _compile() async {
     final project = _projectPath;
     final file = _filePath;
@@ -280,6 +330,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
     setState(() {
       _artifact = null;
       _diagnostics = null;
+      _overview = null;
       _output = [];
       _exitCode = null;
     });
@@ -319,6 +370,7 @@ class _DartToolsPageState extends State<DartToolsPage> {
       _output = [];
       _exitCode = null;
       _diagnostics = null;
+      _overview = null;
     });
     StreamSubscription<String>? stdoutSubscription;
     StreamSubscription<String>? stderrSubscription;
@@ -361,153 +413,205 @@ class _DartToolsPageState extends State<DartToolsPage> {
         .toList();
     final root = _projectPath;
     final file = _filePath;
+    // Home retains each tab and disables tickers for the hidden tabs.
+    final active = !widget.embedded || TickerMode.valuesOf(context).enabled;
     return PopScope<void>(
-      canPop: !_dirty,
+      canPop: !active || !_dirty,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) unawaited(_requestPop());
+        if (!didPop && active) unawaited(_requestPop());
       },
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Dart 工具')),
-        body: ListView(
+      child: _DartToolsFrame(
+        embedded: widget.embedded,
+        body: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          children: [
-            InputDecorator(
-              decoration: const InputDecoration(labelText: '项目'),
-              isEmpty: root == null,
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: projects.any((item) => item.path == root)
-                      ? root
-                      : null,
-                  isExpanded: true,
-                  items: [
-                    for (final project in projects)
-                      DropdownMenuItem(
-                        value: project.path,
-                        child: Text(
-                          project.name,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                  ],
-                  onChanged: _busy
-                      ? null
-                      : (path) => unawaited(_selectProject(path)),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (root != null)
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.embedded) ...[
+                const ToolsSectionHeading(icon: Icons.code, title: 'Dart 本地工具'),
+                const SizedBox(height: 8),
+                const Text('直接操作本地项目。语法检查仅检查扫描与解析错误。'),
+                if (widget.onOpenTerminal != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: widget.onOpenTerminal,
+                      icon: const Icon(Icons.terminal),
+                      label: const Text('终端'),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+              ],
               InputDecorator(
-                decoration: const InputDecoration(labelText: 'Dart 文件'),
-                isEmpty: file == null,
+                decoration: const InputDecoration(labelText: '项目'),
+                isEmpty: root == null,
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
-                    value: _files.contains(file) ? file : null,
+                    value: projects.any((item) => item.path == root)
+                        ? root
+                        : null,
                     isExpanded: true,
                     items: [
-                      for (final path in _files)
+                      for (final project in projects)
                         DropdownMenuItem(
-                          value: path,
+                          value: project.path,
                           child: Text(
-                            p.relative(path, from: root),
+                            project.name,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
                     onChanged: _busy
                         ? null
-                        : (path) {
-                            if (path != null) unawaited(_selectFile(path));
-                          },
+                        : (path) => unawaited(_selectProject(path)),
                   ),
                 ),
               ),
-            const SizedBox(height: 12),
-            if (file != null) ...[
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  IconButton(
-                    tooltip: '保存',
-                    onPressed: _busy || !_dirty
-                        ? null
-                        : () => unawaited(_save()),
-                    icon: const Icon(Icons.save_outlined),
+              const SizedBox(height: 12),
+              if (root != null)
+                InputDecorator(
+                  decoration: const InputDecoration(labelText: 'Dart 文件'),
+                  isEmpty: file == null,
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _files.contains(file) ? file : null,
+                      isExpanded: true,
+                      items: [
+                        for (final path in _files)
+                          DropdownMenuItem(
+                            value: path,
+                            child: Text(
+                              p.relative(path, from: root),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: _busy
+                          ? null
+                          : (path) {
+                              if (path != null) unawaited(_selectFile(path));
+                            },
+                    ),
                   ),
-                  IconButton(
-                    tooltip: '格式化 Dart',
-                    onPressed: _busy ? null : () => unawaited(_format()),
-                    icon: const Icon(Icons.format_align_left),
-                  ),
-                  IconButton(
-                    tooltip: '语法检查',
-                    onPressed: _busy ? null : () => unawaited(_analyze()),
-                    icon: const Icon(Icons.fact_check_outlined),
-                  ),
-                  IconButton(
-                    tooltip: '编译',
-                    onPressed: _busy ? null : () => unawaited(_compile()),
-                    icon: const Icon(Icons.memory_outlined),
-                  ),
-                  IconButton(
-                    tooltip: '运行',
-                    onPressed: _busy ? null : () => unawaited(_execute()),
-                    icon: const Icon(Icons.play_arrow),
-                  ),
-                  if (_artifact?.endsWith('.dill') == true)
+                ),
+              const SizedBox(height: 12),
+              if (file != null) ...[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
                     IconButton(
-                      tooltip: '运行编译结果',
+                      tooltip: '保存',
+                      onPressed: _busy || !_dirty
+                          ? null
+                          : () => unawaited(_save()),
+                      icon: const Icon(Icons.save_outlined),
+                    ),
+                    IconButton(
+                      tooltip: '格式化 Dart',
+                      onPressed: _busy ? null : () => unawaited(_format()),
+                      icon: const Icon(Icons.format_align_left),
+                    ),
+                    IconButton(
+                      tooltip: '语法检查',
+                      onPressed: _busy ? null : () => unawaited(_analyze()),
+                      icon: const Icon(Icons.fact_check_outlined),
+                    ),
+                    IconButton(
+                      tooltip: '结构与导入',
                       onPressed: _busy
                           ? null
-                          : () => unawaited(_execute(compiled: true)),
-                      icon: const Icon(Icons.play_circle_outline),
+                          : () => unawaited(_inspectSource()),
+                      icon: const Icon(Icons.account_tree_outlined),
                     ),
-                  if (_run != null)
                     IconButton(
-                      tooltip: '停止',
-                      onPressed: () => unawaited(_run?.cancel?.call()),
-                      icon: const Icon(Icons.stop),
+                      tooltip: '编译',
+                      onPressed: _busy ? null : () => unawaited(_compile()),
+                      icon: const Icon(Icons.memory_outlined),
                     ),
-                  if (_busy)
-                    const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                    IconButton(
+                      tooltip: '运行',
+                      onPressed: _busy ? null : () => unawaited(_execute()),
+                      icon: const Icon(Icons.play_arrow),
                     ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: MediaQuery.sizeOf(context).width >= 720 ? 420 : 300,
-                child: TextField(
-                  controller: _source,
-                  readOnly: _busy,
-                  expands: true,
-                  maxLines: null,
-                  minLines: null,
-                  style: const TextStyle(fontFamily: 'monospace'),
-                  textAlignVertical: TextAlignVertical.top,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
+                    if (_artifact?.endsWith('.dill') == true)
+                      IconButton(
+                        tooltip: '运行编译结果',
+                        onPressed: _busy
+                            ? null
+                            : () => unawaited(_execute(compiled: true)),
+                        icon: const Icon(Icons.play_circle_outline),
+                      ),
+                    if (_run != null)
+                      IconButton(
+                        tooltip: '停止',
+                        onPressed: () => unawaited(_run?.cancel?.call()),
+                        icon: const Icon(Icons.stop),
+                      ),
+                    if (_busy)
+                      const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: MediaQuery.sizeOf(context).width >= 720 ? 420 : 300,
+                  child: TextField(
+                    controller: _source,
+                    focusNode: _sourceFocus,
+                    readOnly: _busy,
+                    expands: true,
+                    maxLines: null,
+                    minLines: null,
+                    style: const TextStyle(fontFamily: 'monospace'),
+                    textAlignVertical: TextAlignVertical.top,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(height: 200, child: _buildResults()),
-            ] else
-              SizedBox(
-                height: 240,
-                child: Center(
-                  child: _busy
-                      ? const CircularProgressIndicator()
-                      : _error != null
-                      ? SelectableText(_error!)
-                      : Text(projects.isEmpty ? '没有本地项目' : '所选项目没有 Dart 文件'),
+                const SizedBox(height: 8),
+                SizedBox(height: 200, child: _buildResults()),
+              ] else
+                SizedBox(
+                  height: 240,
+                  child: Center(
+                    child: _busy
+                        ? const CircularProgressIndicator()
+                        : _error != null
+                        ? SelectableText(_error!)
+                        : Text(projects.isEmpty ? '没有本地项目' : '所选项目没有 Dart 文件'),
+                  ),
                 ),
-              ),
-          ],
+              if (widget.embedded) ...[
+                const SizedBox(height: 24),
+                const ToolsSectionHeading(
+                  icon: Icons.build_outlined,
+                  title: '通用',
+                ),
+                const SizedBox(height: 12),
+                for (final tool in commonTools)
+                  ListTile(
+                    leading: Icon(tool.icon),
+                    title: Text(tool.title),
+                    subtitle: Text(tool.description),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      if (tool.onTap case final onTap?) {
+                        onTap();
+                      } else if (tool.builder case final builder?) {
+                        Navigator.of(
+                          context,
+                        ).push(MaterialPageRoute<void>(builder: builder));
+                      }
+                    },
+                  ),
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -526,8 +630,28 @@ class _DartToolsPageState extends State<DartToolsPage> {
             leading: const Icon(Icons.error_outline),
             title: Text('${item.line}:${item.column}  ${item.message}'),
             subtitle: Text(item.code),
+            onTap: () => _selectSource(item.offset, item.length),
           );
         },
+      );
+    }
+    if (_overview case final overview?) {
+      return ListView(
+        children: [
+          Text(
+            '${overview.lines} 行 · ${overview.characters} 个字符 · '
+            '${overview.outline.length} 个声明',
+          ),
+          for (final item in [...overview.directives, ...overview.outline])
+            ListTile(
+              dense: true,
+              title: Text(item.label),
+              subtitle: Text('${item.kind} · 第 ${item.line} 行'),
+              onTap: () => _selectSource(item.offset, item.length),
+            ),
+          if (overview.outline.isEmpty && overview.directives.isEmpty)
+            const Text('当前文件没有声明或导入'),
+        ],
       );
     }
     if (_output.isNotEmpty || _exitCode != null) {
@@ -541,6 +665,21 @@ class _DartToolsPageState extends State<DartToolsPage> {
     if (_artifact != null) return SelectableText('已生成 $_artifact');
     return const SizedBox.shrink();
   }
+}
+
+class _DartToolsFrame extends StatelessWidget {
+  const _DartToolsFrame({required this.embedded, required this.body});
+
+  final bool embedded;
+  final Widget body;
+
+  @override
+  Widget build(BuildContext context) => embedded
+      ? body
+      : Scaffold(
+          appBar: AppBar(title: const Text('Dart 工具')),
+          body: body,
+        );
 }
 
 String _readSourceFile(String path) => File(path).readAsStringSync();
