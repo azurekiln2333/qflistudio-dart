@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/dart-tools.md","reason":"Real project tools and operation lifecycle"}
+{"file":".trellis/spec/frontend/dart-curriculum.md","reason":"Unique authored content and real execution; count expands per user request"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Specific errors and no fake portable success"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Shared typed diagnostic contracts"}
