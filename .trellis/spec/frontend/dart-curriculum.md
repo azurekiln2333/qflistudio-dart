@@ -48,12 +48,23 @@ Run from `qfli_dart`:
 dart run tool/build_dart_content.dart          # must emit 120 / 120
 dart run tool/verify_dart_content.dart          # checked=120 failures=0
 dart run tool/audit_compat.dart                 # unlabeled: 0
+dart run tool/verify_portable_content.dart --report portable-report.json
 flutter analyze --no-pub lib tool test curriculum
 flutter test --no-pub
 ```
 
 `tool/verify_dart_content.dart` compiles and **actually runs** each lesson on the
 host SDK and diffs stdout. A missing host SDK is a hard failure, never a skip.
+
+`tool/verify_portable_content.dart` independently executes EVERY lesson and
+paired example on the actual portable Compiler/Runtime path, without a whitelist.
+`--chapter <key>` supports focused repair; `--report <path>` persists exact stdout,
+errors and counts. Each unit owns an isolate with a bounded timeout; kill it in
+finally so synchronous infinite loops cannot hang the audit. Normalize CRLF and
+trailing newlines only, preserving spaces. Any failed unit exits nonzero;
+unsupported features and timeouts are failures. The initial October 22 audit is
+240 checked / 154 failures, so a passing SDK suite or legacy subset does not
+establish that old content runs on OHOS. Keep this gate incomplete until repaired.
 
 ## 5. Test gates
 
@@ -64,6 +75,7 @@ host SDK and diffs stdout. A missing host SDK is a hard failure, never a skip.
 - `test/dart_content_dart_eval_test.dart` — dart_eval portable-engine branch;
   asserts the curated subset (`_dartEvalPortableIds`, empirically verified) and
   reports the rest as official-SDK-required. Never guess the subset by regex.
+  This is a legacy partial regression test, not the all-content acceptance gate.
 
 ## 6. Wrong vs correct
 
@@ -77,3 +89,11 @@ Correct: keep counted programs self-contained; explain stdin with the real
 Wrong: pad lesson counts by copying a template and changing numbers.
 Correct: each lesson is an independent knowledge point with its own prose and
 code.
+
+## 7. Evidence boundaries
+
+Keep SDK execution, host portable execution, OHOS package build and actual OHOS
+device execution separate. No connected HDC target means phone execution is
+unverified. New production content follows the full old-content repair gate;
+do not drop advanced lessons or replace their semantics with expected-output
+prints to turn a failing interpreter audit green.
