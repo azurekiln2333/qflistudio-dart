@@ -24,6 +24,7 @@ is the sibling package `../qfli_studio_core`.
 | [Quality Guidelines](./quality-guidelines.md) | Analyze/test gates, forbidden and required patterns | Documented |
 | [Logging Guidelines](./logging-guidelines.md) | No logging package; `debugPrint` / `developer.log` | Documented |
 | [Native Dart Runtime](./dart-native-runtime.md) | Official Android/desktop VM, SDK packaging and Kernel compilation | Android and desktop implemented; iOS native port pending |
+| [Dart HAP Inspection](./dart-hap-inspection.md) | Frozen package identity, ABI, permission, assets and evidence boundaries | Python fixtures verified; device gate separate |
 | [Dart Offline Native Host](./dart-offline-host.md) | Native URL refusal and preserved local platform routes | Host behavior verified; target rebuild pending |
 
 ## Pre-Development Checklist
