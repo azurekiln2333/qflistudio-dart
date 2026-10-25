@@ -7,7 +7,7 @@ import {
   MethodResult,
 } from '@ohos/flutter_ohos';
 import { systemShare } from '@kit.ShareKit';
-import { common, Want, ConfigurationConstant } from '@kit.AbilityKit';
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { GeneratedPluginRegistrant } from '../plugins/GeneratedPluginRegistrant';
@@ -37,26 +37,15 @@ export default class EntryAbility extends FlutterAbility {
 
     const abilityContext = this.context as common.UIAbilityContext;
 
-    // Local preview, sharing and file selection for the offline Dart product.
+    // Local sharing and file selection for the offline Dart product.
     const platformChannel = new MethodChannel(
       flutterEngine.dartExecutor.getBinaryMessenger(),
       CHANNEL_PLATFORM,
     );
     platformChannel.setMethodCallHandler({
       onMethodCall(call: MethodCall, result: MethodResult): void {
-        if (call.method === 'openUrl') {
-          const url = call.argument('url') as string;
-          const want: Want = {
-            action: 'ohos.want.action.viewData',
-            uri: url,
-          };
-          abilityContext.startAbility(want)
-            .then(() => {
-              result.success(null);
-            })
-            .catch((err: BusinessError) => {
-              result.error(`${err.code}`, `${err.message}`, null);
-            });
+        if (call.method === 'openUrl' || call.method === 'openAgreement') {
+          result.error('OFFLINE_ONLY', 'Dart 独立版不打开外部页面', null);
         } else if (call.method === 'shareText') {
           // 系统分享面板（Share Kit）：纯文本分享。
           const title = call.argument('title') as string;
