@@ -1,0 +1,194 @@
+import 'package:tom_d4rt/src/environment.dart';
+import 'package:tom_d4rt/src/stdlib/convert/ascii.dart';
+import 'package:tom_d4rt/src/stdlib/convert/base64.dart';
+import 'package:tom_d4rt/src/stdlib/convert/byte_conversion.dart';
+import 'package:tom_d4rt/src/stdlib/convert/chunked_conversion.dart';
+import 'package:tom_d4rt/src/stdlib/convert/closable_string_sink.dart';
+import 'package:tom_d4rt/src/stdlib/convert/codec.dart';
+import 'package:tom_d4rt/src/stdlib/convert/convert_hierarchy.dart';
+import 'package:tom_d4rt/src/stdlib/convert/converter.dart';
+import 'package:tom_d4rt/src/stdlib/convert/encoding.dart';
+import 'package:tom_d4rt/src/stdlib/convert/html_escape.dart';
+import 'package:tom_d4rt/src/stdlib/convert/json.dart';
+import 'package:tom_d4rt/src/stdlib/convert/json_utf8_encoder.dart';
+import 'package:tom_d4rt/src/stdlib/convert/latin1.dart';
+import 'package:tom_d4rt/src/stdlib/convert/line_splitter.dart';
+import 'package:tom_d4rt/src/stdlib/convert/string_conversion.dart';
+import 'package:tom_d4rt/src/stdlib/convert/utf.dart';
+import 'dart:convert';
+import 'package:tom_d4rt/src/callable.dart';
+import 'package:tom_d4rt/src/exceptions.dart';
+
+export 'package:tom_d4rt/src/environment.dart';
+export 'package:tom_d4rt/src/stdlib/convert/ascii.dart';
+export 'package:tom_d4rt/src/stdlib/convert/base64.dart';
+export 'package:tom_d4rt/src/stdlib/convert/byte_conversion.dart';
+export 'package:tom_d4rt/src/stdlib/convert/chunked_conversion.dart';
+export 'package:tom_d4rt/src/stdlib/convert/closable_string_sink.dart';
+export 'package:tom_d4rt/src/stdlib/convert/codec.dart';
+export 'package:tom_d4rt/src/stdlib/convert/convert_hierarchy.dart';
+export 'package:tom_d4rt/src/stdlib/convert/converter.dart';
+export 'package:tom_d4rt/src/stdlib/convert/encoding.dart';
+export 'package:tom_d4rt/src/stdlib/convert/html_escape.dart';
+export 'package:tom_d4rt/src/stdlib/convert/json.dart';
+export 'package:tom_d4rt/src/stdlib/convert/json_utf8_encoder.dart';
+export 'package:tom_d4rt/src/stdlib/convert/latin1.dart';
+export 'package:tom_d4rt/src/stdlib/convert/line_splitter.dart';
+export 'package:tom_d4rt/src/stdlib/convert/string_conversion.dart';
+export 'package:tom_d4rt/src/stdlib/convert/utf.dart';
+
+class ConvertStdlib {
+  static void register(Environment environment) {
+    // Register bridged classes
+    environment.defineBridge(Base64CodecConvert.definition);
+    environment.defineBridge(Base64EncoderConvert.definition);
+    environment.defineBridge(Base64DecoderConvert.definition);
+    environment.defineBridge(AsciiCodecConvert.definition);
+    environment.defineBridge(AsciiEncoderConvert.definition);
+    environment.defineBridge(AsciiDecoderConvert.definition);
+    environment.defineBridge(Utf8CodecConvert.definition);
+    environment.defineBridge(Utf8EncoderConvert.definition);
+    environment.defineBridge(Utf8DecoderConvert.definition);
+    environment.defineBridge(JsonCodecConvert.definition);
+    environment.defineBridge(JsonEncoderConvert.definition);
+    environment.defineBridge(JsonDecoderConvert.definition);
+    environment.defineBridge(JsonUtf8EncoderConvert.definition);
+    environment.defineBridge(CodecConvert.definition);
+    environment.defineBridge(ConverterConvert.definition);
+    environment.defineBridge(Latin1CodecConvert.definition);
+    environment.defineBridge(Latin1EncoderConvert.definition);
+    environment.defineBridge(Latin1DecoderConvert.definition);
+    environment.defineBridge(LineSplitterConvert.definition);
+    environment.defineBridge(EncodingConvert.definition);
+    environment.defineBridge(ByteConversionConvert.definition);
+    // These three were written and exported but never registered, so nothing
+    // could reach them. StringConversionSink in particular is the argument
+    // every `startChunkedConversion` needs, and the route to a
+    // ClosableStringSink via `asStringSink()`.
+    environment.defineBridge(StringConversionConvert.definition);
+    environment.defineBridge(ChunkedConversionConvert.definition);
+    environment.defineBridge(ClosableStringSinkConvert.definition);
+    // Must follow the sink bridges: it declares the edges that let the
+    // resolver keep the specific sink over its newly-assignable root.
+    ConvertHierarchyConvert.register();
+
+    // Register global functions
+    environment.define(
+      'jsonEncode',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          if (arguments.length != 1) {
+            throw RuntimeD4rtException(
+              'jsonEncode requires one positional argument (object).',
+            );
+          }
+          final toEncodableArg = namedArguments['toEncodable'] as Callable?;
+          return jsonEncode(
+            arguments[0],
+            toEncodable: toEncodableArg == null
+                ? null
+                : (object) => toEncodableArg.call(visitor, [object]),
+          );
+        },
+        arity: 1,
+        name: 'jsonEncode',
+      ),
+    );
+
+    environment.define(
+      'jsonDecode',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          if (arguments.length != 1 || arguments[0] is! String) {
+            throw RuntimeD4rtException(
+              'jsonDecode requires one positional argument (String source).',
+            );
+          }
+          final reviverArg = namedArguments['reviver'] as Callable?;
+          return jsonDecode(
+            arguments[0] as String,
+            reviver: reviverArg == null
+                ? null
+                : (key, value) => reviverArg.call(visitor, [key, value]),
+          );
+        },
+        arity: 1,
+        name: 'jsonDecode',
+      ),
+    );
+
+    // Register global instances
+    environment.define('json', json);
+    environment.define('base64', base64);
+    environment.define('base64Url', base64Url);
+    environment.define('ascii', ascii);
+    environment.define('utf8', utf8);
+    environment.define('latin1', latin1);
+    // SCF35: dart:convert's two rune constants, found by F-SCC73-5.
+    environment.define('unicodeBomCharacterRune', unicodeBomCharacterRune);
+    environment.define(
+      'unicodeReplacementCharacterRune',
+      unicodeReplacementCharacterRune,
+    );
+
+    // Register global functions
+    environment.define(
+      'base64Encode',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          if (arguments.length != 1) {
+            throw RuntimeD4rtException(
+              'base64Encode requires one positional argument (List<int> bytes).',
+            );
+          }
+          final bytes = arguments[0];
+          if (bytes is! List) {
+            throw RuntimeD4rtException(
+              'base64Encode requires a List<int> argument.',
+            );
+          }
+          return base64Encode(bytes.cast<int>());
+        },
+        arity: 1,
+        name: 'base64Encode',
+      ),
+    );
+
+    // SCF35: the URL-safe twin of base64Encode, found by F-SCC73-5.
+    environment.define(
+      'base64UrlEncode',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          if (arguments.length != 1 || arguments[0] is! List) {
+            throw RuntimeD4rtException(
+              'base64UrlEncode requires one positional argument '
+              '(List<int> bytes).',
+            );
+          }
+          return base64UrlEncode((arguments[0] as List).cast<int>());
+        },
+        arity: 1,
+        name: 'base64UrlEncode',
+      ),
+    );
+
+    environment.define(
+      'base64Decode',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          if (arguments.length != 1 || arguments[0] is! String) {
+            throw RuntimeD4rtException(
+              'base64Decode requires one positional argument (String source).',
+            );
+          }
+          return base64Decode(arguments[0] as String);
+        },
+        arity: 1,
+        name: 'base64Decode',
+      ),
+    );
+
+    // Register HtmlEscape classes
+    HtmlEscapeConvert.register(environment);
+  }
+}

@@ -1,0 +1,2465 @@
+import 'dart:io';
+
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:tom_d4rt/d4rt.dart';
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:analyzer/dart/analysis/features.dart';
+import 'package:tom_d4rt/src/stdlib/convert.dart';
+import 'package:tom_d4rt/src/stdlib/isolate.dart';
+import 'package:tom_d4rt/src/stdlib/math.dart';
+import 'package:tom_d4rt/src/stdlib/collection.dart';
+import 'package:tom_d4rt/src/stdlib/typed_data.dart';
+import 'package:pub_semver/pub_semver.dart';
+import 'package:analyzer/error/error.dart';
+import 'package:tom_d4rt/src/stdlib/stdlib_io.dart'
+    if (dart.library.html) 'package:tom_d4rt/src/stdlib/stdlib_web.dart';
+
+// Represent an module of source code loaded and parsed.
+class LoadedModule {
+  final Uri uri; // The canonical URI of the module
+  final CompilationUnit ast; // The AST of the module
+  final Environment environment; // The environment of this module
+  final Environment
+  exportedEnvironment; // The environment of the exported symbols
+
+  LoadedModule(this.uri, this.ast, this.environment, this.exportedEnvironment);
+}
+
+/// DFUB10 — a module whose load is still in flight.
+///
+/// Registered before a module's import/export directives are walked, so that a
+/// cyclic re-entry gets this partial entry back instead of recursing forever.
+/// Circular imports and exports are legal Dart and must load, so we support
+/// the cycle rather than rejecting it.
+///
+/// [deferredMerges] exists because [Environment.importEnvironment] copies
+/// bindings at call time rather than aliasing the source environment. A module
+/// that merges from an in-flight module therefore copies an incomplete — often
+/// empty — set of exports. Each such merge is recorded here and replayed once
+/// the in-flight module finishes, at which point its exports are complete. The
+/// replay is idempotent: `importEnvironment` skips names already bound to the
+/// identical value, so re-merging costs nothing and cannot raise a spurious
+/// conflict.
+class _InFlightModule {
+  final LoadedModule partial;
+  final List<void Function()> deferredMerges = [];
+
+  _InFlightModule(this.partial);
+}
+
+class ModuleLoader {
+  final Environment globalEnvironment;
+  final Map<String, String> sources;
+  final Map<Uri, LoadedModule> _moduleCache = {};
+  final Map<CompilationUnit, Uri> _executionSourceUris = {};
+
+  /// Preserve the source URI of a direct root unit for isolate reconstruction.
+  void registerExecutionSourceUri(CompilationUnit unit, Uri uri) {
+    _executionSourceUris[unit] = uri;
+  }
+
+  /// The canonical library URI of a parsed imported compilation unit.
+  Uri? sourceUriFor(CompilationUnit unit) {
+    final executionUri = _executionSourceUris[unit];
+    if (executionUri != null) return executionUri;
+    for (final module in _moduleCache.values) {
+      if (identical(module.ast, unit)) return module.uri;
+    }
+    return null;
+  }
+
+  /// The lexical global scope belonging to an imported parsed unit.
+  Environment? environmentFor(CompilationUnit unit) {
+    for (final module in _moduleCache.values) {
+      if (identical(module.ast, unit)) return module.environment;
+    }
+    return null;
+  }
+
+  /// The interpreted call stack of the run this loader serves.
+  ///
+  /// On the loader rather than on a visitor because a run has several
+  /// visitors — one per loaded module — and every one of them calls into the
+  /// others' functions; the loader is what they share, and a new run gets a
+  /// new one.
+  late final D4rtCallStack callStack = D4rtCallStack(_locateStatement);
+
+  /// The line, column and library of [statement], for a trace.
+  ({int line, int column, Uri? source})? _locateStatement(Object statement) {
+    if (statement is! AstNode) return null;
+    final root = statement.root;
+    if (root is! CompilationUnit) return null;
+    final location = root.lineInfo.getLocation(statement.offset);
+    Uri? source;
+    for (final module in _moduleCache.values) {
+      if (identical(module.ast, root)) {
+        source = module.uri;
+        break;
+      }
+    }
+    return (
+      line: location.lineNumber,
+      column: location.columnNumber,
+      source: source,
+    );
+  }
+
+  /// DFUB10 — modules currently being loaded, keyed by the same identity URI as
+  /// [_moduleCache]. A URI is present here only between the start of its
+  /// directive processing and its completion.
+  final Map<Uri, _InFlightModule> _inFlightModules = {};
+  // Step #2 (import-optimization): URI-keyed registries — see the matching
+  // fields on [D4rt] in d4rt_base.dart. Per-URI lookup is O(1); the inner map
+  // is keyed by declaration name (unique per library). Extensions use a
+  // per-URI List (nullable / duplicate unnamed names). Mirrors AstModuleLoader.
+  final Map<String /*uri*/, Map<String /*name*/, LibraryEnum>>
+  bridgedEnumDefinitions;
+  final Map<String /*uri*/, Map<String /*name*/, LibraryClass>> bridgedClases;
+  final D4rt? d4rt; // Reference to D4rt instance for permission checking
+
+  /// DFUB1 — base directory for resolving relative filesystem imports.
+  ///
+  /// When [allowFileSystemImports] is enabled, a scheme-less relative import
+  /// URI is resolved against `Directory(basePath).absolute.uri` before reading
+  /// the module source off disk. `null` disables relative filesystem
+  /// resolution (absolute `file:` URIs still resolve on their own).
+  final String? basePath;
+
+  /// DFUB1 — when true, [_fetchModuleSource] may read a module's source from
+  /// the filesystem (via [_resolveFileSystemUri]) if the URI is not already in
+  /// [sources] and the resolved file exists. Defaults to `false` (sandboxed:
+  /// only preloaded [sources] and bridged/stdlib modules are visible). The
+  /// per-read FilesystemPermission gate is layered on top in DFUB2.
+  final bool allowFileSystemImports;
+
+  Uri?
+  currentlibrary; // Keep for the initial relative URI resolution in _fetchModuleSource and for relative imports
+
+  // Library-scoped globals (registered with library path) - added when import is processed
+  // LibraryFunction wrapper includes sourceUri for deduplication across re-exports
+  final Map<String /*uri*/, Map<String /*name*/, LibraryFunction>>
+  libraryFunctions;
+  final Map<String /*uri*/, Map<String /*name*/, LibraryVariable>>
+  libraryVariables;
+  final Map<String /*uri*/, Map<String /*name*/, LibraryGetter>> libraryGetters;
+  final Map<String /*uri*/, Map<String /*name*/, LibrarySetter>> librarySetters;
+  final Map<String /*uri*/, List<LibraryExtension>> bridgedExtensions;
+
+  // Track which globals have been registered and from which source library
+  // Maps global name -> canonical source library URI (not import barrel URI)
+  final Map<String, String> _registeredFunctions = {};
+  final Map<String, String> _registeredVariables = {};
+  final Map<String, String> _registeredGetters = {};
+  final Map<String, String> _registeredSetters = {};
+  // Track registered classes and enums by sourceUri for deduplication
+  final Map<String, String> _registeredClasses = {};
+  final Map<String, String> _registeredEnums = {};
+  final Map<String, String> _registeredExtensions = {};
+
+  // GEN-100 sync with tom_d4rt_ast: per-module environments for bridge isolation.
+  // Each bridged library URI gets its own Environment containing only its bridges.
+  // This prevents same-named classes from different modules (e.g. dart:ui.TextStyle
+  // vs painting.TextStyle) from conflicting in globalEnvironment.
+  final Map<String, Environment> _bridgedModuleEnvironments = {};
+
+  /// Step #2 (import-binding optimization) — when non-null, a process-global
+  /// cache (owned by [D4rt], keyed per allowed-set signature) that this loader
+  /// reads/writes instead of the per-loader [_bridgedModuleEnvironments]. Set
+  /// for **migrated** instances so a bridged module's environment is built once
+  /// per allowed-set and reused across every `execute*`, rather than rebuilt by
+  /// each freshly-constructed loader. `null` for legacy instances, which keep
+  /// the per-loader behavior. See [D4rt.debugBridgedModuleEnvBuildCount].
+  final Map<String, Environment>? sharedBridgedModuleEnvironments;
+
+  /// Step #2 — the `enclosing` environment for cached bridged module envs. The
+  /// shared warm parent (immutable, per allowed-set), so a cached module env
+  /// carries no per-execution state. Only consulted when
+  /// [sharedBridgedModuleEnvironments] is non-null. When `null` the per-loader
+  /// path uses [globalEnvironment] as before.
+  final Environment? sharedModuleEnclosing;
+
+  /// Step #2 — invoked once each time a bridged module env is *built* (a cache
+  /// miss). Lets [D4rt] count builds for the cache-reuse regression test.
+  final void Function()? onBridgedModuleEnvBuilt;
+
+  // GEN-100 sync: per-stdlib isolated environments for non-ambient stdlib modules.
+  // dart:core and dart:async stay in globalEnvironment (ambient/unconditional);
+  // dart:math, dart:convert, dart:io etc. each get their own env.
+  final Map<String, Environment> _stdlibEnvironments = {};
+
+  /// When true, registration errors are collected instead of thrown.
+  ///
+  /// Use this with [accumulatedRegistrationErrors] to validate all bridge
+  /// registrations in a single run without aborting on the first error.
+  bool collectRegistrationErrors;
+
+  /// Accumulated registration errors when [collectRegistrationErrors] is true.
+  ///
+  /// These errors are collected across all import processing rather than
+  /// being thrown immediately. Check this list after [D4rt.execute] completes
+  /// to see all registration issues at once.
+  final List<String> accumulatedRegistrationErrors = [];
+
+  /// Set of stdlib module paths that have been auto-loaded for extension
+  /// on-type resolution. Prevents redundant loading and avoids re-registration
+  /// warnings when a module is later explicitly imported.
+  final Set<String> _autoLoadedStdlibs = {};
+
+  /// Step #3 (retention) — number of source modules currently parsed and
+  /// cached in [_moduleCache] (each entry holds a parsed [CompilationUnit]).
+  /// Read-only introspection so [D4rt] can assert that prior runs' ASTs are not
+  /// accumulated. Bridged-module envs (which carry no user AST) are not counted.
+  int get loadedModuleCount => _moduleCache.length;
+
+  /// How many SOURCE modules (`file:` URIs, the entry script included) this
+  /// loader holds — what a script runner reports as `sourcesLoaded`. Stdlib and
+  /// bridged modules are cached here too and are not counted.
+  int get loadedSourceModuleCount =>
+      _moduleCache.keys.where((uri) => uri.scheme == 'file').length;
+
+  /// Step #3 (retention) — drops the per-loader parsed-module cache so a
+  /// finished run's [CompilationUnit]s become collectable. Only the per-loader
+  /// [_moduleCache] is cleared; the process-global shared bridge caches (pool,
+  /// warm parent, [sharedBridgedModuleEnvironments]) are untouched — they hold
+  /// no per-run state and are reused across executes. A subsequent execute
+  /// re-parses and re-populates [_moduleCache] as usual.
+  void releaseLoadedModules() {
+    _moduleCache.clear();
+    // DFUB10 — nothing may be mid-load at this point; clearing guards against a
+    // previously abandoned partial being handed out on the next execute.
+    _inFlightModules.clear();
+  }
+
+  ModuleLoader(
+    this.globalEnvironment,
+    this.sources,
+    this.bridgedEnumDefinitions,
+    this.bridgedClases, {
+    this.d4rt,
+    this.basePath,
+    this.allowFileSystemImports = false,
+    this.libraryFunctions = const {},
+    this.libraryVariables = const {},
+    this.libraryGetters = const {},
+    this.librarySetters = const {},
+    this.bridgedExtensions = const {},
+    this.collectRegistrationErrors = false,
+    this.sharedBridgedModuleEnvironments,
+    this.sharedModuleEnclosing,
+    this.onBridgedModuleEnvBuilt,
+  }) {
+    globalEnvironment.latentBridgeLookup ??= latentStdlibBridgeFor;
+    Logger.debug(
+      "[ModuleLoader] Initialized with ${sources.length} preloaded sources.",
+    );
+  }
+
+  /// DFUB1 — resolves an import [uri] to a filesystem `file:` URI, or returns
+  /// `null` when it is not a filesystem candidate.
+  ///
+  /// - `file:` URIs resolve to themselves (already absolute on disk).
+  /// - Any other explicit scheme (`dart:`, `package:`, …) returns `null` — not
+  ///   a filesystem import.
+  /// - A scheme-less (relative) URI resolves against
+  ///   `Directory(basePath).absolute.uri`; returns `null` when [basePath] is
+  ///   unset (no base to resolve against).
+  Uri? _resolveFileSystemUri(Uri uri) {
+    if (uri.scheme == 'file') {
+      return uri;
+    }
+    if (uri.scheme.isNotEmpty) {
+      return null;
+    }
+    if (basePath == null) {
+      return null;
+    }
+    return Directory(basePath!).absolute.uri.resolveUri(uri);
+  }
+
+  /// DFUB3 — canonicalizes a module [uri] to a single absolute spelling so the
+  /// URI that flows through source reads, the read-permission gate and nested
+  /// import resolution is always the same absolute `file:` form.
+  ///
+  /// Ports upstream kodjodevf/d4rt 3b8b8ca. Only filesystem candidates (per
+  /// [_resolveFileSystemUri]) are affected; every other URI (`dart:`,
+  /// `package:`, unresolvable relative) is returned unchanged so this is a
+  /// no-op for non-filesystem imports.
+  ///
+  /// This deliberately does NOT resolve symlinks: the returned URI still uses
+  /// the caller's directory spelling, so a [FilesystemPermission] granted on a
+  /// (possibly symlinked) directory keeps matching the read. Symlink/real-path
+  /// identity for cache deduplication is handled separately by
+  /// [_moduleIdentityUri]. (Canonicalizing permission grants to real paths is
+  /// tracked in dgub5.)
+  Uri _canonicalizeModuleUri(Uri uri) {
+    final fileUri = _resolveFileSystemUri(uri);
+    if (fileUri == null) {
+      return uri;
+    }
+    return File.fromUri(fileUri).absolute.uri;
+  }
+
+  /// DFUB3 — computes the deduplication identity for a module [uri] used as the
+  /// [_moduleCache] key, so different spellings of the same underlying file —
+  /// including symlinked directories/files and `..`/`.` segments — collapse to
+  /// a single cached module instance and load exactly once.
+  ///
+  /// For an existing filesystem file this is the real (symlink-resolved) path;
+  /// when the file does not exist or the real-path call fails it falls back to
+  /// the absolute spelling. Non-filesystem URIs (`dart:`, `package:`) are
+  /// returned unchanged.
+  ///
+  /// Kept separate from [_canonicalizeModuleUri] so that reads and the
+  /// read-permission gate operate on the caller's (grant-matching) spelling
+  /// while cache identity still folds symlinks together.
+  Uri _moduleIdentityUri(Uri uri) {
+    final fileUri = _resolveFileSystemUri(uri);
+    if (fileUri == null) {
+      return uri;
+    }
+    final file = File.fromUri(fileUri);
+    final policy = d4rt?.hostPolicy;
+    if (policy != null &&
+        !policy.allows({
+          'type': 'filesystem',
+          'path': file.path,
+          'read': true,
+        })) {
+      // Identity deduplication must not query native metadata for a source
+      // outside an offline run's roots before the source-read gate runs.
+      return file.absolute.uri;
+    }
+    if (file.existsSync()) {
+      try {
+        return File(file.resolveSymbolicLinksSync()).uri;
+      } on FileSystemException {
+        // Fall through to the absolute-spelling identity below.
+      }
+    }
+    return file.absolute.uri;
+  }
+
+  /// Checks if the given URI requires special permissions and verifies they are granted.
+  void _checkModulePermissions(Uri uri) {
+    if (d4rt == null) return; // No permission checking if no D4rt instance
+
+    final uriString = uri.toString();
+
+    // Define dangerous modules that require permissions
+    if (uriString == 'dart:io') {
+      // SCE206: EITHER capability admits the import. `dart:io` holds the
+      // filesystem AND every network class, and the gate used to ask only
+      // "is ANY filesystem access granted?" — so a script granted
+      // `NetworkPermission` and nothing else could not import the library its
+      // grant is for. SCD170 put a `NetworkPermission` check on every
+      // socket-acquiring call and a `FilesystemPermission` check already sits
+      // on every file operation, so the import is not where either capability
+      // is enforced: a network-only script names `File` and still cannot touch
+      // one. Both questions are scope-free — no path, no host, no operation —
+      // because the import has none to ask about.
+      final hasFilesystem = d4rt!.checkPermission({
+        'type': 'filesystem',
+        'pathAgnostic': true,
+      });
+      final hasNetwork = d4rt!.checkPermission({'type': 'network'});
+      // DFIN3: process execution lives in dart:io too, so a script granted
+      // only ProcessRunPermission can import the library its grant is for.
+      final hasProcess = d4rt!.checkPermission({
+        'type': 'process',
+        'commandAgnostic': true,
+      });
+      if (!hasFilesystem && !hasNetwork && !hasProcess) {
+        throw RuntimeD4rtException(
+          'Access to dart:io requires FilesystemPermission, NetworkPermission or '
+          'ProcessRunPermission. Use d4rt.grant(FilesystemPermission.any) to '
+          'allow filesystem access, or d4rt.grant(NetworkPermission.any) for '
+          'sockets and HTTP.',
+        );
+      }
+    } else if (uriString == 'dart:isolate') {
+      if (!d4rt!.checkPermission({'type': 'isolate'})) {
+        throw RuntimeD4rtException(
+          'Access to dart:isolate requires IsolatePermission. '
+          'Use d4rt.grant(IsolatePermission.any) to allow isolate operations.',
+        );
+      }
+    }
+    // Add more dangerous modules as needed
+  }
+
+  /// Checks if there are bridges registered for a specific URI.
+  bool _hasBridgedContentForUri(String uriString) {
+    return bridgedEnumDefinitions.containsKey(uriString) ||
+        bridgedClases.containsKey(uriString) ||
+        libraryFunctions.containsKey(uriString) ||
+        libraryVariables.containsKey(uriString) ||
+        libraryGetters.containsKey(uriString) ||
+        librarySetters.containsKey(uriString) ||
+        bridgedExtensions.containsKey(uriString);
+  }
+
+  // ===========================================================================
+  // GEN-100: Per-module / per-stdlib environment loading
+  // Mirrors AstModuleLoader._loadStdlibModule and _tryLoadBridgedModule.
+  // ===========================================================================
+
+  /// Known non-ambient stdlib modules and their registration functions.
+  /// dart:core and dart:async are pre-registered into globalEnvironment and
+  /// are NOT listed here (they stay ambient/unconditional).
+  /// The `dart:` libraries this loader can register on demand.
+  ///
+  /// Exposed read-only so a guard can drive off the production list rather
+  /// than a copy of it. SCC76 needs to register every stdlib module into one
+  /// environment to check for duplicate bridge names, and a hardcoded copy of
+  /// this list in a test would decay silently — which is the same failure the
+  /// guard itself exists to prevent, one level up.
+  static Iterable<String> get stdlibModuleNames => _stdlibRegistrars.keys;
+
+  /// Every stdlib library's bridges in one environment, built once per
+  /// process (SCF44). See [Environment.latentBridgeLookup]. One environment is
+  /// sound because SCC76 holds the stdlib modules free of duplicate names.
+  static final Environment _latentStdlib = () {
+    final all = Environment();
+    for (final register in _stdlibRegistrars.values) {
+      register(all);
+    }
+    return all;
+  }();
+
+  /// Answers by native type, cached, so a type no bridge claims is looked up
+  /// once rather than on every speculative wrap. Keyed by
+  /// `(type, structural)`.
+  static final Map<Type, BridgedClass?> _latentPrecise = {};
+  static final Map<Type, BridgedClass?> _latentStructural = {};
+
+  /// The stdlib bridge for [nativeType] from any stdlib library, imported or
+  /// not.
+  ///
+  /// Precise (the default): the exact type, else the bridge whose name or
+  /// `nativeNames` equals the type's name (without type arguments, a leading
+  /// underscore or an `Impl` suffix). [structural]: SCC49's suffix rule, which
+  /// the caller asks only after the imported scope's own suffix rule missed —
+  /// so an imported library still wins at each tier, and widening to every
+  /// library never lets a guess outrank a declared match.
+  static BridgedClass? latentStdlibBridgeFor(
+    Type nativeType, {
+    bool structural = false,
+  }) {
+    final cache = structural ? _latentStructural : _latentPrecise;
+    if (cache.containsKey(nativeType)) return cache[nativeType];
+    if (structural) {
+      return cache[nativeType] = _latentStdlib.structuralSuffixBridge(
+        nativeType,
+      );
+    }
+    final byType = _latentStdlib.registeredBridgeTypes;
+    BridgedClass? found = byType[nativeType];
+    if (found == null) {
+      final full = nativeType.toString();
+      final generic = full.indexOf('<');
+      final raw = generic < 0 ? full : full.substring(0, generic);
+      var clean = raw.startsWith('_') ? raw.substring(1) : raw;
+      if (clean.endsWith('Impl')) {
+        clean = clean.substring(0, clean.length - 'Impl'.length);
+      }
+      for (final bridge in byType.values) {
+        final names = bridge.nativeNames;
+        if (bridge.name == clean ||
+            (names != null && (names.contains(raw) || names.contains(clean)))) {
+          found = bridge;
+          break;
+        }
+      }
+    }
+    return cache[nativeType] = found;
+  }
+
+  static final Map<String, void Function(Environment)> _stdlibRegistrars = {
+    'math': MathStdlib.register,
+    'convert': ConvertStdlib.register,
+    'io': StdlibIo.register,
+    'collection': CollectionStdlib.register,
+    'typed_data': TypedDataStdlib.register,
+    'isolate': IsolateStdlib.register,
+  };
+
+  /// Loads a `dart:*` stdlib module into an isolated per-stdlib [Environment].
+  ///
+  /// Returns `null` if the library has bridged content (caller falls through
+  /// to [_tryLoadBridgedModule]) or is truly unsupported (caller throws).
+  /// Returns a [LoadedModule] with the stdlib's isolated env otherwise.
+  LoadedModule? _loadStdlibModule(Uri uri) {
+    final libName = uri.path;
+    final uriString = uri.toString();
+
+    final registrar = _stdlibRegistrars[libName];
+    if (registrar != null) {
+      Environment stdlibEnv;
+      if (_stdlibEnvironments.containsKey(libName)) {
+        stdlibEnv = _stdlibEnvironments[libName]!;
+      } else {
+        stdlibEnv = Environment(enclosing: globalEnvironment);
+        registrar(stdlibEnv);
+        // Mirror the per-stdlib bridges' native-type lookup into
+        // globalEnvironment so that `toBridgedInstance(rawNative)` can
+        // discover them when a script passes a native subtype (e.g.
+        // `_Random` from `math.Random()`) through an interpreted function.
+        // The lexical name (e.g. `Random`) stays isolated in stdlibEnv —
+        // only the type→bridge mapping is propagated.
+        stdlibEnv.propagateBridgeTypesTo(globalEnvironment);
+        _stdlibEnvironments[libName] = stdlibEnv;
+        Logger.debug(
+          '[ModuleLoader] GEN-100: Registered isolated stdlib dart:$libName',
+        );
+      }
+      final emptyAst = _parseSource(uri, '');
+      final module = LoadedModule(uri, emptyAst, stdlibEnv, stdlibEnv);
+      _moduleCache[uri] = module;
+      return module;
+    }
+
+    // dart:core / dart:async are ambient — pre-registered into globalEnvironment.
+    if (libName == 'core' || libName == 'async') {
+      final emptyAst = _parseSource(uri, '');
+      final module = LoadedModule(
+        uri,
+        emptyAst,
+        globalEnvironment,
+        globalEnvironment,
+      );
+      _moduleCache[uri] = module;
+      return module;
+    }
+
+    // Check if there are bridges for this dart: URI (e.g. dart:ui).
+    if (_hasBridgedContentForUri(uriString)) {
+      return null; // Let _tryLoadBridgedModule handle it.
+    }
+
+    // Truly unsupported dart: library.
+    throw SourceCodeD4rtException(
+      "Dart library '$uriString' not supported.",
+      uriString,
+    );
+  }
+
+  /// Loads a bridged library URI into an isolated per-module [Environment].
+  ///
+  /// Creates the module env on first call; returns the cached env on
+  /// subsequent calls. Merges re-exported bridged content via [_mergeReExports].
+  LoadedModule _tryLoadBridgedModule(
+    Uri uri,
+    Set<String>? showNames,
+    Set<String>? hideNames,
+  ) {
+    final uriString = uri.toString();
+
+    // Step #2 — migrated instances share a process-global module-env cache
+    // built once per allowed-set against the shared warm parent; legacy
+    // instances use the per-loader cache built against this execute's
+    // globalEnvironment. Picking the cache + enclosing here keeps the build
+    // path identical otherwise.
+    final cache = sharedBridgedModuleEnvironments ?? _bridgedModuleEnvironments;
+    final moduleEnclosing = sharedModuleEnclosing ?? globalEnvironment;
+    Environment moduleEnv;
+    if (cache.containsKey(uriString)) {
+      moduleEnv = cache[uriString]!;
+    } else {
+      // GEN-100 FIX: Build the module env with show=null/hide=null so it
+      // contains ALL symbols the module transitively exports.  The per-import
+      // show/hide filter is applied later in importEnvironment() at the call
+      // site — it must NOT be baked into the cached module env, which is
+      // shared across every import of this URI.
+      moduleEnv = Environment(enclosing: moduleEnclosing);
+      _registerBridgesForUriInto(uriString, null, null, moduleEnv);
+      _mergeReExports(
+        uriString,
+        moduleEnv,
+        null,
+        null,
+        <String, Set<String>?>{},
+      );
+      cache[uriString] = moduleEnv;
+      onBridgedModuleEnvBuilt?.call();
+      Logger.debug(
+        '[ModuleLoader] GEN-100: Created per-module env for $uriString',
+      );
+    }
+
+    final emptyAst = _parseSource(uri, '');
+    final module = LoadedModule(uri, emptyAst, moduleEnv, moduleEnv);
+    _moduleCache[uri] = module;
+    return module;
+  }
+
+  /// Registers all bridged definitions for [uriString] into [targetEnvironment].
+  ///
+  /// GEN-100 sync with [AstModuleLoader._registerBridgesForUriInto]:
+  /// registers into a module-specific env instead of [globalEnvironment].
+  /// Show/hide filters are applied at registration time.
+  void _registerBridgesForUriInto(
+    String uriString,
+    Set<String>? showNames,
+    Set<String>? hideNames,
+    Environment targetEnvironment,
+  ) {
+    // Bridged enums
+    for (final libEnum
+        in bridgedEnumDefinitions[uriString]?.values ?? const <LibraryEnum>[]) {
+      final name = libEnum.enumDefinition.name;
+      if (!_shouldRegisterName(
+        name,
+        showNames: showNames,
+        hideNames: hideNames,
+      )) {
+        continue;
+      }
+      try {
+        final bridgedEnum = libEnum.enumDefinition.buildBridgedEnum();
+        // SCE25: the declaring URI travels with the registration, so a
+        // same-name enum from a second package is ambiguous rather than
+        // last-wins — the rule classes have had since tcca19.
+        targetEnvironment.defineBridgedEnum(
+          bridgedEnum,
+          sourceUri: libEnum.sourceUri ?? uriString,
+        );
+        Logger.debugLazy(
+          () =>
+              ' [ModuleLoader] GEN-100: Registered bridged enum: $name from $uriString',
+        );
+      } catch (e) {
+        Logger.error("registering bridged enum '$name' into module env: $e");
+      }
+    }
+
+    // Bridged classes
+    for (final libClass
+        in bridgedClases[uriString]?.values ?? const <LibraryClass>[]) {
+      final name = libClass.name;
+      if (!_shouldRegisterName(
+        name,
+        showNames: showNames,
+        hideNames: hideNames,
+      )) {
+        continue;
+      }
+      try {
+        // Step #17 — transfer the deferred thunk so the BridgedClass is only
+        // built if the importing module actually resolves the class.
+        targetEnvironment.defineBridgeLazy(
+          libClass.name,
+          libClass.nativeType,
+          libClass.thunk,
+          sourceUri: libClass.sourceUri ?? uriString,
+        );
+        Logger.debugLazy(
+          () =>
+              ' [ModuleLoader] GEN-100: Registered bridged class: $name from $uriString',
+        );
+      } catch (e) {
+        Logger.error("registering bridged class '$name' into module env: $e");
+      }
+    }
+
+    // GEN-078: class aliases (e.g. MaterialStateProperty → WidgetStateProperty)
+    if (d4rt != null) {
+      for (final alias in d4rt!.classAliases) {
+        if (alias.library != uriString) continue;
+        if (!_shouldRegisterName(
+          alias.aliasName,
+          showNames: showNames,
+          hideNames: hideNames,
+        )) {
+          continue;
+        }
+        try {
+          targetEnvironment.defineBridgeAlias(
+            alias.aliasName,
+            alias.targetName,
+          );
+          Logger.debugLazy(
+            () =>
+                ' [ModuleLoader] GEN-100: Registered alias: ${alias.aliasName} → ${alias.targetName} from $uriString',
+          );
+        } catch (e) {
+          Logger.error(
+            "registering alias '${alias.aliasName}' into module env: $e",
+          );
+        }
+      }
+      // GEN-079: function typedefs as BridgedClass(nativeType: Function)
+      for (final typedef in d4rt!.functionTypedefs) {
+        if (typedef.library != uriString) continue;
+        if (!_shouldRegisterName(
+          typedef.name,
+          showNames: showNames,
+          hideNames: hideNames,
+        )) {
+          continue;
+        }
+        try {
+          targetEnvironment.defineBridge(
+            BridgedClass(
+              nativeType: Function,
+              name: typedef.name,
+              // SCD137 — carries through when the generator emitted it.
+              typedefRequiredPositional: typedef.requiredPositional,
+              typedefMaxPositional: typedef.maxPositional,
+            ),
+            sourceUri: uriString,
+          );
+          Logger.debugLazy(
+            () =>
+                ' [ModuleLoader] GEN-100: Registered function typedef: ${typedef.name} from $uriString',
+          );
+        } catch (e) {
+          Logger.error(
+            "registering function typedef '${typedef.name}' into module env: $e",
+          );
+        }
+      }
+    }
+
+    // Library functions
+    for (final libFunc
+        in libraryFunctions[uriString]?.values ?? const <LibraryFunction>[]) {
+      final name = libFunc.function.name;
+      if (name == '<native>') continue;
+      if (!_shouldRegisterName(
+        name,
+        showNames: showNames,
+        hideNames: hideNames,
+      )) {
+        continue;
+      }
+      try {
+        targetEnvironment.define(name, libFunc.function);
+        Logger.debugLazy(
+          () =>
+              ' [ModuleLoader] GEN-100: Registered library function: $name from $uriString',
+        );
+      } catch (e) {
+        Logger.error(
+          "registering library function '$name' into module env: $e",
+        );
+      }
+    }
+
+    // Library variables
+    for (final libVar
+        in libraryVariables[uriString]?.values ?? const <LibraryVariable>[]) {
+      if (!_shouldRegisterName(
+        libVar.name,
+        showNames: showNames,
+        hideNames: hideNames,
+      )) {
+        continue;
+      }
+      try {
+        targetEnvironment.define(libVar.name, libVar.value);
+        Logger.debugLazy(
+          () =>
+              ' [ModuleLoader] GEN-100: Registered library variable: ${libVar.name} from $uriString',
+        );
+      } catch (e) {
+        Logger.error(
+          "registering library variable '${libVar.name}' into module env: $e",
+        );
+      }
+    }
+
+    // Library getters + setters (paired)
+    final settersByName = <String, LibrarySetter>{};
+    for (final libSetter
+        in librarySetters[uriString]?.values ?? const <LibrarySetter>[]) {
+      settersByName[libSetter.name] = libSetter;
+    }
+    for (final libGetter
+        in libraryGetters[uriString]?.values ?? const <LibraryGetter>[]) {
+      if (!_shouldRegisterName(
+        libGetter.name,
+        showNames: showNames,
+        hideNames: hideNames,
+      )) {
+        continue;
+      }
+      final setter = settersByName.remove(libGetter.name);
+      try {
+        targetEnvironment.define(
+          libGetter.name,
+          GlobalGetter(libGetter.getter, setter: setter?.setter),
+        );
+        Logger.debugLazy(
+          () =>
+              ' [ModuleLoader] GEN-100: Registered library getter: ${libGetter.name} from $uriString',
+        );
+      } catch (e) {
+        Logger.error(
+          "registering library getter '${libGetter.name}' into module env: $e",
+        );
+      }
+    }
+    // Remaining standalone setters
+    for (final entry in settersByName.entries) {
+      if (!_shouldRegisterName(
+        entry.key,
+        showNames: showNames,
+        hideNames: hideNames,
+      )) {
+        continue;
+      }
+      try {
+        targetEnvironment.define(
+          entry.key,
+          GlobalGetter(
+            () => throw RuntimeD4rtException(
+              'Property ${entry.key} is write-only',
+            ),
+            setter: entry.value.setter,
+          ),
+        );
+      } catch (e) {
+        Logger.error(
+          "registering standalone setter '${entry.key}' into module env: $e",
+        );
+      }
+    }
+
+    // Bridged extensions
+    for (final libExt
+        in bridgedExtensions[uriString] ?? const <LibraryExtension>[]) {
+      final definition = libExt.extensionDefinition;
+      final extName = definition.name ?? '<unnamed>';
+      if (definition.name != null &&
+          !_shouldRegisterName(
+            definition.name!,
+            showNames: showNames,
+            hideNames: hideNames,
+          )) {
+        continue;
+      }
+      try {
+        // `lookup`, not `get`: this probe misses by design whenever the
+        // importing script does not also import the on-type's own library
+        // (the `_resolveTypeForExtension` fallback below is what handles that
+        // case). The throwing `get` turned every such routine miss into a
+        // reported `Undefined variable` error that nothing ever revoked, so a
+        // host collecting reported errors as its pass/fail signal — the REPL
+        // in `-test` mode — failed runs in which nothing went wrong.
+        final typeObj = targetEnvironment.lookup(definition.onTypeName);
+        var onType = typeObj is RuntimeType ? typeObj : null;
+        onType ??= _resolveTypeForExtension(definition.onTypeName);
+        if (onType == null) {
+          Logger.warn(
+            ' [ModuleLoader] GEN-100: Could not resolve type '
+            "'${definition.onTypeName}' for extension '$extName' from $uriString — skipping.",
+          );
+          // GEN-056d FIX: surface the unresolved-onType case via the same
+          // error-collection channel used by the legacy registration branch
+          // at line ~1286 below. Previously this path silently dropped the
+          // error, so `D4rt.validateRegistrations()` returned an empty list
+          // even when an extension targeted an unknown type.
+          if (collectRegistrationErrors) {
+            accumulatedRegistrationErrors.add(
+              "Could not resolve type '${definition.onTypeName}' for extension '$extName'.",
+            );
+          }
+          continue;
+        }
+        final interpretedExt = definition.buildInterpretedExtension(onType);
+        targetEnvironment.addUnnamedExtension(interpretedExt);
+        if (definition.name != null) {
+          targetEnvironment.define(definition.name!, interpretedExt);
+        }
+        Logger.debugLazy(
+          () =>
+              ' [ModuleLoader] GEN-100: Registered extension "$extName" on '
+              '${definition.onTypeName} from $uriString',
+        );
+      } catch (e) {
+        Logger.error("registering extension '$extName' into module env: $e");
+      }
+    }
+  }
+
+  /// GEN-100 sync: Merge re-exported libraries' bridged content into [moduleEnv].
+  ///
+  /// Replaces [_mergeReExportsGlobal]. Walks [d4rt.libraryReExports[sourceUri]]
+  /// and registers each target's bridges into the source library's per-module
+  /// environment. Recurses for transitive re-exports. [visited] guards cycles.
+  void _mergeReExports(
+    String sourceUri,
+    Environment moduleEnv,
+    Set<String>? outerShow,
+    Set<String>? outerHide,
+    Map<String, Set<String>?> visitedShows,
+  ) {
+    // GEN-100 FIX: Use a Map<uri → broadestShowSeen> instead of a simple
+    // "ever visited" Set.  A permanent Set blocked legitimate re-processing:
+    // material.dart reaches painting.dart via 100+ intermediate libs that
+    // each carry their own show-filter.  The first arrival with a restrictive
+    // filter (e.g. {Widget,...}) computed intersect({Widget}, {Color,...}) = {},
+    // registering nothing from dart:ui.  The direct painting.dart path
+    // (show=null, broader) was then blocked by the permanent mark and
+    // Color/FontWeight stayed missing.
+    //
+    // With Map semantics:
+    //   • visitedShows[uri] absent   → never visited, process now.
+    //   • visitedShows[uri] = null   → already covered with show=null (all
+    //                                   symbols); nothing new can arrive, skip.
+    //   • visitedShows[uri] = prevSet → covered by prevSet so far; re-process
+    //                                   only if outerShow brings new symbols
+    //                                   (i.e. outerShow ⊄ prevSet).
+    //
+    // Because the call site now passes outerShow=null (see _tryLoadBridgedModule),
+    // the very first call always reaches every URI with show=null, which sets
+    // visitedShows[uri]=null and prevents any second visit — giving O(V+E)
+    // traversal identical to the old permanent-Set approach, but correct.
+    if (visitedShows.containsKey(sourceUri)) {
+      final prevShow = visitedShows[sourceUri];
+      if (prevShow == null) return; // null = all symbols already covered
+      // outerShow=null means all symbols → definitely broader than prevShow
+      if (outerShow != null && outerShow.difference(prevShow).isEmpty) return;
+      // Expand prevShow to the union of prevShow and outerShow.
+      if (outerShow == null) {
+        visitedShows[sourceUri] = null;
+      } else {
+        prevShow.addAll(outerShow); // mutate in place
+      }
+    } else {
+      visitedShows[sourceUri] = outerShow != null ? Set.of(outerShow) : null;
+    }
+
+    final reExports = d4rt?.libraryReExports[sourceUri];
+    if (reExports == null || reExports.isEmpty) return;
+
+    for (final re in reExports) {
+      final effectiveShow = _intersectShow(outerShow, re.show);
+      final effectiveHide = _unionHide(outerHide, re.hide);
+
+      final targetUri = Uri.parse(re.uri);
+      if (targetUri.scheme == 'dart') {
+        try {
+          final stdlibModule = _loadStdlibModule(targetUri);
+          if (stdlibModule != null) {
+            moduleEnv.importEnvironment(
+              stdlibModule.exportedEnvironment,
+              show: effectiveShow,
+              hide: effectiveHide,
+            );
+          }
+        } on SourceCodeD4rtException {
+          // Re-export of an unsupported dart: lib — ignore.
+        }
+      }
+
+      _registerBridgesForUriInto(
+        re.uri,
+        effectiveShow,
+        effectiveHide,
+        moduleEnv,
+      );
+      _mergeReExports(
+        re.uri,
+        moduleEnv,
+        effectiveShow,
+        effectiveHide,
+        visitedShows,
+      );
+    }
+  }
+
+  /// Intersection of two optional show-filters (null = show everything).
+  Set<String>? _intersectShow(Set<String>? outer, Set<String>? inner) {
+    if (outer == null) return inner;
+    if (inner == null) return outer;
+    return outer.intersection(inner);
+  }
+
+  /// Union of two optional hide-filters (null = hide nothing).
+  Set<String>? _unionHide(Set<String>? outer, Set<String>? inner) {
+    if (outer == null && inner == null) return null;
+    return {...?outer, ...?inner};
+  }
+
+  /// DFUB10 — the in-flight entry that owns [module], or null when the module
+  /// is fully loaded.
+  ///
+  /// The scan is over the current import-nesting depth (one entry per module on
+  /// the load stack), not over the module cache, so it stays tiny.
+  _InFlightModule? _inFlightFor(LoadedModule module) {
+    for (final entry in _inFlightModules.values) {
+      if (identical(entry.partial, module)) return entry;
+    }
+    return null;
+  }
+
+  /// DFUB10 — runs [merge] now and schedules a replay when [source] is only
+  /// partially loaded.
+  ///
+  /// `Environment.importEnvironment` copies bindings at call time; a merge that
+  /// runs against a module still walking its own directives therefore captures
+  /// an incomplete — often empty — export set and would never self-heal.
+  /// Replaying once [source] finishes fills in the rest.
+  void _mergeFromModule(LoadedModule source, void Function() merge) {
+    merge();
+    _inFlightFor(source)?.deferredMerges.add(merge);
+  }
+
+  /// Loads (or returns the cached) module for [uri].
+  ///
+  /// DFUB10 — the real work lives in [_loadModule]; this wrapper only
+  /// guarantees that a *failed* load drops its in-flight registration. Without
+  /// it a module that threw part-way would stay registered as "in progress"
+  /// forever, and a later `execute()` on the same loader would silently be
+  /// handed that abandoned partial instead of re-loading.
+  LoadedModule loadModule(
+    Uri uri, {
+    Set<String>? showNames,
+    Set<String>? hideNames,
+  }) {
+    try {
+      return _loadModule(uri, showNames: showNames, hideNames: hideNames);
+    } catch (_) {
+      _inFlightModules.remove(_moduleIdentityUri(_canonicalizeModuleUri(uri)));
+      rethrow;
+    }
+  }
+
+  LoadedModule _loadModule(
+    Uri uri, {
+    Set<String>? showNames,
+    Set<String>? hideNames,
+  }) {
+    // DFUB3 — canonicalize filesystem module URIs to a single absolute spelling
+    // so reads, the read-permission gate and nested import resolution all use
+    // the same (grant-matching) form. No-op for non-filesystem URIs (`dart:`,
+    // `package:`, unresolvable relative).
+    uri = _canonicalizeModuleUri(uri);
+
+    // DFUB3 — the cache is keyed by the symlink-resolved identity so different
+    // spellings of the same underlying file (relative vs absolute, symlinked
+    // directory/file vs real path) dedupe to one cached module and load exactly
+    // once. Reads still use `uri` (the caller's spelling) above.
+    final identityUri = _moduleIdentityUri(uri);
+
+    // Check permissions for dangerous modules
+    _checkModulePermissions(uri);
+
+    // Save the current source URI for resolving relative exports of this module
+    Uri? previouslibraryForRecursiveLoad = currentlibrary;
+    currentlibrary = uri;
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Setting currentlibrary to: $uri (show: $showNames, hide: $hideNames)",
+    );
+
+    if (_moduleCache.containsKey(identityUri)) {
+      Logger.debug(
+        "[ModuleLoader loadModule for $uri] Module '${uri.toString()}' found in cache.",
+      );
+      // Restore the source URI before returning for parent calls
+      currentlibrary = previouslibraryForRecursiveLoad;
+      return _moduleCache[identityUri]!;
+    }
+
+    // DFUB10 — a cycle: this module is already being loaded further up the
+    // stack. Hand back its partial entry instead of recursing forever. The
+    // partial's environments are the very objects the in-progress frame will
+    // finish populating, and any merge taken from an incomplete export set is
+    // replayed when that frame completes (see [_mergeFromModule]).
+    final inFlightEntry = _inFlightModules[identityUri];
+    if (inFlightEntry != null) {
+      Logger.debug(
+        "[ModuleLoader loadModule for $uri] Module '${uri.toString()}' is already in flight (circular import/export); returning partial module.",
+      );
+      currentlibrary = previouslibraryForRecursiveLoad;
+      return inFlightEntry.partial;
+    }
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Loading module: ${uri.toString()}",
+    );
+
+    // GEN-100: Handle stdlib and bridged modules with per-module environments
+    // BEFORE falling through to source-code parsing. This mirrors the
+    // AstModuleLoader flow: stdlib → bridged → bundle source.
+    if (uri.scheme == 'dart') {
+      final stdlibModule = _loadStdlibModule(uri);
+      if (stdlibModule != null) {
+        currentlibrary = previouslibraryForRecursiveLoad;
+        return stdlibModule;
+      }
+      // dart: URI with bridged content falls through to _tryLoadBridgedModule.
+    }
+    if (_hasBridgedContentForUri(uri.toString())) {
+      final bridgedModule = _tryLoadBridgedModule(uri, showNames, hideNames);
+      currentlibrary = previouslibraryForRecursiveLoad;
+      return bridgedModule;
+    }
+
+    String sourceCode = _fetchModuleSource(
+      uri,
+      showNames: showNames,
+      hideNames: hideNames,
+    ); // Pass show/hide to filter bridged registrations
+    CompilationUnit ast = _parseSource(uri, sourceCode);
+
+    Environment moduleEnvironment = Environment(enclosing: globalEnvironment);
+    // Must also enclose globalEnvironment. DFUB10 — created here rather than
+    // just before the export directives so the partial module published below
+    // carries the SAME Environment instance that later receives this module's
+    // local declarations; a cyclic importer therefore holds a live reference.
+    Environment exportedEnvironment = Environment(enclosing: globalEnvironment);
+
+    // DFUB10 — publish the partial module BEFORE walking any directive, so a
+    // cycle back to this URI terminates. Circular imports and exports are legal
+    // Dart and must load; we support the cycle rather than rejecting it.
+    final inFlight = _InFlightModule(
+      LoadedModule(uri, ast, moduleEnvironment, exportedEnvironment),
+    );
+    _inFlightModules[identityUri] = inFlight;
+
+    // Bug-72 FIX: Process import directives BEFORE declarations
+    // This ensures imported classes/mixins are available when class declarations are visited
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Processing import directives first...",
+    );
+    for (final directive in ast.directives) {
+      if (directive is ImportDirective) {
+        final importedUriString = directive.uri.stringValue;
+        if (importedUriString == null) {
+          Logger.warn(
+            "[ModuleLoader loadModule for $uri] Import directive with null URI string in ${uri.toString()}",
+          );
+          continue;
+        }
+        try {
+          Uri resolvedImportUri = uri.resolve(
+            importedUriString,
+          ); // Resolve relative to the current module's URI
+          Logger.debug(
+            "[ModuleLoader loadModule for $uri]   Importing from ${uri.toString()}: URI '$importedUriString', resolved to '${resolvedImportUri.toString()}'",
+          );
+          LoadedModule importedModule = loadModule(
+            resolvedImportUri,
+          ); // Recursive call - this will check permissions
+
+          // Get the show/hide combinators and prefix
+          Set<String>? showNames;
+          Set<String>? hideNames;
+          String? prefix = directive.prefix?.name;
+
+          for (final combinator in directive.combinators) {
+            if (combinator is ShowCombinator) {
+              showNames ??= {};
+              showNames.addAll(combinator.shownNames.map((id) => id.name));
+              Logger.debug(
+                "[ModuleLoader loadModule for $uri]   Import combinator: show ${combinator.shownNames.map((id) => id.name).join(', ')}",
+              );
+            } else if (combinator is HideCombinator) {
+              hideNames ??= {};
+              hideNames.addAll(combinator.hiddenNames.map((id) => id.name));
+              Logger.debug(
+                "[ModuleLoader loadModule for $uri]   Import combinator: hide ${combinator.hiddenNames.map((id) => id.name).join(', ')}",
+              );
+            }
+          }
+
+          // Import the environment of the imported module into the current module environment
+          if (prefix != null) {
+            // For prefixed imports, create a filtered environment and define it
+            // with the prefix. `shallowCopyFiltered` snapshots, so a cyclic
+            // import needs the same deferred replay as the plain case.
+            _mergeFromModule(importedModule, () {
+              Environment prefixedEnv = importedModule.exportedEnvironment
+                  .shallowCopyFiltered(
+                    showNames: showNames,
+                    hideNames: hideNames,
+                  );
+              moduleEnvironment.definePrefixedImport(prefix, prefixedEnv);
+            });
+            Logger.debug(
+              "[ModuleLoader loadModule for $uri]   Successfully defined prefixed import '$prefix' from ${resolvedImportUri.toString()} into ${uri.toString()} (show: ${showNames?.join(", ")}, hide: ${hideNames?.join(", ")}).",
+            );
+          } else {
+            // For regular imports, import directly into the module environment
+            _mergeFromModule(
+              importedModule,
+              () => moduleEnvironment.importEnvironment(
+                importedModule.exportedEnvironment,
+                show: showNames,
+                hide: hideNames,
+              ),
+            );
+            // SCD4 (scd4_aicv): what an ambiguity is judged against. The
+            // surface is read when a lookup needs it, so a cyclic import that
+            // is still loading is seen whole by then.
+            moduleEnvironment.recordUnprefixedImport(
+              resolvedImportUri.toString(),
+              importedModule.exportedEnvironment,
+              show: showNames,
+              hide: hideNames,
+            );
+            Logger.debug(
+              "[ModuleLoader loadModule for $uri]   Successfully imported environment from ${resolvedImportUri.toString()} into ${uri.toString()} (show: ${showNames?.join(", ")}, hide: ${hideNames?.join(", ")}).",
+            );
+          }
+        } catch (e, s) {
+          Logger.error(
+            "[ModuleLoader loadModule for $uri] Error processing import directive for '$importedUriString' from ${uri.toString()}: $e\nStackTrace: $s",
+          );
+          // DFUB13 — the log line above has the owner/target context; the
+          // exception the caller actually sees did not. Attach it there too.
+          if (e is D4rtException) {
+            throw wrapDirectiveError(
+              'import',
+              uri,
+              uri.resolve(importedUriString),
+              e,
+            );
+          }
+          rethrow;
+        }
+      }
+    }
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Finished processing import directives.",
+    );
+
+    DeclarationVisitor declarationVisitor = DeclarationVisitor(
+      moduleEnvironment,
+    );
+    // Only declarations are visited to populate the local environment
+    for (var declaration in ast.declarations) {
+      declaration.accept(declarationVisitor);
+    }
+
+    // Interpretation of top-level initializers
+    // Create an InterpreterVisitor for this specific module.
+    // It will use moduleEnvironment to resolve types and execute initializers.
+    // The moduleLoader is passed for potentially resolved imports by initializers (less common).
+    InterpreterVisitor moduleInterpreter = InterpreterVisitor(
+      globalEnvironment:
+          moduleEnvironment, // Important: use the module's local environment as base
+      moduleLoader: this, // Pass the current loader
+      initiallibrary: uri, // The URI of the module being interpreted
+    );
+
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Executing InterpreterVisitor pass for initializers...",
+    );
+
+    /// Bind every type alias whose target resolves now, to a FIXPOINT so
+    /// declaration order does not matter. Idempotent — an already-bound alias
+    /// is skipped — which is what makes it safe to run more than once.
+    void registerTypeAliases() {
+      final typeAliases = ast.declarations.whereType<TypeAlias>();
+      for (var round = 0; round < typeAliases.length; round++) {
+        var bound = false;
+        for (final alias in typeAliases) {
+          if (moduleInterpreter.registerTypeAlias(alias)) bound = true;
+        }
+        if (!bound) break;
+      }
+    }
+
+    // SCE130: run it HERE as well, before enums and classes. A class's
+    // type-parameter bounds, and those of its methods, are resolved when the
+    // class is populated below and are never re-extracted, so an alias bound
+    // on either — `typedef N = num; class Box<T extends N>` — had to resolve
+    // by then or not at all. The same warning the block below carries applies
+    // to this call: `d4rt_base.dart` has the twin of it, and a fix landing in
+    // only one entry point passes the probe it was written against while the
+    // test suite, which uses the other, still fails.
+    registerTypeAliases();
+
+    // First, process enum declarations to populate enum values
+    // This must happen before top-level variable declarations in case
+    // const variables reference enum values
+    for (final declaration in ast.declarations) {
+      if (declaration is EnumDeclaration) {
+        declaration.accept(moduleInterpreter);
+      }
+    }
+
+    // Process class and mixin declarations to populate their members (methods, constructors, etc.)
+    // The DeclarationVisitor only creates placeholders with empty constructor maps.
+    // Bug-59: Without this, imported classes have no constructors available!
+    //
+    // Bug-43 / forward-class-reference FIX (mirrors d4rt_base.dart and
+    // tom_d4rt_ast/ast_module_loader.dart): defer every class's
+    // static-field initializer block until ALL class/mixin members have
+    // been registered, so a `static const` in class A can reference
+    // class B even when B is declared later in source.
+    moduleInterpreter.deferStaticFieldInits = true;
+    try {
+      for (final declaration in ast.declarations) {
+        if (declaration is ClassDeclaration ||
+            declaration is MixinDeclaration) {
+          declaration.accept(moduleInterpreter);
+        }
+      }
+    } finally {
+      moduleInterpreter.deferStaticFieldInits = false;
+    }
+    moduleInterpreter.runDeferredStaticInitializers();
+
+    // SCD100: type aliases. After classes, enums and extension types so an
+    // alias can name one, and BEFORE functions so their annotations can name an
+    // alias — a return type written through an alias used to report
+    // `Type 'I' not found.` and the program never ran. Run to a FIXPOINT so
+    // declaration order does not matter.
+    //
+    // This loop and the one in `d4rt_base.dart` are separate entry points into
+    // the same ordering, and BOTH need the phase: the `source:` form goes
+    // through that one, the `sources:`/`library:` form through this one, and a
+    // fix landing in only one of them passes the probe it was written against
+    // while the test suite — which uses the other — still fails.
+    registerTypeAliases();
+
+    // Process function declarations to populate interpreted functions properly
+    for (final declaration in ast.declarations) {
+      if (declaration is FunctionDeclaration) {
+        declaration.accept(moduleInterpreter);
+      }
+    }
+
+    // Bug-91: Process extension declarations to populate extension methods
+    // Extensions need to be processed by the interpreter to be available for imported modules
+    for (final declaration in ast.declarations) {
+      if (declaration is ExtensionDeclaration) {
+        declaration.accept(moduleInterpreter);
+      }
+    }
+
+    // Cluster EXTTYPE: Process extension type declarations (Dart 3.3+) so
+    // the wrapper class is registered for imported modules — otherwise
+    // consumers see "Undefined variable" when invoking the constructor.
+    for (final declaration in ast.declarations) {
+      if (declaration is ExtensionTypeDeclaration) {
+        declaration.accept(moduleInterpreter);
+      }
+    }
+
+    // Then process top-level variable declarations
+    for (final declaration in ast.declarations) {
+      // We only care about the evaluation of TopLevelVariableDeclaration for their initializers.
+      if (declaration is TopLevelVariableDeclaration) {
+        declaration.accept(moduleInterpreter);
+      }
+    }
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Finished InterpreterVisitor pass for initializers.",
+    );
+
+    // PREPARATION OF THE EXPORTED ENVIRONMENT
+    // `exportedEnvironment` was created up-front (DFUB10) so cyclic importers
+    // hold a live reference; here it finally receives this module's own
+    // declarations, now that moduleEnvironment holds their initialized values.
+    // DFIN6 (dgub15): ONLY this module's own declarations. moduleEnvironment
+    // also holds everything the module IMPORTED, and merging all of it
+    // re-exported every import: with main -> a -> b, main could call a name
+    // only b declares, which Dart rejects. What a module re-exports is what
+    // its `export` directives name, merged below.
+    exportedEnvironment.importEnvironment(
+      moduleEnvironment,
+      show: _ownTopLevelNames(ast),
+    );
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Initialized exportedEnvironment with local declarations (post-initialization).",
+    );
+
+    // Process the export directives of this module to populate its exportedEnvironment
+    // Must be done before caching to avoid recursion problems if A exports B and B exports A.
+    // The cache is checked at the beginning of the function.
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Processing export directives for ${uri.toString()}...",
+    );
+    for (final directive in ast.directives) {
+      if (directive is ExportDirective) {
+        final exportedUriString = directive.uri.stringValue;
+        if (exportedUriString == null) {
+          Logger.warn(
+            "[ModuleLoader loadModule for $uri] Export directive with null URI string in ${uri.toString()}",
+          );
+          continue;
+        }
+        try {
+          Uri resolvedExportUri = uri.resolve(
+            exportedUriString,
+          ); // Resolve relative to the current module's URI
+          Logger.debug(
+            "[ModuleLoader loadModule for $uri]   Exporting from ${uri.toString()}: URI '$exportedUriString', resolved to '${resolvedExportUri.toString()}'",
+          );
+          LoadedModule subModule = loadModule(
+            resolvedExportUri,
+          ); // Recursive call
+
+          // Get the show/hide combinators
+          Set<String>? showNames;
+          Set<String>? hideNames;
+
+          for (final combinator in directive.combinators) {
+            if (combinator is ShowCombinator) {
+              showNames ??= {}; // Initialize if it's the first show combinator
+              showNames.addAll(
+                combinator.shownNames.map((id) => id.name),
+              ); // Use id.name
+              Logger.debug(
+                "[ModuleLoader loadModule for $uri]   Export combinator: show ${combinator.shownNames.map((id) => id.name).join(', ')}",
+              );
+            } else if (combinator is HideCombinator) {
+              hideNames ??= {}; // Initialize if it's the first hide combinator
+              hideNames.addAll(
+                combinator.hiddenNames.map((id) => id.name),
+              ); // Use id.name
+              Logger.debug(
+                "[ModuleLoader loadModule for $uri]   Export combinator: hide ${combinator.hiddenNames.map((id) => id.name).join(', ')}",
+              );
+            }
+          }
+
+          // Import the environment of the sub-module by applying the show/hide filters.
+          // Cluster EXPORT (I-MISC-40/41): pass errorOnConflict: true so that a
+          // library that re-publishes two different definitions of the same
+          // name (local vs re-export, or two re-exports) raises immediately
+          // instead of silently overwriting.
+          _mergeFromModule(
+            subModule,
+            () => exportedEnvironment.importEnvironment(
+              subModule.exportedEnvironment,
+              show: showNames,
+              hide: hideNames,
+              errorOnConflict: true,
+            ),
+          );
+          Logger.debug(
+            "[ModuleLoader loadModule for $uri]   Successfully merged exported environment from ${resolvedExportUri.toString()} into ${uri.toString()} (show: ${showNames?.join(", ")}, hide: ${hideNames?.join(", ")}).",
+          );
+        } catch (e, s) {
+          Logger.error(
+            "[ModuleLoader loadModule for $uri] Error processing export directive for '$exportedUriString' from ${uri.toString()}: $e\nStackTrace: $s",
+          );
+          // DFUB13 — see the import branch. Barrels are where this matters
+          // most: the failing barrel is rarely the file the user was editing.
+          if (e is D4rtException) {
+            throw wrapDirectiveError(
+              'export',
+              uri,
+              uri.resolve(exportedUriString),
+              e,
+            );
+          }
+          rethrow;
+        }
+      }
+      // Note: ImportDirective is now processed earlier, before declarations
+    }
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Finished processing export directives for ${uri.toString()}.",
+    );
+
+    try {
+      final testGetSymbol = moduleEnvironment.get('getMessage');
+      Logger.debug(
+        "[ModuleLoader loadModule for $uri] Test get 'getMessage' from module env for $uri: SUCCESS, value: ${testGetSymbol?.runtimeType}",
+      );
+    } catch (e) {
+      // Silently ignore if not found
+    }
+
+    // DFUB10 — reuse the very instance the cyclic importers were handed, so
+    // every reference to this module (partial or final) is the same object.
+    final loadedModule = inFlight.partial;
+    // DFUB3 — key by the symlink-resolved identity so a later load via a
+    // different spelling of the same file hits this cached instance.
+    _moduleCache[identityUri] = loadedModule;
+    _inFlightModules.remove(identityUri);
+
+    // DFUB10 — this module's exports are complete now, so replay every merge
+    // that was taken from it while it was still incomplete. Replays are
+    // idempotent: `importEnvironment` skips names already bound to the
+    // identical value.
+    for (final replay in inFlight.deferredMerges) {
+      replay();
+    }
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Module '${uri.toString()}' chargé et mis en cache.",
+    );
+
+    // Restore the source URI before returning
+    currentlibrary = previouslibraryForRecursiveLoad;
+    Logger.debug(
+      "[ModuleLoader loadModule for $uri] Restored currentlibrary to: $currentlibrary",
+    );
+    return loadedModule;
+  }
+
+  /// Helper to check if a name should be registered based on show/hide filters.
+  bool _shouldRegisterName(
+    String name, {
+    Set<String>? showNames,
+    Set<String>? hideNames,
+  }) {
+    // If hideNames is specified and contains this name, skip it
+    if (hideNames != null && hideNames.contains(name)) {
+      return false;
+    }
+    // If showNames is specified, only include if the name is in the list
+    if (showNames != null && !showNames.contains(name)) {
+      return false;
+    }
+    return true;
+  }
+
+  String _fetchModuleSource(
+    Uri uri, {
+    Set<String>? showNames,
+    Set<String>? hideNames,
+    Set<String>? reExportVisited,
+  }) {
+    final uriString = uri.toString();
+    Logger.debug(
+      "[ModuleLoader] Récupération de la source pour: $uriString depuis sources. (show: $showNames, hide: $hideNames)",
+    );
+
+    // First check if the exact URI is in the preloaded sources
+    if (sources.containsKey(uriString)) {
+      Logger.debug("[ModuleLoader] Source found for $uriString in sources.");
+      return sources[uriString]!;
+    }
+
+    // DFUB1 — when filesystem imports are enabled, a URI not in the preloaded
+    // sources may be read off disk. Resolves relative URIs against basePath;
+    // `file:`/absolute URIs read directly.
+    // DFUB2 — every on-disk read is gated by a per-read FilesystemPermission
+    // check (`_checkFileSystemSourceReadPermission`); an ungranted read throws
+    // before any bytes are read.
+    if (allowFileSystemImports) {
+      final fileUri = _resolveFileSystemUri(uri);
+      if (fileUri != null) {
+        final file = File.fromUri(fileUri);
+        if (file.existsSync()) {
+          _checkFileSystemSourceReadPermission(fileUri);
+          Logger.debug(
+            "[ModuleLoader] Source loaded from filesystem for $fileUri.",
+          );
+          return file.readAsStringSync();
+        }
+        Logger.debug(
+          "[ModuleLoader] Filesystem import enabled, but no file found at "
+          "${file.absolute.path}.",
+        );
+      }
+    }
+
+    // Then handle the known Dart libraries provided by Stdlib
+    if (uri.scheme == 'dart') {
+      final knownStdlibDartLibs = [
+        'core',
+        'math',
+        'async',
+        'convert',
+        'io',
+        'collection',
+        'typed_data',
+        'isolate',
+      ];
+      if (knownStdlibDartLibs.contains(uri.path)) {
+        if (uri.path == 'convert') {
+          ConvertStdlib.register(globalEnvironment);
+          return '';
+        }
+        if (uri.path == 'math') {
+          MathStdlib.register(globalEnvironment);
+          return '';
+        }
+        if (uri.path == 'io') {
+          StdlibIo.register(globalEnvironment);
+          return '';
+        }
+        if (uri.path == 'collection') {
+          CollectionStdlib.register(globalEnvironment);
+          return '';
+        }
+        if (uri.path == 'typed_data') {
+          TypedDataStdlib.register(globalEnvironment);
+          return '';
+        }
+        if (uri.path == 'isolate') {
+          IsolateStdlib.register(globalEnvironment);
+          return '';
+        }
+        Logger.info(
+          "[ModuleLoader] The Dart library '${uri.toString()}' is provided natively by Stdlib. Returning an empty module.",
+        );
+        return ""; // Empty source to allow the import to succeed
+      } else {
+        // Not a known stdlib - check if there are bridges for this dart: URI
+        if (_hasBridgedContentForUri(uriString)) {
+          Logger.info(
+            "[ModuleLoader] Dart library '${uri.toString()}' has bridged content, falling through to bridge registration.",
+          );
+          // Fall through to bridged content handling below
+        } else {
+          Logger.error(
+            "[ModuleLoader] Dart library '${uri.toString()}' not supported or recognized by Stdlib.",
+          );
+          throw SourceCodeD4rtException(
+            "Dart library '${uri.toString()}' not supported.",
+          );
+        }
+      }
+    }
+    // Check if this URI has any bridged types or library-scoped globals registered
+    final hasBridgedContent =
+        bridgedClases.isNotEmpty ||
+        bridgedEnumDefinitions.isNotEmpty ||
+        libraryFunctions.isNotEmpty ||
+        libraryVariables.isNotEmpty ||
+        libraryGetters.isNotEmpty ||
+        librarySetters.isNotEmpty ||
+        bridgedExtensions.isNotEmpty;
+
+    if (hasBridgedContent) {
+      // Track if this specific URI has any content registered
+      bool hasContentForUri = false;
+      final registrationErrors = <String>[];
+
+      for (final libEnum
+          in bridgedEnumDefinitions[uriString]?.values ??
+              const <LibraryEnum>[]) {
+        hasContentForUri = true;
+        final definition = libEnum.enumDefinition;
+        final enumName = definition.name;
+
+        // Check show/hide filters
+        if (!_shouldRegisterName(
+          enumName,
+          showNames: showNames,
+          hideNames: hideNames,
+        )) {
+          Logger.debugLazy(
+            () =>
+                " [execute] Skipping enum '$enumName' due to show/hide filter",
+          );
+          continue;
+        }
+
+        // Use sourceUri for deduplication if available, otherwise fall back to import URI
+        final sourceUri = libEnum.sourceUri ?? uriString;
+
+        if (_registeredEnums.containsKey(enumName)) {
+          final existingSourceUri = _registeredEnums[enumName]!;
+          if (existingSourceUri == sourceUri) {
+            // Same enum from same canonical source - silently skip (re-export case)
+            Logger.debugLazy(
+              () =>
+                  " [execute] Skipping duplicate enum '$enumName' from same source: $sourceUri",
+            );
+            continue;
+          } else {
+            // Different source - this is an actual duplicate, error
+            registrationErrors.add(
+              "Duplicate enum '$enumName' exists from source '$existingSourceUri' and source '$sourceUri'. "
+              "These are different enums with the same name.",
+            );
+            continue;
+          }
+        }
+
+        _registeredEnums[enumName] = sourceUri;
+
+        try {
+          final bridgedEnum = definition.buildBridgedEnum();
+          // SCE25: see the sibling call above.
+          globalEnvironment.defineBridgedEnum(
+            bridgedEnum,
+            sourceUri: sourceUri,
+          );
+          Logger.debugLazy(
+            () =>
+                " [execute] Registered bridged enum: $enumName from $sourceUri",
+          );
+        } catch (e) {
+          Logger.error("registering bridged enum '$enumName': $e");
+          registrationErrors.add(
+            "Failed to register bridged enum '$enumName': $e",
+          );
+        }
+      }
+
+      for (final libClass
+          in bridgedClases[uriString]?.values ?? const <LibraryClass>[]) {
+        hasContentForUri = true;
+        final className = libClass.name;
+
+        // Check show/hide filters
+        if (!_shouldRegisterName(
+          className,
+          showNames: showNames,
+          hideNames: hideNames,
+        )) {
+          Logger.debugLazy(
+            () =>
+                " [execute] Skipping class '$className' due to show/hide filter",
+          );
+          continue;
+        }
+
+        // Use sourceUri for deduplication if available, otherwise fall back to import URI
+        final sourceUri = libClass.sourceUri ?? uriString;
+
+        if (_registeredClasses.containsKey(className)) {
+          final existingSourceUri = _registeredClasses[className]!;
+          if (existingSourceUri == sourceUri) {
+            // Same class from same canonical source - silently skip (re-export case)
+            Logger.debugLazy(
+              () =>
+                  " [execute] Skipping duplicate class '$className' from same source: $sourceUri",
+            );
+            continue;
+          }
+          // Two different libraries declare a same-name bridge. Do NOT error
+          // here: registration mirrors Dart's *import*, and importing two
+          // libraries that both export `Foo` is legal. What is illegal is
+          // *referring* to the bare `Foo` afterwards, so the environment
+          // records the ambiguity (keyed by source URI) and reports it at the
+          // reference — see [Environment.defineBridgeLazy] and the
+          // AmbiguousBridgedNameException thrown from [Environment.lookup].
+          // Both classes stay reachable as `<package>.Foo`.
+          Logger.debugLazy(
+            () =>
+                " [execute] Same-name class '$className' from a different "
+                "source ($existingSourceUri vs $sourceUri); the bare name "
+                "becomes ambiguous and must be qualified.",
+          );
+        }
+
+        _registeredClasses[className] = sourceUri;
+
+        try {
+          // Step #17 — transfer the deferred thunk (build on first resolve).
+          // The source URI travels with it: it is what the ambiguity report
+          // and the `<package>.Name` qualifier are derived from.
+          globalEnvironment.defineBridgeLazy(
+            libClass.name,
+            libClass.nativeType,
+            libClass.thunk,
+            sourceUri: sourceUri,
+          );
+          Logger.debugLazy(
+            () =>
+                " [execute] Registered bridged class: $className from $sourceUri",
+          );
+        } catch (e) {
+          Logger.error("registering bridged class '$className': $e");
+          registrationErrors.add(
+            "Failed to register bridged class '$className': $e",
+          );
+        }
+      }
+
+      // Register library-scoped functions for this import
+      for (final libFunc
+          in libraryFunctions[uriString]?.values ?? const <LibraryFunction>[]) {
+        hasContentForUri = true;
+        final nativeFunc = libFunc.function;
+        final funcName = nativeFunc.name;
+
+        // Check show/hide filters first
+        if (!_shouldRegisterName(
+          funcName,
+          showNames: showNames,
+          hideNames: hideNames,
+        )) {
+          Logger.debugLazy(
+            () =>
+                " [execute] Skipping function '$funcName' due to show/hide filter",
+          );
+          continue;
+        }
+
+        // Use sourceUri for deduplication if available, otherwise fall back to import URI
+        final sourceUri = libFunc.sourceUri ?? uriString;
+
+        // Check for duplicate registration
+        if (_registeredFunctions.containsKey(funcName)) {
+          final existingSourceUri = _registeredFunctions[funcName]!;
+          if (existingSourceUri == sourceUri) {
+            // Same function from same canonical source - silently skip (re-export case)
+            Logger.debugLazy(
+              () =>
+                  " [execute] Skipping duplicate function '$funcName' from same source: $sourceUri",
+            );
+            continue;
+          } else {
+            // Different source - this is an actual duplicate, error
+            registrationErrors.add(
+              "Duplicate function '$funcName' exists from source '$existingSourceUri' and source '$sourceUri'. "
+              "Use import show/hide clauses to resolve the conflict.",
+            );
+            continue;
+          }
+        }
+
+        try {
+          globalEnvironment.define(funcName, nativeFunc);
+          _registeredFunctions[funcName] = sourceUri;
+          Logger.debugLazy(
+            () =>
+                " [execute] Registered library function: $funcName from $sourceUri",
+          );
+        } catch (e) {
+          Logger.error("registering library function '$funcName': $e");
+          registrationErrors.add("Failed to register function '$funcName': $e");
+        }
+      }
+
+      // Register library-scoped variables for this import
+      for (final libVar
+          in libraryVariables[uriString]?.values ?? const <LibraryVariable>[]) {
+        hasContentForUri = true;
+        final varName = libVar.name;
+
+        // Check show/hide filters first
+        if (!_shouldRegisterName(
+          varName,
+          showNames: showNames,
+          hideNames: hideNames,
+        )) {
+          Logger.debugLazy(
+            () =>
+                " [execute] Skipping variable '$varName' due to show/hide filter",
+          );
+          continue;
+        }
+
+        // Use sourceUri for deduplication if available, otherwise fall back to import URI
+        final sourceUri = libVar.sourceUri ?? uriString;
+
+        // Check for duplicate registration
+        if (_registeredVariables.containsKey(varName)) {
+          final existingSourceUri = _registeredVariables[varName]!;
+          if (existingSourceUri == sourceUri) {
+            // Same variable from same canonical source - silently skip (re-export case)
+            Logger.debugLazy(
+              () =>
+                  " [execute] Skipping duplicate variable '$varName' from same source: $sourceUri",
+            );
+            continue;
+          } else {
+            // Different source - this is an actual duplicate, error
+            registrationErrors.add(
+              "Duplicate variable '$varName' exists from source '$existingSourceUri' and source '$sourceUri'. "
+              "Use import show/hide clauses to resolve the conflict.",
+            );
+            continue;
+          }
+        }
+
+        try {
+          globalEnvironment.define(varName, libVar.value);
+          _registeredVariables[varName] = sourceUri;
+          Logger.debugLazy(
+            () =>
+                " [execute] Registered library variable: $varName from $sourceUri",
+          );
+        } catch (e) {
+          Logger.error("registering library variable '$varName': $e");
+          registrationErrors.add("Failed to register variable '$varName': $e");
+        }
+      }
+
+      // Register library-scoped getters for this import
+      for (final libGetter
+          in libraryGetters[uriString]?.values ?? const <LibraryGetter>[]) {
+        hasContentForUri = true;
+        final getterName = libGetter.name;
+
+        // Check show/hide filters first
+        if (!_shouldRegisterName(
+          getterName,
+          showNames: showNames,
+          hideNames: hideNames,
+        )) {
+          Logger.debugLazy(
+            () =>
+                " [execute] Skipping getter '$getterName' due to show/hide filter",
+          );
+          continue;
+        }
+
+        // Use sourceUri for deduplication if available, otherwise fall back to import URI
+        final sourceUri = libGetter.sourceUri ?? uriString;
+
+        // Check for duplicate registration
+        if (_registeredGetters.containsKey(getterName)) {
+          final existingSourceUri = _registeredGetters[getterName]!;
+          if (existingSourceUri == sourceUri) {
+            // Same getter from same canonical source - silently skip (re-export case)
+            Logger.debugLazy(
+              () =>
+                  " [execute] Skipping duplicate getter '$getterName' from same source: $sourceUri",
+            );
+            continue;
+          } else {
+            // Different source - this is an actual duplicate, error
+            registrationErrors.add(
+              "Duplicate getter '$getterName' exists from source '$existingSourceUri' and source '$sourceUri'. "
+              "Use import show/hide clauses to resolve the conflict.",
+            );
+            continue;
+          }
+        }
+
+        try {
+          globalEnvironment.define(getterName, GlobalGetter(libGetter.getter));
+          _registeredGetters[getterName] = sourceUri;
+          Logger.debugLazy(
+            () =>
+                " [execute] Registered library getter: $getterName from $sourceUri",
+          );
+        } catch (e) {
+          Logger.error("registering library getter '$getterName': $e");
+          registrationErrors.add("Failed to register getter '$getterName': $e");
+        }
+      }
+
+      // Register library-scoped setters for this import
+      // Setters update existing GlobalGetters to include setter support
+      for (final libSetter
+          in librarySetters[uriString]?.values ?? const <LibrarySetter>[]) {
+        hasContentForUri = true;
+        final setterName = libSetter.name;
+
+        // Check show/hide filters first
+        if (!_shouldRegisterName(
+          setterName,
+          showNames: showNames,
+          hideNames: hideNames,
+        )) {
+          Logger.debugLazy(
+            () =>
+                " [execute] Skipping setter '$setterName' due to show/hide filter",
+          );
+          continue;
+        }
+
+        // Use sourceUri for deduplication if available, otherwise fall back to import URI
+        final sourceUri = libSetter.sourceUri ?? uriString;
+
+        // Check for duplicate registration
+        if (_registeredSetters.containsKey(setterName)) {
+          final existingSourceUri = _registeredSetters[setterName]!;
+          if (existingSourceUri == sourceUri) {
+            // Same setter from same canonical source - silently skip (re-export case)
+            Logger.debugLazy(
+              () =>
+                  " [execute] Skipping duplicate setter '$setterName' from same source: $sourceUri",
+            );
+            continue;
+          } else {
+            // Different source - this is an actual duplicate, error
+            registrationErrors.add(
+              "Duplicate setter '$setterName' exists from source '$existingSourceUri' and source '$sourceUri'. "
+              "Use import show/hide clauses to resolve the conflict.",
+            );
+            continue;
+          }
+        }
+
+        try {
+          // Find the corresponding getter and update it to include the setter
+          final existingValue = globalEnvironment.getRawValueIfDefined(
+            setterName,
+          );
+          if (existingValue is GlobalGetter) {
+            // Replace GlobalGetter with one that includes the setter
+            globalEnvironment.define(
+              setterName,
+              GlobalGetter(existingValue.getter, setter: libSetter.setter),
+            );
+            Logger.debugLazy(
+              () =>
+                  " [execute] Added setter to existing getter: $setterName from $sourceUri",
+            );
+          } else {
+            // No getter yet - create a GlobalGetter that only has a setter
+            // This allows assignment to work, but reading will return null
+            Logger.warn(
+              " [execute] Setter '$setterName' registered without corresponding getter",
+            );
+            globalEnvironment.define(
+              setterName,
+              GlobalGetter(
+                () => null, // No getter - reading returns null
+                setter: libSetter.setter,
+              ),
+            );
+          }
+          _registeredSetters[setterName] = sourceUri;
+          Logger.debugLazy(
+            () =>
+                " [execute] Registered library setter: $setterName from $sourceUri",
+          );
+        } catch (e) {
+          Logger.error("registering library setter '$setterName': $e");
+          registrationErrors.add("Failed to register setter '$setterName': $e");
+        }
+      }
+
+      // Register bridged extensions for this import
+      for (final libExt
+          in bridgedExtensions[uriString] ?? const <LibraryExtension>[]) {
+        hasContentForUri = true;
+        final definition = libExt.extensionDefinition;
+        final extName = definition.name ?? '<unnamed>';
+
+        // Named extensions are subject to show/hide filters;
+        // unnamed extensions are always registered since they cannot be hidden by name.
+        if (definition.name != null &&
+            !_shouldRegisterName(
+              definition.name!,
+              showNames: showNames,
+              hideNames: hideNames,
+            )) {
+          Logger.debugLazy(
+            () =>
+                " [execute] Skipping extension '$extName' due to show/hide filter",
+          );
+          continue;
+        }
+
+        // Use sourceUri for deduplication if available, otherwise fall back to import URI
+        final sourceUri = libExt.sourceUri ?? uriString;
+
+        // Use a deduplication key that combines name + onType to allow
+        // extensions with different target types but same name.
+        final deduplicationKey = '$extName@${definition.onTypeName}';
+
+        if (_registeredExtensions.containsKey(deduplicationKey)) {
+          final existingSourceUri = _registeredExtensions[deduplicationKey]!;
+          if (existingSourceUri == sourceUri) {
+            Logger.debugLazy(
+              () =>
+                  " [execute] Skipping duplicate extension '$extName on ${definition.onTypeName}' from same source: $sourceUri",
+            );
+            continue;
+          } else {
+            registrationErrors.add(
+              "Duplicate extension '$extName on ${definition.onTypeName}' exists from source '$existingSourceUri' and source '$sourceUri'.",
+            );
+            continue;
+          }
+        }
+
+        _registeredExtensions[deduplicationKey] = sourceUri;
+
+        try {
+          // Resolve the onType from the environment
+          RuntimeType? onType;
+          try {
+            final typeObj = globalEnvironment.get(definition.onTypeName);
+            if (typeObj is RuntimeType) {
+              onType = typeObj;
+            }
+          } on RuntimeD4rtException {
+            // Type not found yet — try fallbacks
+          }
+
+          // GEN-056 FIX: If the type isn't found in the environment, try
+          // resolving it from registered bridge classes and stdlib modules.
+          // This handles cases where a bridge extension targets a type from
+          // a different package or stdlib (e.g., PlatformEx on Platform from
+          // dart:io) that hasn't been explicitly imported by the script.
+          onType ??= _resolveTypeForExtension(definition.onTypeName);
+
+          if (onType == null) {
+            Logger.warn(
+              " [execute] Could not resolve type '${definition.onTypeName}' for extension '$extName'. "
+              "Extension will not be registered.",
+            );
+            registrationErrors.add(
+              "Could not resolve type '${definition.onTypeName}' for extension '$extName'.",
+            );
+            continue;
+          }
+
+          final interpretedExt = definition.buildInterpretedExtension(onType);
+
+          // Named extensions are defined by name; unnamed are added as unnamed extensions
+          if (definition.name != null) {
+            globalEnvironment.define(definition.name!, interpretedExt);
+            Logger.debugLazy(
+              () =>
+                  " [execute] Registered named bridged extension: ${definition.name} on ${definition.onTypeName} from $sourceUri",
+            );
+          } else {
+            globalEnvironment.addUnnamedExtension(interpretedExt);
+            Logger.debugLazy(
+              () =>
+                  " [execute] Registered unnamed bridged extension on ${definition.onTypeName} from $sourceUri",
+            );
+          }
+        } catch (e) {
+          Logger.error("registering bridged extension '$extName': $e");
+          registrationErrors.add("Failed to register extension '$extName': $e");
+        }
+      }
+
+      if (registrationErrors.isNotEmpty) {
+        if (collectRegistrationErrors) {
+          // Accumulate errors instead of throwing — allows collecting all errors
+          accumulatedRegistrationErrors.addAll(registrationErrors);
+        } else {
+          final errorList = registrationErrors.map((e) => '- $e').join('\n');
+          throw RuntimeD4rtException(
+            'Errors during bridge registration:\n$errorList',
+          );
+        }
+      }
+
+      // If this URI had bridged content, return empty source
+      if (hasContentForUri) {
+        // GEN-107: Also load any libraries that this URI re-exports.
+        // This mirrors what ast_module_loader._mergeReExports does for the
+        // AST-based pipeline: walks d4rt.libraryReExports[uriString] and
+        // recursively calls _fetchModuleSource for every re-exported target
+        // that has bridged content, so that a script which only imports
+        // 'package:flutter/material.dart' still gets Widget (from
+        // 'package:flutter/widgets.dart') in its globalEnvironment.
+        // Thread reExportVisited so the caller's traversal cycle-set is shared,
+        // preventing exponential re-traversal when _fetchModuleSource is called
+        // from inside _mergeReExportsGlobal (which would otherwise start a fresh
+        // empty-set traversal for every bridge URI it encounters).
+        _mergeReExportsGlobal(uriString, reExportVisited ?? <String>{});
+        return '';
+      }
+    }
+
+    // DFUB2 — the source could not be resolved. Produce a message specific to
+    // WHY it failed so callers get an actionable diagnostic.
+    Logger.error(
+      "[ModuleLoader] Source not preloaded and not a recognized Dart standard library for URI: $uriString",
+    );
+    throw _missingModuleSourceError(uri);
+  }
+
+  /// DFUB2 — builds a diagnostic for a module source that could not be
+  /// resolved, distinguishing the reason:
+  ///
+  /// - a filesystem candidate with [allowFileSystemImports] disabled → the
+  ///   import is off but the URI names a file (enable the flag or preload it);
+  /// - a filesystem candidate that simply does not exist on disk → include the
+  ///   resolved path so the caller can see where the loader looked;
+  /// - a `package:` URI → package-specific guidance (preload or bridge it);
+  /// - anything else → the generic "not preloaded / not a stdlib" message.
+  ///
+  /// The path-scope canonicalization (`..` traversal) is hardened separately
+  /// in DFUB11; the platform io/web split is DFUB12.
+  SourceCodeD4rtException _missingModuleSourceError(Uri uri) {
+    final uriString = uri.toString();
+    final fileUri = _resolveFileSystemUri(uri);
+
+    if (fileUri != null) {
+      if (!allowFileSystemImports) {
+        return SourceCodeD4rtException(
+          "Module source not preloaded for URI: $uriString. Filesystem "
+          "imports are disabled; enable allowFileSystemImports or preload "
+          "the module source.",
+          uriString,
+        );
+      }
+      final resolvedPath = File.fromUri(fileUri).absolute.path;
+      return SourceCodeD4rtException(
+        "Module source not found on filesystem for URI: $uriString "
+        "(resolved path: $resolvedPath).",
+        uriString,
+      );
+    }
+
+    if (uri.scheme == 'package') {
+      return SourceCodeD4rtException(
+        "Package module source not preloaded for URI: $uriString. Provide "
+        "it in sources or register a bridge for that package library.",
+        uriString,
+      );
+    }
+
+    return SourceCodeD4rtException(
+      "Module source not preloaded for URI: $uriString, and not a "
+      "recognized Dart standard library.",
+      uriString,
+    );
+  }
+
+  /// DFUB2 — gates a filesystem module-source read behind a
+  /// [FilesystemPermission] read check.
+  ///
+  /// The resolved [fileUri] is normalized to an absolute path and matched
+  /// against the granted permissions via [D4rt.checkPermission]. An ungranted
+  /// read throws a [RuntimeD4rtException] before any bytes are read. No-op when
+  /// there is no owning [D4rt] instance (nothing to enforce against).
+  void _checkFileSystemSourceReadPermission(Uri fileUri) {
+    if (d4rt == null) return;
+
+    final filePath = File.fromUri(fileUri).absolute.path;
+    if (!d4rt!.checkPermission({
+      'type': 'filesystem',
+      'path': filePath,
+      'read': true,
+    })) {
+      throw RuntimeD4rtException(
+        'Reading module source from "$filePath" requires '
+        'FilesystemPermission.',
+      );
+    }
+  }
+
+  /// GEN-056 FIX: Resolve a RuntimeType for an extension's on-type by
+  /// searching registered bridge classes and auto-loading stdlib modules.
+  ///
+  /// This handles cases where:
+  /// 1. An extension targets a type from another bridge package that may
+  ///    already be registered (e.g., MyClassExt on MyClass from pkg_a)
+  /// 2. An extension targets a stdlib type (e.g., PlatformEx on Platform
+  ///    from dart:io) that hasn't been explicitly imported by the script
+  ///
+  /// Returns the RuntimeType if found, or null if the type cannot be resolved.
+  RuntimeType? _resolveTypeForExtension(String typeName) {
+    // Fallback 1: Search all registered BridgedClass definitions.
+    // These are bridge classes registered with the interpreter (via
+    // registerBridgedClass) that may not yet be loaded into the environment.
+    for (final classMap in bridgedClases.values) {
+      for (final libClass in classMap.values) {
+        // Step #17 — compare by name without forcing a build; only the matched
+        // class is materialized (it is genuinely being resolved here).
+        if (libClass.name == typeName) {
+          // Register the class in globalEnvironment so it's available
+          // for extension type matching
+          globalEnvironment.defineBridgeLazy(
+            libClass.name,
+            libClass.nativeType,
+            libClass.thunk,
+          );
+          Logger.debug(
+            "[ModuleLoader] Resolved extension on-type '$typeName' from registered bridge class",
+          );
+          return libClass.bridgedClass;
+        }
+      }
+    }
+
+    // Fallback 2: Try auto-loading known stdlib modules.
+    // Bridge packages may depend on stdlib types (e.g., DCli uses Platform
+    // from dart:io). In real Dart, these would be transitively available.
+    // We auto-load stdlib modules to find the type.
+    // Derived from [_stdlibRegistrars] rather than written out again. It WAS
+    // written out again, and the copy had already drifted: it was missing
+    // `isolate`, so a bridge package depending on a `dart:isolate` type found
+    // nothing here while every other stdlib module was tried. Two lists of the
+    // same thing is the shape SCC76 guards one level up, and it does not stop
+    // being that shape because these are closures.
+    for (final entry in _stdlibRegistrars.entries) {
+      if (_autoLoadedStdlibs.contains(entry.key)) continue;
+
+      // Load the stdlib module
+      entry.value(globalEnvironment);
+      _autoLoadedStdlibs.add(entry.key);
+
+      // Check if the type is now available. `lookup`, not `get`: missing here
+      // is the loop's normal outcome — every module that does not carry the
+      // type misses, and a type that resolves nowhere misses in all of them,
+      // which the caller handles by warning and skipping the extension. The
+      // throwing `get` left one reported `Undefined variable` behind per miss,
+      // failing any host that reads the ErrorReporter as its pass/fail signal.
+      final typeObj = globalEnvironment.lookup(typeName);
+      if (typeObj is RuntimeType) {
+        Logger.debug(
+          "[ModuleLoader] Auto-loaded stdlib '${entry.key}' to resolve extension on-type '$typeName'",
+        );
+        return typeObj;
+      }
+    }
+
+    return null; // Type not found anywhere
+  }
+
+  CompilationUnit _parseSource(Uri uri, String sourceCode) {
+    Logger.debug("[ModuleLoader] Parsing source for module: ${uri.toString()}");
+    // Ensure the path passed to parseString is meaningful for errors.
+    // If the URI is opaque (ex: custom scheme), toFilePath may fail.
+    // Use uri.path or uri.toString() as a fallback.
+    String pathToReport = uri.isScheme('file')
+        ? uri.toFilePath()
+        : uri.toString();
+
+    final result = parseString(
+      content: sourceCode,
+      throwIfDiagnostics: false,
+      path: pathToReport,
+      featureSet: FeatureSet.fromEnableFlags2(
+        sdkLanguageVersion: Version(
+          3,
+          10,
+          0,
+        ), // Dart 3.6 for digit-separators and null-aware-elements
+        flags: [
+          'non-nullable',
+          'null-aware-elements',
+          'triple-shift',
+          'spread-collections',
+          'control-flow-collections',
+          'extension-methods',
+          'extension-types',
+          'digit-separators',
+        ],
+      ),
+    );
+
+    final errors = result.errors
+        .where((e) => e.diagnosticCode.severity == DiagnosticSeverity.ERROR)
+        .toList();
+    if (errors.isNotEmpty) {
+      // SCE111: two defects behind the sentence SCE111 went to converge on,
+      // both measured rather than inferred. The location read `ligne`/`colonne`
+      // — the only French left in the package, and inconsistent with the
+      // direct-source path in `d4rt_base.dart`, which is the same report for
+      // the same event one caller over. And `join("\\n")` in a double-quoted
+      // string is an escaped backslash followed by `n`, not a newline, so four
+      // diagnostics arrived as ONE run-on line containing the characters `\\n`.
+      // The direct-source path has always joined with a real newline.
+      final errorMessages = errors
+          .map((e) {
+            final location = result.lineInfo.getLocation(e.offset);
+            return "- ${e.message} (line ${location.lineNumber}, column ${location.columnNumber})";
+          })
+          .join("\n");
+      Logger.error(
+        "[ModuleLoader] Parsing errors for $pathToReport:\n$errorMessages",
+      );
+      throw SourceCodeD4rtException(
+        "Parsing errors in module $pathToReport:\n$errorMessages",
+        sourceCode,
+      );
+    }
+    Logger.debug(
+      "[ModuleLoader] Module ${uri.toString()} parsed successfully.",
+    );
+    return result.unit;
+  }
+
+  // ---------------------------------------------------------------------------
+  // GEN-107: Re-export merging for the source-based interpreter.
+  //
+  // When a bridged module is loaded, Dart's `export` semantics mean that
+  // symbols visible through re-exported libraries must also be available to
+  // scripts that import the re-exporting barrel. For example, a script that
+  // writes `import 'package:flutter/material.dart'` expects `Widget` to be
+  // in scope even though `Widget`'s bridge is registered under
+  // `package:flutter/widgets.dart`.
+  //
+  // The generator (GEN-107 Phase 2) already records re-export edges in
+  // `D4rt.libraryReExports` via `registerBridges → registerLibraryReExport`.
+  // _mergeReExportsGlobal walks that map and loads bridges for every
+  // transitively re-exported URI into `globalEnvironment`, mirroring what
+  // `AstModuleLoader._mergeReExports` does for the AST-based pipeline.
+  // ---------------------------------------------------------------------------
+
+  /// GEN-107: Load bridges for all libraries re-exported by [sourceUri] into
+  /// [globalEnvironment], respecting per-edge show/hide filters.
+  ///
+  /// The cycle guard is placed on [sourceUri] at the top of the method so
+  /// that the same *source* file is never processed twice, but the same
+  /// *target* URI can still be reached via multiple re-export paths, each
+  /// with its own show/hide clause.  This is required because a single
+  /// target (e.g. `dart:ui`) is commonly re-exported by several source
+  /// files with disjoint name sets:
+  ///
+  ///   painting.dart → dart:ui  show:{PlaceholderAlignment,...}
+  ///   src/painting/basic_types.dart → dart:ui  show:{Offset,Color,...}
+  ///
+  /// Both paths must be followed; the per-edge show/hide filters ensure only
+  /// the names each source actually exposes are registered, preventing
+  /// duplicate-sourceUri conflicts in [_fetchModuleSource]'s dedup maps.
+  ///
+  /// The recursive call to [_mergeReExportsGlobal] is made unconditionally for
+  /// every re-export edge so that transitive re-exports are followed even when
+  /// a URI has no direct bridge content of its own.
+  ///
+  /// [visited] prevents infinite recursion on cyclic re-export graphs.
+  /// Callers should pass an empty set; this method adds [sourceUri] itself.
+  void _mergeReExportsGlobal(String sourceUri, Set<String> visited) {
+    if (d4rt == null) return;
+    // Cycle guard on SOURCE URI — prevents reprocessing the same source file.
+    // Do NOT guard on the target (re.uri): different sources pointing to the
+    // same target with different show/hide sets must each be processed.
+    if (!visited.add(sourceUri)) return;
+
+    final reExports = d4rt!.libraryReExports[sourceUri];
+    if (reExports == null || reExports.isEmpty) return;
+
+    for (final re in reExports) {
+      final targetUri = Uri.parse(re.uri);
+
+      if (targetUri.scheme == 'dart') {
+        // dart: re-exports — delegate to _fetchModuleSource which handles
+        // stdlib and bridged dart: URIs. Ignore unknown dart: libraries.
+        try {
+          _fetchModuleSource(
+            targetUri,
+            showNames: re.show,
+            hideNames: re.hide,
+            reExportVisited: visited,
+          );
+        } on SourceCodeD4rtException {
+          // Unknown dart: library in a re-export — not a user error, skip.
+        }
+      } else if (_hasBridgedContentForUri(re.uri)) {
+        // package: URI with registered bridges — load with show/hide applied.
+        // _fetchModuleSource dedup maps prevent double-registration of names
+        // from the same canonical sourceUri.  Pass visited so the shared
+        // traversal set prevents exponential re-traversal of the same nodes.
+        try {
+          _fetchModuleSource(
+            targetUri,
+            showNames: re.show,
+            hideNames: re.hide,
+            reExportVisited: visited,
+          );
+        } on SourceCodeD4rtException {
+          Logger.debug(
+            '[ModuleLoader] GEN-107: unexpected error loading re-exported '
+            'bridge for ${re.uri} (re-exported from $sourceUri)',
+          );
+        }
+      }
+
+      // Always recurse — the target URI may itself re-export other URIs even
+      // if it has no direct bridge content (e.g. pure-barrel source files).
+      _mergeReExportsGlobal(re.uri, visited);
+    }
+  }
+}
+
+/// The names a module declares at its top level (DFIN6): what its exported
+/// environment carries before its `export` directives are applied. Imported
+/// names are not among them.
+Set<String> _ownTopLevelNames(CompilationUnit unit) {
+  final names = <String>{};
+  for (final d in unit.declarations) {
+    switch (d) {
+      case NamedCompilationUnitMember():
+        names.add(d.name.lexeme);
+      case ExtensionDeclaration(:final name?):
+        names.add(name.lexeme);
+      case TopLevelVariableDeclaration():
+        for (final v in d.variables.variables) {
+          names.add(v.name.lexeme);
+        }
+      default:
+        break;
+    }
+  }
+  return names;
+}

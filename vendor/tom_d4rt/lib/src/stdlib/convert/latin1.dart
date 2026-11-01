@@ -1,0 +1,182 @@
+import 'dart:convert';
+import 'package:tom_d4rt/d4rt.dart';
+import '../coerce_elements.dart';
+import 'fuse_argument.dart';
+
+class Latin1CodecConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Latin1Codec,
+    name: 'Latin1Codec',
+    isAssignable: (v) => v is Latin1Codec,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        final allowInvalid = namedArgs.get<bool?>('allowInvalid') ?? false;
+        return Latin1Codec(allowInvalid: allowInvalid);
+      },
+    },
+    methods: {
+      'encode': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Latin1Codec.encode', atMost: 1);
+        return (target as Latin1Codec).encode(positionalArgs[0] as String);
+      },
+      'decode': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Latin1Codec.decode', atMost: 1);
+        final allowInvalid = namedArgs.get<bool?>('allowInvalid');
+        return (target as Latin1Codec).decode(
+          coerceElements<int>(positionalArgs[0], 'latin1.decode'),
+          allowInvalid: allowInvalid,
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Codec<List<int>, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'Latin1Codec.fuse',
+              'Codec<List<int>, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as Latin1Codec).fuse(
+          positionalArgs[0] as Codec<List<int>, dynamic>,
+        );
+      },
+    },
+    getters: {
+      'encoder': (visitor, target) => (target as Latin1Codec).encoder,
+      'decoder': (visitor, target) => (target as Latin1Codec).decoder,
+      'name': (visitor, target) => (target as Latin1Codec).name,
+      'inverted': (visitor, target) => (target as Latin1Codec).inverted,
+    },
+  );
+}
+
+class Latin1EncoderConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Latin1Encoder,
+    name: 'Latin1Encoder',
+    isAssignable: (v) => v is Latin1Encoder,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty || namedArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            'Latin1Encoder constructor takes no arguments.',
+          );
+        }
+        return Latin1Encoder();
+      },
+    },
+    methods: {
+      'convert': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Latin1Codec.convert', atMost: 1);
+        return (target as Latin1Encoder).convert(positionalArgs[0] as String);
+      },
+      'startChunkedConversion':
+          (visitor, target, positionalArgs, namedArgs, _) {
+            if (positionalArgs.length != 1 || positionalArgs[0] is! Sink) {
+              throw RuntimeD4rtException(
+                'startChunkedConversion requires a Sink<List<int>> argument.',
+              );
+            }
+            return (target as Latin1Encoder).startChunkedConversion(
+              D4.adaptSink<List<int>>(positionalArgs[0], 'sink'),
+            );
+          },
+      'bind': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'Latin1Encoder.bind requires a Stream<String> argument.',
+          );
+        }
+        return (target as Latin1Encoder).bind(
+          D4.coerceStream<String>(positionalArgs[0], 'Latin1Encoder.bind'),
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Converter<List<int>, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'Latin1Encoder.fuse',
+              'Converter<List<int>, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as Latin1Encoder).fuse(
+          positionalArgs[0] as Converter<List<int>, dynamic>,
+        );
+      },
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as Latin1Encoder).cast<String, List<int>>();
+      },
+    },
+    getters: {},
+  );
+}
+
+class Latin1DecoderConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Latin1Decoder,
+    name: 'Latin1Decoder',
+    isAssignable: (v) => v is Latin1Decoder,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        final allowInvalid = namedArgs.get<bool?>('allowInvalid') ?? false;
+        return Latin1Decoder(allowInvalid: allowInvalid);
+      },
+    },
+    methods: {
+      'convert': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Latin1Codec.convert', atMost: 1);
+        return (target as Latin1Decoder).convert(
+          coerceElements<int>(positionalArgs[0], 'latin1.decode'),
+        );
+      },
+      'startChunkedConversion':
+          (visitor, target, positionalArgs, namedArgs, _) {
+            if (positionalArgs.length != 1 || positionalArgs[0] is! Sink) {
+              throw RuntimeD4rtException(
+                'startChunkedConversion requires a Sink<String> argument.',
+              );
+            }
+            return (target as Latin1Decoder).startChunkedConversion(
+              D4.adaptSink<String>(positionalArgs[0], 'sink'),
+            );
+          },
+      'bind': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'Latin1Decoder.bind requires a Stream<List<int>> argument.',
+          );
+        }
+        return (target as Latin1Decoder).bind(
+          D4.coerceByteStream(positionalArgs[0], 'Latin1Decoder.bind'),
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Converter<String, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'Latin1Decoder.fuse',
+              'Converter<String, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as Latin1Decoder).fuse(
+          positionalArgs[0] as Converter<String, dynamic>,
+        );
+      },
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as Latin1Decoder).cast<List<int>, String>();
+      },
+    },
+    getters: {},
+  );
+}

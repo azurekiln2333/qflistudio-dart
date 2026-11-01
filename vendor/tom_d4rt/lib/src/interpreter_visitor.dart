@@ -1,0 +1,16263 @@
+import 'dart:async';
+import 'package:analyzer/dart/ast/ast.dart' hide TypeParameter;
+import 'package:analyzer/dart/ast/token.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/dart/element/type.dart';
+import 'package:tom_d4rt/d4rt.dart';
+import 'package:tom_d4rt/src/utils/extensions/string.dart';
+import 'package:tom_d4rt/src/unbridged_reasons.dart';
+
+/// Main visitor that walks the AST and interprets the code.
+/// Uses a two-pass approach (DeclarationVisitor first).
+/// SCE104: the answer [InterpreterVisitor._tryCast] gives when a cast cannot
+/// succeed.
+///
+/// A sentinel rather than an exception because the two constructs that perform
+/// a cast word their failure differently, and rather than `null` because `null`
+/// is a perfectly good cast result — `null as int?` succeeds and yields it.
+class _CastFailure {
+  const _CastFailure();
+}
+
+const _CastFailure _castFailed = _CastFailure();
+
+class InterpreterVisitor extends GeneralizingAstVisitor<Object?> {
+  /// SCC33 — the dispatch backstop.
+  ///
+  /// `GeneralizingAstVisitor.visitNode` walks the node's children and answers
+  /// `null`. For a visitor that *traverses*, that is the right default; for one
+  /// that *evaluates*, it is a trapdoor. A node with no handler did not fail —
+  /// it quietly produced `null`, and the program carried that `null` until it
+  /// hit something that could not take it, several frames away and in
+  /// unrelated code. `#foo` evaluated to `null` for the entire life of the
+  /// project this way (SCB11); the error it eventually raised accused a bridge.
+  ///
+  /// Raising here converts that class of defect from "wrong answer, blamed
+  /// elsewhere" into "named diagnostic, at the offset". Everything the
+  /// inherited default was legitimately doing now has an explicit handler —
+  /// see [visitNamedExpression], [visitFunctionDeclarationStatement] and
+  /// [visitTypeAlias], each of which was found by instrumenting this method
+  /// and running the suite rather than by reading the code.
+  @override
+  Object? visitNode(AstNode node) {
+    throw UnimplementedD4rtException(
+      "Unsupported AST node '${node.runtimeType}' at offset ${node.offset}. "
+      "The interpreter has no handler for this construct, so it cannot be "
+      "evaluated. Source: ${_nodeExcerpt(node)}.",
+    );
+  }
+
+  /// A short, single-line, quoted excerpt of [node]'s source, for the
+  /// diagnostic.
+  ///
+  /// Truncated because an unhandled node can be an entire declaration, and a
+  /// multi-line dump buries the node type that is the actual message. The twin
+  /// has no `toSource()` and quotes the bundle's source instead (SCE236); the
+  /// two `visitNode` bodies are identical, and only this helper differs.
+  static String _nodeExcerpt(AstNode node) {
+    final text = node.toSource().replaceAll(RegExp(r'\s+'), ' ');
+    return "'${text.length <= 60 ? text : '${text.substring(0, 57)}...'}'";
+  }
+
+  /// A named argument evaluates to its expression — the label is a name, not a
+  /// value.
+  ///
+  /// Without this, the generalizing default recursed into the children, which
+  /// walked the [Label] and tried to *resolve its identifier as a variable*.
+  /// That is why `super(a: 7)` failed with "Undefined variable: a" while
+  /// `super(a: a)` appeared to work: in the second form a variable of that name
+  /// happened to be in scope, so the accidental lookup succeeded and the real
+  /// value arrived by a different route. Every existing test wrote the
+  /// forwarding form, which is why the suite never caught it.
+  @override
+  Object? visitNamedExpression(NamedExpression node) =>
+      node.expression.accept<Object?>(this);
+
+  /// A local function declaration is executed by evaluating the declaration it
+  /// wraps.
+  ///
+  /// This worked before only as a side effect of the inherited default's child
+  /// recursion. It is spelled out because the behaviour is intended, and
+  /// because `tom_d4rt_ast` already had the explicit handler — this realigns
+  /// the twins.
+  @override
+  Object? visitFunctionDeclarationStatement(
+    FunctionDeclarationStatement node,
+  ) => node.functionDeclaration.accept<Object?>(this);
+
+  /// A type alias binds its NAME to the type it names, and evaluates to
+  /// nothing itself.
+  ///
+  /// SCC33 gave this an explicit handler that returned null, which stopped
+  /// seven further node types reaching the dispatch backstop but left the alias
+  /// with no runtime representation at all. SCD100 measured what that cost:
+  /// `1 is I` through `typedef I = int` did not answer "no", it THREW
+  /// (`Type check failed: Undefined variable: I`), and so did a generic bound
+  /// and a return type written through an alias — legal programs that would not
+  /// run. Three more shapes went the other way and accepted silently what Dart
+  /// rejects, because a parameter, a local and an `as` whose annotation cannot
+  /// be resolved all stay lenient by design.
+  ///
+  /// **One registration fixes all of them.** Every type-resolution path funnels
+  /// through `environment.get(typeName)` — `is`/`as`, parameter binding, return
+  /// checks, generic bounds and a collection literal's type argument — so
+  /// defining the alias name to the RuntimeType its target resolves to makes
+  /// each of them behave exactly as if the script had written the target.
+  ///
+  /// **Still does not recurse**, which is the part SCC33 cares about: the
+  /// target is resolved by [_resolveTypeAnnotationWithEnvironment], which reads
+  /// the annotation directly. No child is ever `accept`ed, so no type-level
+  /// syntax reaches the backstop.
+  ///
+  /// **Lenient when the target cannot be resolved** — the alias simply goes
+  /// unregistered and the old behaviour stands. That covers a forward
+  /// reference on the first pass (see the fixpoint in `d4rt_base.dart`, which
+  /// is what makes declaration order not matter) and a target this resolver
+  /// does not model.
+  ///
+  /// **A GENERIC alias is deliberately skipped.** `typedef L<T> = List<T>`
+  /// needs its type argument substituted at each use site; binding it here
+  /// would bind `T` to nothing and answer confidently wrong, which is worse
+  /// than the leniency it replaces. Tracked as sce130.
+  @override
+  Object? visitTypeAlias(TypeAlias node) {
+    registerTypeAlias(node);
+    return null;
+  }
+
+  /// Bind [node]'s name to its target type, if the target resolves now.
+  ///
+  /// Returns true when a binding was made, so the caller can run this to a
+  /// fixpoint and resolve alias chains written in any order.
+  bool registerTypeAlias(TypeAlias node) {
+    final aliasName = node.name.lexeme;
+    if (environment.isDefinedLocally(aliasName)) return false;
+    // Legacy `typedef R f(A);` has no `= target` to bind at all.
+    if (node is! GenericTypeAlias) return false;
+    if (node.typeParameters != null) return false; // generic alias — see above
+    final target = node.type;
+    final RuntimeType resolved;
+    try {
+      resolved = _resolveTypeAnnotationWithEnvironment(target, environment);
+    } catch (_) {
+      return false; // not resolvable yet, or not modelled — stay lenient
+    }
+    environment.define(aliasName, resolved);
+    _typeAliasAnnotations.putIfAbsent(environment, () => {})[aliasName] =
+        target;
+    return true;
+  }
+
+  final Map<Environment, Map<String, TypeAnnotation>> _typeAliasAnnotations =
+      {};
+
+  /// Retain the syntax of local aliases because RuntimeType erases `?`.
+  (TypeAnnotation, Environment, bool) _expandTypeAlias(
+    TypeAnnotation annotation,
+    Environment scope,
+  ) {
+    var nullable = annotation.question != null;
+    final seen = <TypeAnnotation>{};
+    while (annotation is NamedType && seen.add(annotation)) {
+      var lookupScope = scope;
+      final prefix = annotation.importPrefix?.name.lexeme;
+      if (prefix != null) {
+        final imported = scope.lookup(prefix);
+        if (imported is! Environment) break;
+        lookupScope = imported;
+      }
+      final name = annotation.name.lexeme;
+      final definingScope = lookupScope.findDefiningEnvironment(name);
+      final target = _typeAliasAnnotations[definingScope]?[name];
+      if (target == null) break;
+      annotation = target;
+      scope = definingScope!;
+      nullable = nullable || annotation.question != null;
+    }
+    return (annotation, scope, nullable);
+  }
+
+  Environment environment;
+  final Environment globalEnvironment;
+  final ModuleLoader moduleLoader; // Field for ModuleLoader
+  InterpretedFunction? currentFunction; // Track the function being executed
+  AsyncExecutionState? currentAsyncState;
+
+  /// The statement [visitLabeledStatement] is about to run, and the labels
+  /// written on it. A loop or switch reads its labels from here once, on
+  /// entry — see [_labelsOf] — so a label reaches the statement it is written
+  /// on and nothing nested inside it.
+  AstNode? _labelledStatement;
+  Set<String> _labelledStatementLabels = const {};
+
+  /// The labels written on [statement]: empty unless it is the statement a
+  /// [LabeledStatement] is running right now. Read once, on entry — a nested
+  /// labelled statement replaces the record while the body runs.
+  Set<String> _labelsOf(AstNode statement) =>
+      identical(statement, _labelledStatement)
+      ? _labelledStatementLabels
+      : const {};
+
+  /// For sync* generators: the list to collect yielded values into.
+  /// When non-null, yield statements add directly to this list.
+  List<Object?>? syncGeneratorValues;
+
+  /// For lazy sync* generators: when true, yield throws SyncYieldSuspension
+  /// to pause execution and bubble up through the call stack.
+  bool isLazySyncGeneratorContext = false;
+
+  /// Deferred initializers for class static fields.
+  ///
+  /// Populated during [visitClassDeclaration] when static-field evaluation
+  /// is deferred so that forward references between classes resolve correctly
+  /// (e.g. a static const list in class A that uses class B's const
+  /// constructor, where B is declared after A in source order).
+  ///
+  /// Drained after all class/mixin declarations have been visited, by
+  /// calling [runDeferredStaticInitializers].
+  final List<void Function()> _pendingStaticInitializers = <void Function()>[];
+
+  /// When true, [visitClassDeclaration] will enqueue its static-field
+  /// initializer evaluation onto [_pendingStaticInitializers] instead of
+  /// running it immediately. The top-level runner flips this on for the
+  /// multi-class declaration pass and then drains the queue.
+  bool deferStaticFieldInits = false;
+
+  /// T3 (perf, plan_2 §6 / F4): canonicalization cache for `const` set/map
+  /// literals. A const collection literal is a compile-time constant whose
+  /// value is environment-independent and immutable, so re-visiting the same
+  /// node must yield the identical canonical instance (matching real Dart's
+  /// const canonicalization). Without this, every evaluation re-ran the full
+  /// type-inference + element walk and allocated a fresh
+  /// `UnmodifiableSetView` / `UnmodifiableMapView` — surfacing as the F4
+  /// `UnmodifiableSetView.UnmodifiableSetView` constructor hotspot. The cache
+  /// is keyed by AST node identity and is only populated for const literals;
+  /// non-const literals must still allocate fresh each time. The returned
+  /// views are unmodifiable, so sharing one instance across hits is safe.
+  /// The await sites each collection-literal `for` body in flight has
+  /// reached, innermost last (SCF43). See [_CollectionForReplay].
+  final List<Set<Object>> _collectionForAwaitScopes = [];
+
+  final Map<SetOrMapLiteral, Object> _constCollectionCache =
+      <SetOrMapLiteral, Object>{};
+
+  /// S1/S3c (plan_3 §9.1 / §9.3): per-identifier-use static lexical coordinates
+  /// produced by [StaticResolver]. A coordinate is emitted only for an eligible
+  /// innermost-block local (depth 0); [visitSimpleIdentifier] reads such a use
+  /// straight from the current frame's slot array via [Environment.getSlot]
+  /// (one Expando hop + one list index, no name hashing — note-6 §10.4). Empty
+  /// until [resolveStaticCoordinates] runs; nodes with no entry take the
+  /// name-keyed [Environment.get] walk.
+  final Expando<StaticCoord> staticCoords = Expando<StaticCoord>();
+
+  /// S3b (plan_3 §4.6 / §9.3): per-declaration-node slot index produced by
+  /// [StaticResolver]. Read in [visitVariableDeclarationList] to dual-write a
+  /// slotted local's value into the frame's slot array alongside the name
+  /// binding. Empty until [resolveStaticCoordinates] runs; nodes with no entry
+  /// declare no slot.
+  final Expando<int> declSlots = Expando<int>();
+
+  /// Runs the [StaticResolver] over [declarations], populating [staticCoords]
+  /// and [declSlots]. Invoked by the execute pipeline after Pass-1 declarations
+  /// and before Pass-2 interpretation. A no-op for execute paths that do not
+  /// call it (their nodes simply carry no coordinate).
+  void resolveStaticCoordinates(Iterable<AstNode> declarations) {
+    final resolver = StaticResolver(staticCoords, declSlots);
+    for (final declaration in declarations) {
+      declaration.accept(resolver);
+    }
+  }
+
+  /// Execute and clear all pending static-field initializers. Intended to be
+  /// called by the top-level runner after every class declaration has been
+  /// visited, so that forward-referenced class constructors are available.
+  void runDeferredStaticInitializers() {
+    while (_pendingStaticInitializers.isNotEmpty) {
+      final batch = List<void Function()>.from(_pendingStaticInitializers);
+      _pendingStaticInitializers.clear();
+      for (final init in batch) {
+        init();
+      }
+    }
+  }
+
+  InterpreterVisitor({
+    required this.globalEnvironment,
+    required this.moduleLoader, // Accept ModuleLoader in the constructor
+    Uri? initiallibrary, // New: Optional URI for the initial source
+  }) : environment = globalEnvironment {
+    if (initiallibrary != null) {
+      // Sets the base URI in the ModuleLoader for the initial source code.
+      // This is crucial for resolving relative imports in this initial source code.
+      moduleLoader.currentlibrary = initiallibrary;
+      Logger.debug(
+        "[InterpreterVisitor] Initial source URI set in ModuleLoader to: $initiallibrary",
+      );
+    }
+    // Initialize currentAsyncState if it's null and we are in an async context implicitly
+    // This might be more complex depending on how top-level async calls are handled
+  }
+
+  @override
+  Object? visitCompilationUnit(CompilationUnit node) {
+    // Restore simple sequential processing
+    Object? lastValue;
+    for (final declaration in node.declarations) {
+      lastValue = declaration.accept<Object?>(this);
+    }
+    return lastValue;
+  }
+
+  /// S4 (perf, particle-field freeze §"Remaining work" step 1): per-`Block`
+  /// cache of "does this block introduce any name bindings into its own
+  /// scope?". A block that declares nothing (no local variables, functions,
+  /// pattern declarations, or local type declarations) needs no child
+  /// `Environment` of its own — its statements observe and mutate exactly the
+  /// enclosing frame. Collapsing such a frame is sound under the slot runtime:
+  /// a depth-0 [StaticCoord] only ever reads a local from its *declaring*
+  /// block's frame, and a declaring block always introduces a binding (hence is
+  /// never collapsed); every cross-block read uses the depth-agnostic name walk,
+  /// which tolerates a shorter scope chain. The scan runs once per block node
+  /// and is cached on the node's identity, so repeated executions of a hot
+  /// block (e.g. a Flutter `build` body re-run every frame) pay it only once.
+  final Expando<bool> _blockIntroducesBindings = Expando<bool>();
+
+  @override
+  Object? visitBlock(Block node) {
+    if (_blockNeedsOwnFrame(node)) {
+      return executeBlock(node.statements, Environment(enclosing: environment));
+    }
+    // No bindings introduced: run statements directly in the current frame.
+    // Passing `environment` makes executeBlock's save/restore a no-op.
+    return executeBlock(node.statements, environment);
+  }
+
+  /// True when [node] declares at least one name in its own block scope and
+  /// therefore requires a dedicated child [Environment]. Cached per node.
+  bool _blockNeedsOwnFrame(Block node) {
+    final cached = _blockIntroducesBindings[node];
+    if (cached != null) return cached;
+    final result = _statementsIntroduceBindings(node.statements);
+    _blockIntroducesBindings[node] = result;
+    return result;
+  }
+
+  /// True if any statement binds a name into the enclosing block scope.
+  /// Mirrors the declaration kinds handled by [executeBlock]; unwraps
+  /// [LabeledStatement] so a labelled declaration still counts.
+  bool _statementsIntroduceBindings(List<Statement> statements) {
+    for (var statement in statements) {
+      while (statement is LabeledStatement) {
+        statement = statement.statement;
+      }
+      if (statement is VariableDeclarationStatement ||
+          statement is FunctionDeclarationStatement ||
+          statement is PatternVariableDeclarationStatement ||
+          statement is ClassDeclaration ||
+          statement is MixinDeclaration ||
+          statement is EnumDeclaration) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns true if the given expression chain contains a null-aware
+  /// selector (`?.`, `?[…]`) somewhere along the receiver path.
+  ///
+  /// Mirrors `_chainHasNullAwareSelector` in tom_d4rt_ast. Used to implement
+  /// Dart's null-shorting semantics: when an inner selector in a chain uses
+  /// `?.`/`?[…]`, every subsequent selector up to the chain's termination
+  /// point must yield null instead of throwing. The chain terminates at
+  /// parentheses or non-selector expressions.
+  bool _chainHasNullAwareSelector(Expression? expr) {
+    if (expr == null) return false;
+    if (expr is PropertyAccess) {
+      if (expr.operator.lexeme == '?.') return true;
+      return _chainHasNullAwareSelector(expr.target);
+    }
+    if (expr is MethodInvocation) {
+      if (expr.operator?.lexeme == '?.') return true;
+      return _chainHasNullAwareSelector(expr.target);
+    }
+    if (expr is IndexExpression) {
+      if (expr.isNullAware) return true;
+      return _chainHasNullAwareSelector(expr.target);
+    }
+    if (expr is PostfixExpression) {
+      // Postfix `!` does not terminate null-shorting at the syntax level.
+      return _chainHasNullAwareSelector(expr.operand);
+    }
+    // ParenthesizedExpression, SimpleIdentifier, literals, etc. all
+    // terminate the chain.
+    return false;
+  }
+
+  /// The interpreted call stack of the run this visitor serves
+  /// (D4rtCallStack), held by the run's loader so every module's visitor
+  /// shares it.
+  D4rtCallStack get callStack => moduleLoader.callStack;
+
+  Object? executeBlock(
+    List<Statement> statements,
+    Environment blockEnvironment,
+  ) {
+    final previousEnvironment = environment;
+    Object? lastValue;
+    try {
+      environment = blockEnvironment;
+      final callStack = this.callStack;
+      for (final statement in statements) {
+        // The position a trace reports for this frame, if an error leaves it.
+        callStack.current = statement;
+        // Explicitly handle declarations within blocks
+        if (statement is FunctionDeclaration ||
+            statement is ClassDeclaration ||
+            statement is MixinDeclaration ||
+            statement
+                is TopLevelVariableDeclaration || // Technically not a statement, but might appear?
+            statement is VariableDeclarationStatement) {
+          // This is a proper statement
+          lastValue = statement.accept<Object?>(this);
+          // Check for suspension after declaration execution
+          if (lastValue is AsyncSuspensionRequest) {
+            return lastValue; // Propagate suspension
+          }
+          lastValue = null; // Declarations don't produce a carry value
+        } else {
+          lastValue = statement.accept<Object?>(this);
+          // if the execution of the statement returns an async suspension request,
+          // we propagate it immediately upwards.
+          if (lastValue is AsyncSuspensionRequest) {
+            return lastValue;
+          }
+        }
+        // Handle ReturnException, BreakException, ContinueException if needed (propagate or consume)
+        // This simple version just propagates them implicitly by not catching them here.
+      }
+    } finally {
+      environment = previousEnvironment;
+    }
+    return lastValue;
+  }
+
+  @override
+  Object? visitTopLevelVariableDeclaration(TopLevelVariableDeclaration node) {
+    for (final variable in node.variables.variables) {
+      if (variable.name.lexeme == '_') {
+        // Evaluate initializer for potential side effects, but don't define
+        variable.initializer?.accept<Object?>(this);
+      } else {
+        Object? value;
+        if (variable.initializer != null) {
+          value = variable.initializer!.accept<Object?>(this);
+        }
+        environment.define(variable.name.lexeme, value);
+      }
+    }
+    return null;
+  }
+
+  @override
+  Object? visitPatternVariableDeclarationStatement(
+    PatternVariableDeclarationStatement node,
+  ) {
+    final patternDecl = node.declaration;
+    final pattern = patternDecl.pattern;
+    final initializer = patternDecl.expression;
+
+    // Evaluate the right-hand side value
+    final rhsValue = initializer.accept<Object?>(this);
+
+    // Match and bind the pattern to the value
+    try {
+      _matchAndBind(pattern, rhsValue, environment);
+    } on PatternMatchD4rtException catch (e) {
+      // Convert pattern match failures to standard RuntimeError for now
+      throw RuntimeD4rtException("Pattern match failed: ${e.message}");
+    } on TypeError {
+      // SCD64: a `TypeError` raised while binding is the PROGRAM's error, not
+      // this machinery failing, so it keeps its identity instead of being
+      // wrapped below. `var (a!) = maybeNull;` is legal Dart whose entire
+      // purpose is to raise one, and a script's `on TypeError` has to see it.
+      rethrow;
+    } catch (e, s) {
+      // Add stack trace capture
+      Logger.error(
+        "during pattern binding: $e\nStack trace:\n$s",
+      ); // Display the stack trace
+      // Catch other potential errors during binding
+      throw RuntimeD4rtException("Error during pattern binding: $e");
+    }
+    return null;
+  }
+
+  @override
+  Object? visitVariableDeclarationStatement(VariableDeclarationStatement node) {
+    // Simply visit the declaration list. The list visitor handles definition.
+    return node.variables.accept<Object?>(this);
+    // return null; // Statements usually return null unless they are Return/Throw/etc.
+  }
+
+  // Handles the list of variables in a single declaration statement.
+
+  @override
+  Object? visitExpressionStatement(ExpressionStatement node) {
+    return node.expression.accept<Object?>(this);
+  }
+
+  @override
+  Object? visitAsExpression(AsExpression node) {
+    final value = node.expression.accept<Object?>(this);
+    final result = _tryCast(value, node.type);
+    if (!identical(result, _castFailed)) return result;
+    // GEN-094: Include actual value type for actionable diagnostics.
+    final valueDesc = value?.runtimeType.toString() ?? 'Null';
+    throw D4rtTypeError(
+      "Cast failed with 'as' : value of type $valueDesc cannot be cast to "
+      '${_castTypeDescription(node.type)}',
+    );
+  }
+
+  /// SCE104: how a cast's target type is spelled in a failure message.
+  ///
+  /// The ONE architectural divergence the shared cast carries. The analyzer's
+  /// `TypeAnnotation` can print itself; the mirror AST cannot, so the twin
+  /// rebuilds the name from the node. Confined to this method on purpose —
+  /// both call sites (the `as` expression and the cast pattern) go through it,
+  /// so the difference is one recorded member rather than four inline copies.
+  String _castTypeDescription(TypeAnnotation typeNode) => typeNode.toSource();
+
+  /// [value] cast to [typeNode], or [_castFailed] when the cast cannot succeed.
+  ///
+  /// SCE104: ONE cast, for the two constructs that perform one. `v as T` and
+  /// `case var x as T` are the same operation written twice, and they were
+  /// implemented twice — an eleven-name ladder here and a nine-name ladder in
+  /// the `CastPattern` branch of [_matchAndBind]. Measured before the merge,
+  /// the two disagreed on eight inputs, and each knew something the other did
+  /// not:
+  ///
+  ///   | input            | expression | pattern | Dart   |
+  ///   | ---------------- | ---------- | ------- | ------ |
+  ///   | `'s' as int`     | throws     | MISS    | throws |
+  ///   | `1 as double`    | 1.0        | MISS    | 1.0    |
+  ///   | `1 as Null`      | throws     | HIT     | throws |
+  ///   | `'s' as I` (=int)| throws     | HIT     | throws |
+  ///   | `'s' as Map`     | RETURNS 's'| miss    | throws |
+  ///   | `'s' as Set`     | RETURNS 's'| miss    | throws |
+  ///
+  /// The pattern lacked `Null`, alias resolution and the `int`→`double`
+  /// promotion; the expression lacked `Map` and `Set` entirely, so those fell
+  /// to the permissive `default` and a failing cast returned its operand. One
+  /// body ends both, and the two rows the pattern was right about are why the
+  /// merge is not simply "call the expression's version".
+  ///
+  /// Returning a sentinel rather than throwing is what lets each construct keep
+  /// its own message: the SDK words a failed `as` and a failed cast PATTERN
+  /// differently, and matching it per construct is the point of [D4rtTypeError]
+  /// — the same discipline `ResolvedBinding` applies with its `of 'name'`
+  /// suffix.
+  Object? _tryCast(Object? value, TypeAnnotation typeNode) {
+    if (typeNode is NamedType) {
+      // SCD100: `as` decides by the WRITTEN name, so an alias reached the
+      // permissive `default:` below and cast anything to anything — `'a' as I`
+      // through `typedef I = int` returned the String, where `'a' as int`
+      // correctly threw. Resolving the alias to its target's name first puts
+      // the cast on the branch the target deserves.
+      //
+      // A non-alias name resolves to something whose `name` IS the written
+      // name, so this is a no-op for every other program.
+      final typeName = _aliasTargetName(typeNode.name.lexeme);
+      // G-DOV2-1 FIX: Handle nullable types (e.g., String?, int?)
+      // If the type is nullable (has a '?' suffix), then null is always allowed
+      final isNullable = typeNode.question != null;
+      if (isNullable && value == null) {
+        return value; // Null is valid for any nullable type
+      }
+      switch (typeName) {
+        case 'int':
+          if (value is int) return value;
+          break;
+        case 'double':
+          if (value is double) return value;
+          // GEN-094: int→double promotion — see tom_d4rt_ast mirror for
+          // the full reasoning; in short, D4rt collection literals
+          // store int elements even under `<double>[...]`, so an
+          // explicit `as double` must handle the same case
+          // extractBridgedArg already does via INTER-003.
+          if (value is int) return value.toDouble();
+          break;
+        case 'num':
+          if (value is num) return value;
+          break;
+        case 'String':
+          if (value is String) return value;
+          break;
+        case 'bool':
+          if (value is bool) return value;
+          break;
+        case 'List':
+          if (value is List) return value;
+          break;
+        case 'Map':
+          // SCE104: from the pattern's ladder. Absent here, so `'s' as Map`
+          // reached `default` and RETURNED the String.
+          if (value is Map) return value;
+          break;
+        case 'Set':
+          // SCE104: likewise — and `Set` is the one name the pattern's ladder
+          // had that this one did not.
+          if (value is Set) return value;
+          break;
+        case 'Null':
+          if (value == null) return value;
+          break;
+        case 'Record':
+          // DFIN5 (dguc7): every record is a `Record`.
+          if (value is InterpretedRecord || value is Record) return value;
+          break;
+        case 'Object':
+          // G-DOV2-1 FIX: For Object?, null is valid (handled above)
+          // For Object, any non-null value is valid
+          if (value != null || isNullable) return value;
+          break;
+        case 'dynamic':
+          return value;
+        default:
+          // C21: If the value is a native interface-proxy that wraps an
+          // InterpretedInstance and the cast target names a class in the
+          // wrapped instance's class chain, unwrap to the InterpretedInstance
+          // so subsequent property/method access dispatches against the
+          // scripted class (which knows about user-defined fields and
+          // methods that the bridged proxy alone cannot serve).
+          //
+          // SCF31: the same for a bare bridged SUPER OBJECT — the native base
+          // a concrete bridged class was constructed as, handed back by
+          // framework code (`delegate as _CountingDelegate`). It is the
+          // instance to the script, and without this the cast returned the
+          // native base, which has none of the script's members.
+          final inner = D4.interpretedBehind(value);
+          if (inner is InterpretedInstance &&
+              _interpretedClassChainHasName(inner.klass, typeName)) {
+            return inner;
+          }
+          // For custom/interpreted types, we can add logic here
+          // For now, we accept all (permissive behavior)
+          return value;
+      }
+    } else if (typeNode is GenericFunctionType ||
+        typeNode is RecordTypeAnnotation) {
+      // DFUB5: `value as int Function(int)` / `value as (int, String)` — accept
+      // when the value's runtime type is compatible with the structural
+      // Function/Record type (or when the value's type can't be determined, to
+      // stay permissive). Upstream 848f03d.
+      final targetType = _resolveTypeAnnotation(typeNode);
+      final valueType = environment.getRuntimeType(value);
+      if (valueType == null ||
+          valueType.isSubtypeOf(targetType, value: value)) {
+        return value;
+      }
+    }
+    return _castFailed;
+  }
+
+  /// SCD100: the name [written] ultimately stands for, following a type alias.
+  ///
+  /// Returns [written] unchanged for anything that is not an alias — including
+  /// a name that does not resolve at all, which keeps every existing cast on
+  /// the branch it already took.
+  String _aliasTargetName(String written) {
+    try {
+      final resolved = environment.get(written);
+      if (resolved is RuntimeType && resolved.name != written) {
+        return resolved.name;
+      }
+    } catch (_) {
+      // Unresolvable — leave the written name alone.
+    }
+    return written;
+  }
+
+  /// C21: Walk an [InterpretedClass]'s **interpreted** ancestor chain and
+  /// return true if any class, mixin, or interface matches [typeName].
+  ///
+  /// Used by [visitAsExpression] to decide whether a `value as TypeName` cast
+  /// against a [D4InterpretedProxy] should unwrap to the embedded
+  /// [InterpretedInstance]. Only interpreted ancestors count — when [typeName]
+  /// names a *bridged* ancestor (e.g. `RenderBox`), unwrapping would defeat
+  /// the proxy's purpose of satisfying native `is`-checks and subsequent
+  /// native API calls. The unwrap path exists to let scripts read
+  /// user-defined fields after a downcast to a script class
+  /// (`child.parentData! as _DefaultsParentData`); native casts must keep
+  /// returning the proxy.
+  bool _interpretedClassChainHasName(InterpretedClass? klass, String typeName) {
+    if (klass == null) return false;
+    final visited = <InterpretedClass>{};
+    bool walk(InterpretedClass? c) {
+      if (c == null || !visited.add(c)) return false;
+      if (c.name == typeName) return true;
+      if (walk(c.superclass)) return true;
+      for (final m in c.mixins) {
+        if (walk(m)) return true;
+      }
+      for (final i in c.interfaces) {
+        if (walk(i)) return true;
+      }
+      return false;
+    }
+
+    return walk(klass);
+  }
+
+  @override
+  Object? visitIntegerLiteral(IntegerLiteral node) {
+    return node.value;
+  }
+
+  @override
+  Object? visitDoubleLiteral(DoubleLiteral node) {
+    return node.value;
+  }
+
+  @override
+  Object? visitBooleanLiteral(BooleanLiteral node) {
+    return node.value;
+  }
+
+  @override
+  Object? visitStringLiteral(StringLiteral node) {
+    if (node is SimpleStringLiteral) {
+      return node.value;
+    } else if (node is AdjacentStrings) {
+      // Handle adjacent strings like 'Hello ' 'World!'
+      final buffer = StringBuffer();
+      for (final stringLiteral in node.strings) {
+        if (stringLiteral is SimpleStringLiteral) {
+          buffer.write(stringLiteral.value);
+        } else if (stringLiteral is StringInterpolation) {
+          // G-DOV-1/2 FIX: Handle StringInterpolation children within AdjacentStrings
+          buffer.write(visitStringInterpolation(stringLiteral));
+        } else {
+          // Recursively handle nested adjacent strings or other string types
+          final value = visitStringLiteral(stringLiteral);
+          buffer.write(value.toString());
+        }
+      }
+      return buffer.toString();
+    }
+    throw UnimplementedD4rtException(
+      'Type de StringLiteral non géré: ${node.runtimeType}',
+    );
+  }
+
+  @override
+  Object? visitNullLiteral(NullLiteral node) {
+    return null;
+  }
+
+  @override
+  Object? visitSymbolLiteral(SymbolLiteral node) {
+    // `#foo.bar.baz` is ONE library-qualified symbol named 'foo.bar.baz', not a
+    // member access on `#foo` — so the components are joined, never resolved.
+    // Operator symbols (`#+`, `#[]`) arrive as a single component and need no
+    // special handling.
+    //
+    // A non-const `Symbol` is correct even though the literal is a compile-time
+    // constant in real Dart: `Symbol` compares by name, so the value this builds
+    // is `==` (and hash-equal) to the SDK's canonicalised `#foo`. That is what
+    // lets a script mix `#foo` and `Symbol('foo')` freely, including as Map keys.
+    return Symbol(node.components.map((t) => t.lexeme).join('.'));
+  }
+
+  @override
+  Object? visitSimpleIdentifier(SimpleIdentifier node) {
+    final name = node.name;
+
+    if (Logger.isDebug) {
+      Logger.debug(
+        "[visitSimpleIdentifier] Looking for '$name'. Visitor env: ${environment.hashCode}",
+      );
+    }
+
+    // Lexical search & Bridges.
+    //
+    // S3c (plan_3 §9.3 / §4.6): an eligible innermost-block local carries a
+    // static coordinate; read it straight from the current frame's slot array
+    // — one Expando hop + one list index, no name hashing and no chain walk
+    // (note-6 §10.4). Eligibility (the resolver) guarantees the matching
+    // `defineSlot` ran in this same frame before any read, and that the local
+    // is never assigned or captured, so the slot is the sole live binding.
+    // Every other use (bridge / prefixed / enum / non-local) carries no
+    // coordinate and takes the full name-based [Environment.lookup] walk.
+    //
+    // The lexical walk uses the NON-THROWING [Environment.lookup]: a miss here
+    // is the COMMON case for an instance-member reference (a bare field/getter
+    // that means `this.<name>`), so the old throwing `get()` turned every such
+    // read into a thrown+caught `RuntimeD4rtException` with a captured stack
+    // trace — thousands per second under an animation loop, dominating CPU and
+    // allocation. A sentinel keeps the miss on the normal return path; we fall
+    // through to the implicit-`this` lookup below without ever throwing.
+    Object? value;
+    final bool foundLexically;
+    final coord = staticCoords[node];
+    if (coord != null) {
+      value = environment.getSlot(coord.slot);
+      foundLexically = true;
+    } else {
+      final looked = environment.lookup(name);
+      foundLexically = !identical(looked, Environment.kNotFound);
+      value = foundLexically ? looked : null;
+    }
+
+    if (foundLexically) {
+      if (Logger.isDebug) {
+        Logger.debug(
+          "[visitSimpleIdentifier] Found '$name' via environment.lookup() -> ${value?.runtimeType}",
+        );
+      }
+
+      // Handle late variables. `.value` triggers lazy initialization and may
+      // throw LateInitializationError; per Plan H that must surface unwrapped
+      // (native Dart semantics), so we let it propagate rather than fall through
+      // to the implicit-'this' lookup that would rewrap it as "Undefined
+      // variable".
+      if (value is LateVariable) {
+        if (Logger.isDebug) {
+          Logger.debug(
+            "[visitSimpleIdentifier] Accessing late variable '$name'",
+          );
+        }
+        return value.value;
+      }
+
+      // SCF25: a bare name bound to a GETTER — top-level, or a static one the
+      // owner class's statics were snapshotted into — is a read of the getter,
+      // not the getter function. It used to answer `<fn g>`.
+      if (value is InterpretedFunction && value.isGetter) {
+        return value.call(this, const [], const {});
+      }
+
+      // FIX-20260613-1038-C: instance members shadow bridged top-level /
+      // library declarations. The lexical walk above also reaches the global
+      // scope, so a bridged top-level name (e.g. vector_math's
+      // `radians(double)`) can mask an instance field/getter/method of the
+      // same name — the wrong way round for Dart, whose order is
+      // locals → instance members → library. Correct it here, gated tightly so
+      // the common path pays almost nothing:
+      //   * the slot fast-path (`coord != null`) is a resolved local — never a
+      //     global, so it is skipped entirely;
+      //   * we only look past the lexical hit when `this` actually declares a
+      //     member of this name (the genuine collision), and only THEN confirm
+      //     the lexical value came from the global scope (a true local below
+      //     global keeps shadowing, matching Dart).
+      if (coord == null) {
+        final maybeThis = environment.lookup('this');
+        if (maybeThis is InterpretedInstance &&
+            maybeThis.hasInstanceMember(name)) {
+          final globalHit = globalEnvironment.lookup(name);
+          if (identical(globalHit, value)) {
+            return maybeThis.get(name, visitor: this);
+          }
+        }
+      }
+
+      // note-6 (§10.4): keep the resolved-read return path free of any String
+      // `==`/hash — the `name` comparison only runs when debug logging is on, so
+      // a production read is just the slot index + LateVariable check above.
+      if (Logger.isDebug && name == 'initialValue') {
+        Logger.debug(
+          "[visitSimpleIdentifier] Returning '$name' = $value (from lexical/bridge)",
+        );
+      }
+      return value;
+    }
+
+    if (Logger.isDebug) {
+      Logger.debug(
+        "[visitSimpleIdentifier] '$name' not found lexically or as bridge. Trying implicit 'this'.",
+      );
+    }
+
+    // Implicit attempt via 'this'
+    // (Only if not found lexically/as bridge)
+    Object? thisInstance;
+    try {
+      thisInstance = environment.get('this');
+    } on RuntimeD4rtException {
+      // 'this' does not exist in the current environment.
+      // Before giving up, try searching static methods in the current class if we're in a static context
+      if (currentFunction != null &&
+          currentFunction!.ownerType is InterpretedClass) {
+        final ownerClass = currentFunction!.ownerType as InterpretedClass;
+        Logger.debug(
+          "[visitSimpleIdentifier] 'this' not found, but we're in class '${ownerClass.name}'. Checking static members for '$name'.",
+        );
+
+        // Check static methods
+        final staticMethod = ownerClass.findStaticMethod(name);
+        if (staticMethod != null) {
+          Logger.debug(
+            "[visitSimpleIdentifier] Found static method '$name' in current class '${ownerClass.name}'.",
+          );
+          return staticMethod;
+        }
+
+        // Check static getters
+        final staticGetter = ownerClass.findStaticGetter(name);
+        if (staticGetter != null) {
+          Logger.debug(
+            "[visitSimpleIdentifier] Found static getter '$name' in current class '${ownerClass.name}'.",
+          );
+          return staticGetter;
+        }
+
+        // Check static fields
+        try {
+          final staticField = ownerClass.getStaticField(name);
+          Logger.debug(
+            "[visitSimpleIdentifier] Found static field '$name' in current class '${ownerClass.name}'.",
+          );
+          return staticField;
+        } on RuntimeD4rtException {
+          // Static field not found, continue to final error
+        }
+      }
+
+      // This is the end of the search, the identifier is undefined.
+      throw undefinedNameError(name);
+    }
+
+    // 'this' was found, now we try to access the member.
+    try {
+      if (thisInstance is InterpretedInstance) {
+        // Access the property on 'this'
+        final member = thisInstance.get(name, visitor: this);
+        Logger.debug(
+          "[visitSimpleIdentifier] Found '$name' via implicit InterpretedInstance 'this'. Member: ${member?.runtimeType}",
+        );
+        return member; // Return the field value or bound function (getter/method)
+      } else if (toBridgedInstance(thisInstance).$2) {
+        final bridgedInstance = toBridgedInstance(thisInstance).$1!;
+
+        Logger.debug(
+          "[visitSimpleIdentifier] Trying implicit 'this' access on BridgedInstance (${bridgedInstance.bridgedClass.name}) for member '$name'.",
+        );
+        // Check instance getter FIRST
+        final getterAdapter = bridgedInstance.bridgedClass
+            .findInstanceGetterAdapter(name);
+        if (getterAdapter != null) {
+          Logger.debug(
+            "[visitSimpleIdentifier] Found BRIDGED GETTER '$name' via implicit 'this'. Calling adapter...",
+          );
+          final getterResult = getterAdapter(
+            this,
+            bridgedInstance.nativeObject,
+          );
+          if (name == 'initialValue') {
+            Logger.debug(
+              "[visitSimpleIdentifier] Returning '$name' = $getterResult (from BridgedInstance getter this)",
+            );
+          }
+          return getterResult;
+        }
+        Logger.debug(
+          "[visitSimpleIdentifier]   Bridged getter '$name' not found. Checking for method...",
+        );
+        // Then check instance method
+        final methodAdapter = bridgedInstance.bridgedClass
+            .findInstanceMethodAdapter(name);
+        if (methodAdapter != null) {
+          Logger.debug(
+            "[visitSimpleIdentifier] Found BRIDGED METHOD '$name' via implicit 'this'. Binding...",
+          );
+          // Return a callable bound to the instance
+
+          final boundCallable = BridgedMethodCallable(
+            bridgedInstance,
+            methodAdapter,
+            name,
+          );
+          if (name == 'initialValue') {
+            Logger.debug(
+              "[visitSimpleIdentifier] Returning '$name' = $boundCallable (bound method from BridgedInstance this)",
+            );
+          }
+          return boundCallable;
+        }
+        Logger.debug(
+          "[visitSimpleIdentifier]   Bridged method '$name' not found either.",
+        );
+        // Cluster-12 (priority 3): Walk the registered supertype chain when
+        // the leaf bridge has no matching getter/method. See
+        // [InterpreterVisitorExtension.lookupOnBridgedSupertypes].
+        final supertypeMatch = lookupOnBridgedSupertypes(bridgedInstance, name);
+        if (supertypeMatch.$2) {
+          Logger.debug(
+            "[visitSimpleIdentifier]   Resolved '$name' via supertype walk on '${bridgedInstance.bridgedClass.name}'.",
+          );
+          return supertypeMatch.$1;
+        }
+        // If neither getter nor method, error
+        throw UndefinedMemberD4rtException(
+          "Undefined property or method '$name' on bridged instance of "
+          "'${bridgedInstance.bridgedClass.name}' accessed via implicit 'this'."
+          "${unbridgedMemberSuffix(bridgedInstance.bridgedClass.name, name)}",
+          memberName: name,
+          receiver: thisInstance,
+        );
+      } // +++ NEW BLOCK +++
+      else if (thisInstance is InterpretedEnumValue) {
+        Logger.debug(
+          "[visitSimpleIdentifier] Found '$name' via implicit InterpretedEnumValue 'this'.",
+        );
+        // Delegate to the get method of the enum value, passing visitor
+        // This will execute getters or return bound methods/fields.
+        final enumMember = thisInstance.get(name, this);
+        if (name == 'initialValue') {
+          Logger.debug(
+            "[visitSimpleIdentifier] Returning '$name' = $enumMember (from EnumValue this)",
+          );
+        }
+        return enumMember;
+      } else if (thisInstance is InterpretedExtensionTypeInstance) {
+        // DFUB4: bare member access inside an extension-type method body —
+        // `formatted`, `isValid()` resolve against the bound `this` instance
+        // (representation field, getter or method).
+        Logger.debug(
+          "[visitSimpleIdentifier] Found '$name' via implicit InterpretedExtensionTypeInstance 'this'.",
+        );
+        return thisInstance.get(name, this);
+      }
+      throw RuntimeD4rtException.resolutionFailure(
+        "Undefined variable: $name (this exists as native type ${thisInstance?.runtimeType}",
+      );
+    } on RuntimeD4rtException catch (thisErr) {
+      // Plan H: rethrow LateInitializationError directly (without wrapping
+      // as "Undefined variable") so it surfaces to the framework error
+      // reporter unwrapped — matches native Dart behaviour and gives
+      // accurate diagnostics for "late variable accessed before assigned".
+      if (thisErr is LateInitializationError) {
+        rethrow;
+      }
+      // 'this' not found OR instance.get() failed. Only a genuinely absent
+      // member is a candidate for extension-method resolution; anything that
+      // went wrong *inside* a member that does exist has to propagate.
+      if (thisErr is UndefinedMemberD4rtException &&
+          thisErr.memberName == name &&
+          identical(thisErr.receiver, thisInstance)) {
+        Logger.debug(
+          "[SimpleIdentifier] Direct access failed for '$name' via implicit 'this'. Trying extension lookup on ${thisInstance?.runtimeType}.",
+        );
+        if (thisInstance != null) {
+          // Check that 'this' exists before searching
+          try {
+            final extensionMember = environment.findExtensionMember(
+              thisInstance,
+              name,
+            );
+
+            if (extensionMember is ExtensionMemberCallable) {
+              if (extensionMember.isGetter) {
+                Logger.debug(
+                  "[SimpleIdentifier] Found extension getter '$name' via implicit 'this'. Calling...",
+                );
+                // Extension getters are called with the instance as the only positional argument
+                final extensionPositionalArgs = [thisInstance];
+                try {
+                  return extensionMember.call(
+                    this,
+                    extensionPositionalArgs,
+                    {},
+                  );
+                } on ReturnException catch (e) {
+                  return e.value;
+                } catch (e) {
+                  throw RuntimeD4rtException(
+                    "Error executing extension getter '$name' via implicit 'this': $e",
+                  );
+                }
+              } else if (!extensionMember.isOperator &&
+                  !extensionMember.isSetter) {
+                // Return the extension method itself (not bound)
+                Logger.debug(
+                  "[SimpleIdentifier] Found extension method '$name' via implicit 'this'. Returning callable.",
+                );
+                // Return a bound instance instead of the raw method.
+                return BoundExtensionCallable(thisInstance, extensionMember);
+              }
+              // Operators/setters are generally not accessible directly via a simple identifier
+            }
+            // No suitable extension member found, fall through to final error
+            Logger.debug(
+              "[SimpleIdentifier] No suitable extension member found for '$name' via implicit 'this'.",
+            );
+          } on RuntimeD4rtException catch (findError) {
+            // Error during extension lookup itself
+            Logger.debug(
+              "[SimpleIdentifier] Error during extension lookup for '$name' via implicit 'this': ${findError.message}",
+            );
+            // Fall through to final error
+          }
+        } else {
+          Logger.debug(
+            "[SimpleIdentifier] Cannot search extension for '$name' because implicit 'this' is null.",
+          );
+        }
+      }
+      // Relaunch the error if the member was not merely absent, or if
+      // extension lookup failed.
+      else if (thisErr.message.contains(
+        "non implémenté pour BridgedInstance",
+      )) {
+        // Relaunch the specific BridgeInstance errors
+        rethrow;
+      }
+
+      // Before final error, try static method lookup in enclosing class
+      final enclosingClass = _findEnclosingClass();
+      if (enclosingClass != null) {
+        Logger.debug(
+          "[visitSimpleIdentifier] Final attempt: checking static members for '$name' in enclosing class '${enclosingClass.name}'.",
+        );
+
+        // Check static methods
+        final staticMethod = enclosingClass.findStaticMethod(name);
+        if (staticMethod != null) {
+          Logger.debug(
+            "[visitSimpleIdentifier] Found static method '$name' in enclosing class '${enclosingClass.name}' (final attempt).",
+          );
+          return staticMethod;
+        }
+
+        // Check static getters
+        final staticGetter = enclosingClass.findStaticGetter(name);
+        if (staticGetter != null) {
+          Logger.debug(
+            "[visitSimpleIdentifier] Found static getter '$name' in enclosing class '${enclosingClass.name}' (final attempt).",
+          );
+          return staticGetter;
+        }
+
+        // Check static fields
+        try {
+          final staticField = enclosingClass.getStaticField(name);
+          Logger.debug(
+            "[visitSimpleIdentifier] Found static field '$name' in enclosing class '${enclosingClass.name}' (final attempt).",
+          );
+          return staticField;
+        } on RuntimeD4rtException {
+          // Static field not found, continue to final error
+        }
+      }
+
+      // If the member was absent AND extension lookup failed, or if the initial
+      // error was something else entirely, raise the final "Undefined variable"
+      // error.
+      throw rewrapPreservingMemberSignal(
+        thisErr,
+        "Undefined variable: $name (Original error: ${thisErr.message})",
+      );
+    }
+  }
+
+  @override
+  Object? visitThisExpression(ThisExpression node) {
+    try {
+      return environment.get('this');
+    } on RuntimeD4rtException {
+      // This should ideally not happen if called within a valid method/constructor context
+      throw RuntimeD4rtException(
+        "Keyword 'this' used outside of an instance context.",
+      );
+    }
+  }
+
+  /// Helper method to find an enclosing class that might contain static members
+  /// Searches through the environment chain and currentFunction hierarchy
+  InterpretedClass? _findEnclosingClass() {
+    // First, try the current function's owner
+    if (currentFunction != null &&
+        currentFunction!.ownerType is InterpretedClass) {
+      return currentFunction!.ownerType as InterpretedClass;
+    }
+
+    // If that doesn't work, search the environment chain for class instances
+    // This is a fallback approach - look for any classes defined in parent scopes
+    Environment? current = environment;
+    while (current != null) {
+      for (final value in current.values.values) {
+        if (value is InterpretedClass) {
+          // Found a class in this environment - this might be our enclosing class
+          // We need to check if we're inside a method of this class
+          // This is a heuristic - in a proper implementation, we'd track the lexical scope better
+          Logger.debug(
+            "[_findEnclosingClass] Found class '${value.name}' in environment chain",
+          );
+          return value;
+        }
+      }
+      current = current.enclosing;
+    }
+
+    return null;
+  }
+
+  @override
+  Object? visitPrefixedIdentifier(PrefixedIdentifier node) {
+    final prefixValue = node.prefix.accept<Object?>(this);
+    if (prefixValue is AsyncSuspensionRequest) {
+      // Propagate the suspension so that the state machine resumes this node after resolution
+      return prefixValue;
+    }
+    final memberName = node.identifier.name;
+
+    // Handle the case where the prefix is an environment (prefixed import)
+    if (prefixValue is Environment) {
+      Logger.debug(
+        "[PrefixedIdentifier] The prefix '${node.prefix.toSource()}' resolved to an Environment. Searching for '$memberName' in this environment.",
+      );
+      try {
+        // The call to get() on the prefixed environment could return a function (which must be called if it's a getter)
+        // or a direct value.
+        final member = prefixValue.get(memberName);
+        // If it's an InterpretedFunction and a getter, it must be called.
+        if (member is InterpretedFunction && member.isGetter) {
+          Logger.debug(
+            "[PrefixedIdentifier] Member '$memberName' is a getter. Calling...",
+          );
+          return member.call(
+            this,
+            [],
+            {},
+          ); // Call without 'this' because it's a prefixed import
+        }
+        Logger.debug(
+          "[PrefixedIdentifier] Member '$memberName' found directly: $member",
+        );
+        return member; // Return the value/function directly
+      } on RuntimeD4rtException catch (e) {
+        throw RuntimeD4rtException(
+          "Erreur lors de la récupération du membre '$memberName' de l'import préfixé '${node.prefix.toSource()}': ${e.message}",
+          originalException: e.originalException,
+          originalStackTrace: e.originalStackTrace,
+        );
+      }
+    }
+
+    if (prefixValue is InterpretedClass) {
+      // Static access
+      try {
+        return prefixValue.getStaticField(memberName);
+      } on RuntimeD4rtException catch (_) {
+        InterpretedFunction? staticMember = prefixValue.findStaticGetter(
+          memberName,
+        );
+        staticMember ??= prefixValue.findStaticMethod(memberName);
+        if (staticMember != null) {
+          if (staticMember.isGetter) {
+            return staticMember.call(this, [], {});
+          } else {
+            return staticMember;
+          }
+        } else {
+          // A constructor tear-off is a function value, distinct from its type.
+          if (memberName == 'new') {
+            final constructor = prefixValue.findConstructor('');
+            if (constructor != null) {
+              return _NamedConstructorTearOff(prefixValue, constructor, '');
+            }
+          }
+          // G-DOV2-2 FIX: Handle named constructor tear-offs (Class.fromMap, etc.)
+          // Named constructors can be used as tear-offs when passed to higher-order functions
+          final namedConstructor = prefixValue.findConstructor(memberName);
+          if (namedConstructor != null) {
+            // Return a callable that will invoke this named constructor
+            return _NamedConstructorTearOff(
+              prefixValue,
+              namedConstructor,
+              memberName,
+            );
+          }
+          // Cluster C33: class-as-value (Type literal) semantics. A
+          // PrefixedIdentifier like `slotType.hashCode` where `slotType`
+          // is bound to an InterpretedClass should dispatch
+          // `Object.hashCode`/`Object.runtimeType` on the Type instance,
+          // not look up a static member. Fall back before throwing.
+          if (memberName == 'hashCode') {
+            return prefixValue.hashCode;
+          }
+          if (memberName == 'runtimeType') {
+            return prefixValue.runtimeType;
+          }
+          throw UndefinedStaticMemberD4rtException(
+            "Undefined static member '$memberName' on class '${prefixValue.name}'.",
+            memberName: memberName,
+          );
+        }
+      }
+    } else if (prefixValue is InterpretedEnum) {
+      if (memberName == 'values') {
+        Logger.debug(
+          "[PrefixedIdentifier] Accessing static getter 'values' on enum '${prefixValue.name}'.",
+        );
+        return prefixValue.valuesList;
+      }
+
+      // Check enum values first
+      final value = prefixValue.values[memberName];
+      if (value != null) {
+        Logger.debug(
+          "[PrefixedIdentifier] Accessing enum value '$memberName' on enum '${prefixValue.name}'.",
+        );
+        return value;
+      }
+
+      // Check static fields
+      if (prefixValue.staticFields.containsKey(memberName)) {
+        Logger.debug(
+          "[PrefixedIdentifier] Accessing static field '$memberName' on enum '${prefixValue.name}'.",
+        );
+        return prefixValue.staticFields[memberName];
+      }
+
+      // Check static getters
+      final staticGetter = prefixValue.staticGetters[memberName];
+      if (staticGetter != null) {
+        Logger.debug(
+          "[PrefixedIdentifier] Calling static getter '$memberName' on enum '${prefixValue.name}'.",
+        );
+        return staticGetter.call(this, [], {});
+      }
+
+      // Check static methods
+      final staticMethod = prefixValue.staticMethods[memberName];
+      if (staticMethod != null) {
+        Logger.debug(
+          "[PrefixedIdentifier] Accessing static method '$memberName' on enum '${prefixValue.name}'.",
+        );
+        return staticMethod;
+      }
+
+      // Check mixins for static members (reverse order)
+      for (final mixin in prefixValue.mixins.reversed) {
+        // Check static fields
+        try {
+          final mixinStaticField = mixin.getStaticField(memberName);
+          Logger.debug(
+            "[PrefixedIdentifier] Found static field '$memberName' from mixin '${mixin.name}' for enum '${prefixValue.name}'",
+          );
+          return mixinStaticField;
+        } on RuntimeD4rtException {
+          // Continue to next check
+        }
+
+        // Check static getters
+        final mixinStaticGetter = mixin.findStaticGetter(memberName);
+        if (mixinStaticGetter != null) {
+          Logger.debug(
+            "[PrefixedIdentifier] Found static getter '$memberName' from mixin '${mixin.name}' for enum '${prefixValue.name}'",
+          );
+          return mixinStaticGetter.call(this, [], {});
+        }
+
+        // Check static methods
+        final mixinStaticMethod = mixin.findStaticMethod(memberName);
+        if (mixinStaticMethod != null) {
+          Logger.debug(
+            "[PrefixedIdentifier] Found static method '$memberName' from mixin '${mixin.name}' for enum '${prefixValue.name}'",
+          );
+          return mixinStaticMethod;
+        }
+      }
+
+      // Not found
+      throw UndefinedStaticMemberD4rtException(
+        "Undefined static member '$memberName' on enum '${prefixValue.name}'. Available enum values: ${prefixValue.valueNames.join(', ')}",
+        memberName: memberName,
+      );
+    } else if (prefixValue is BridgedClass) {
+      final bridgedClass = prefixValue;
+      Logger.debug(
+        "[PrefixedIdentifier] Static access on BridgedClass: ${bridgedClass.name}.$memberName",
+      );
+      final staticGetter = bridgedClass.findStaticGetterAdapter(memberName);
+      if (staticGetter != null) {
+        return wrapNativeReturnValue(staticGetter(this));
+      }
+      final staticMethod = bridgedClass.findStaticMethodAdapter(memberName);
+      if (staticMethod != null) {
+        // Return the static method as a callable value
+        Logger.debug(
+          "[PrefixedIdentifier] Returning bridged static method '$memberName' as value from '${bridgedClass.name}'.",
+        );
+        return BridgedStaticMethodCallable(
+          bridgedClass,
+          staticMethod,
+          memberName,
+        );
+      }
+      // Constructor tear-off support for bridged classes (mirrors
+      // tom_d4rt_ast). `EagerGestureRecognizer.new` and named-ctor
+      // tear-offs like `Foo.fromMap` produce Callables that wrap the
+      // bridged constructor adapter.
+      if (memberName == 'new') {
+        final ctor = bridgedClass.findConstructorAdapter('');
+        if (ctor != null) {
+          Logger.debug(
+            "[PrefixedIdentifier] Returning bridged unnamed-constructor tear-off '${bridgedClass.name}.new'.",
+          );
+          return _BridgedConstructorTearOff(bridgedClass, ctor, '');
+        }
+      }
+      final namedCtor = bridgedClass.findConstructorAdapter(memberName);
+      if (namedCtor != null) {
+        Logger.debug(
+          "[PrefixedIdentifier] Returning bridged named-constructor tear-off '${bridgedClass.name}.$memberName'.",
+        );
+        return _BridgedConstructorTearOff(bridgedClass, namedCtor, memberName);
+      }
+      // Cluster C32: class-as-value (Type literal) semantics. A
+      // PrefixedIdentifier like `slotType.hashCode` where `slotType` is
+      // bound to a BridgedClass should dispatch
+      // `Object.hashCode`/`Object.runtimeType` on the Type instance, not
+      // look up a static member. Fall back before throwing.
+      if (memberName == 'hashCode') {
+        return bridgedClass.hashCode;
+      }
+      if (memberName == 'runtimeType') {
+        return bridgedClass.runtimeType;
+      }
+      throw UndefinedStaticMemberD4rtException(
+        "Undefined static member '$memberName' on bridged class '${bridgedClass.name}'.",
+        memberName: memberName,
+      );
+    } else if (prefixValue is InterpretedExtension) {
+      // Handle static member access on extensions
+      final extension = prefixValue;
+      Logger.debug(
+        "[PrefixedIdentifier] Static access on Extension: ${extension.name ?? '<unnamed>'}.$memberName",
+      );
+
+      // Check static field
+      if (extension.staticFields.containsKey(memberName)) {
+        return extension.staticFields[memberName];
+      }
+
+      // Check static getter
+      final staticGetter = extension.findStaticGetter(memberName);
+      if (staticGetter != null) {
+        return staticGetter.call(this, [], {});
+      }
+
+      // Check static method
+      final staticMethod = extension.findStaticMethod(memberName);
+      if (staticMethod != null) {
+        return staticMethod;
+      }
+
+      throw UndefinedStaticMemberD4rtException(
+        "Undefined static member '$memberName' on extension '${extension.name ?? '<unnamed>'}'.",
+        memberName: memberName,
+      );
+    } else if (prefixValue is InterpretedInstance) {
+      try {
+        final member = prefixValue.get(memberName, visitor: this);
+        if (member is InterpretedFunction && member.isGetter) {
+          return member.bind(prefixValue).call(this, [], {});
+        } else {
+          return member;
+        }
+      } on RuntimeD4rtException catch (e) {
+        if (e is UndefinedMemberD4rtException &&
+            e.memberName == memberName &&
+            identical(e.receiver, prefixValue)) {
+          final extensionMember = environment.findExtensionMember(
+            prefixValue,
+            memberName,
+          );
+          if (extensionMember is ExtensionMemberCallable) {
+            if (extensionMember.isGetter) {
+              return extensionMember.call(this, [prefixValue], {});
+            } else if (!extensionMember.isOperator &&
+                !extensionMember.isSetter) {
+              return extensionMember;
+            }
+          }
+        }
+        throw rewrapPreservingMemberSignal(
+          e,
+          "${e.message} (accessing property via PrefixedIdentifier '$memberName')",
+        );
+      }
+    } else if (prefixValue is InterpretedEnumValue) {
+      if (memberName == 'index') {
+        Logger.debug(
+          "[PrefixedIdentifier] Accessing getter 'index' on enum value '$prefixValue'.",
+        );
+        return prefixValue.index;
+      } else if (memberName == 'toString') {
+        Logger.debug(
+          "[PrefixedIdentifier] Accessing method 'toString' on enum value '$prefixValue'. Returning callable.",
+        );
+        // Return directly the string for simplicity in prefixed access?
+        // No, return a callable function to be consistent with methods.
+        return NativeFunction(
+          (_, args, _, _) {
+            if (args.isNotEmpty) {
+              throw RuntimeD4rtException("toString() takes no arguments.");
+            }
+            return prefixValue.toString();
+          },
+          arity: 0,
+          name: 'toString',
+        );
+      } else if (memberName == 'name') {
+        Logger.debug(
+          "[PrefixedIdentifier] Explicitly accessing 'name' on enum value '$prefixValue'. Returning value.",
+        );
+        return prefixValue.name; // Access directly the 'name' property
+      } else {
+        Logger.debug(
+          "[PrefixedIdentifier] Accessing member '$memberName' on enum value '$prefixValue'. Calling get()...",
+        );
+        try {
+          // Pass 'this' (the visitor) to allow getter execution if needed.
+          return prefixValue.get(memberName, this);
+        } on ReturnException catch (e) {
+          // If get() executes a getter that throws ReturnException
+          return e.value;
+        } on RuntimeD4rtException catch (e) {
+          // G-DOV2-7 FIX: Try extension lookup if direct access fails
+          if (e is UndefinedMemberD4rtException &&
+              e.memberName == memberName &&
+              identical(e.receiver, prefixValue)) {
+            Logger.debug(
+              "[PrefixedIdentifier] Direct access failed for '$memberName' on enum $prefixValue. Trying extension lookup...",
+            );
+            final extensionMember = environment.findExtensionMember(
+              prefixValue,
+              memberName,
+            );
+            if (extensionMember is ExtensionMemberCallable) {
+              if (extensionMember.isGetter) {
+                Logger.debug(
+                  "[PrefixedIdentifier] Found extension getter '$memberName' for enum. Calling...",
+                );
+                return extensionMember.call(this, [prefixValue], {});
+              } else if (!extensionMember.isOperator &&
+                  !extensionMember.isSetter) {
+                Logger.debug(
+                  "[PrefixedIdentifier] Found extension method '$memberName' for enum. Returning tear-off.",
+                );
+                return extensionMember;
+              }
+            }
+          }
+          // Propagate error if extension lookup failed
+          throw rewrapPreservingMemberSignal(
+            e,
+            "Error getting member '$memberName' from enum value '$prefixValue': ${e.message}",
+          );
+        } catch (e) {
+          // Propagate other errors from get()
+          throw RuntimeD4rtException(
+            "Error getting member '$memberName' from enum value '$prefixValue': $e",
+          );
+        }
+      }
+    } else if (toBridgedInstance(prefixValue).$2) {
+      final bridgedInstance = toBridgedInstance(prefixValue).$1!;
+      // GEN-075: Check universal Object properties first
+      switch (memberName) {
+        case 'hashCode':
+          return bridgedInstance.nativeObject.hashCode;
+        case 'runtimeType':
+          return bridgedInstance.nativeObject.runtimeType;
+        default:
+      }
+      // Getter first, then method: the same order as `BridgedInstance.get`
+      // (SCE232). It matters only for a name in both maps, which
+      // scd196_member_map_disjointness_test forbids.
+      final getterAdapter = bridgedInstance.bridgedClass
+          .findInstanceGetterAdapter(memberName);
+      if (getterAdapter != null) {
+        return getterAdapter(this, bridgedInstance.nativeObject);
+      }
+      final methodAdapter = bridgedInstance.bridgedClass
+          .findInstanceMethodAdapter(memberName);
+      if (methodAdapter != null) {
+        // C20a fix: prefixed identifier `prefix.method` is a method tear-off
+        // when not followed by an invocation. Return the callable rather than
+        // invoking it with empty arguments. The previous `.call(this, [], {})`
+        // crashed bridges that index `positionalArgs[0]` (e.g. Set.contains
+        // used as `_kAllStates.where(states.contains)`), surfacing as
+        // "Set.contains: Invalid value" RangeError.
+        return BridgedMethodCallable(
+          bridgedInstance,
+          methodAdapter,
+          memberName,
+        );
+      }
+
+      // Cluster-12 (priority 3): Walk the registered supertype chain when
+      // the leaf bridge has no matching getter/method. See
+      // [InterpreterVisitorExtension.lookupOnBridgedSupertypes].
+      final supertypeMatch = lookupOnBridgedSupertypes(
+        bridgedInstance,
+        memberName,
+      );
+      if (supertypeMatch.$2) {
+        Logger.debug(
+          "[PrefixedIdentifier]   Resolved '$memberName' via supertype walk on '${bridgedInstance.bridgedClass.name}'.",
+        );
+        return supertypeMatch.$1;
+      }
+
+      // No adapter found, try extension methods/getters
+      try {
+        final extensionMember = environment.findExtensionMember(
+          bridgedInstance,
+          memberName,
+        );
+        if (extensionMember is ExtensionMemberCallable) {
+          if (extensionMember.isGetter) {
+            Logger.debug(
+              "[PrefixedIdentifier] Found extension getter '$memberName' for ${bridgedInstance.bridgedClass.name}. Calling...",
+            );
+            final extensionArgs = <Object?>[bridgedInstance];
+            return extensionMember.call(this, extensionArgs, {});
+          } else if (!extensionMember.isOperator && !extensionMember.isSetter) {
+            Logger.debug(
+              "[PrefixedIdentifier] Found extension method '$memberName' for ${bridgedInstance.bridgedClass.name}. Returning callable.",
+            );
+            return BoundExtensionCallable(bridgedInstance, extensionMember);
+          }
+        }
+      } on RuntimeD4rtException catch (findError) {
+        Logger.debug(
+          "[PrefixedIdentifier] Error finding extension '$memberName' for ${bridgedInstance.bridgedClass.name}: ${findError.message}",
+        );
+      }
+
+      // RC-5: Enum property fallback — same as visitPropertyAccess Fix I
+      if (bridgedInstance.nativeObject is Enum) {
+        final enumObj = bridgedInstance.nativeObject as Enum;
+        switch (memberName) {
+          case 'name':
+            return enumObj.name;
+          case 'index':
+            return enumObj.index;
+          case 'hashCode':
+            return enumObj.hashCode;
+          case 'runtimeType':
+            return enumObj.runtimeType;
+          case 'toString':
+            return NativeFunction(
+              (visitor, args, namedArgs, typeArgs) => enumObj.toString(),
+              arity: 0,
+              name: 'toString',
+            );
+        }
+        // Cluster-26 (Key.label dispatch): see visitPropertyAccess. Only
+        // entered for unknown properties to keep built-in enum access fast.
+        // Walks the current scope chain (which extends from the per-module
+        // env where ModuleLoader registered the BridgedEnum). The global env
+        // does not hold bridged enums — only classes are pre-populated there
+        // by D4rt._initModule.
+        final bridgedEnumValue =
+            environment.getBridgedEnumValue(enumObj) ??
+            globalEnvironment.getBridgedEnumValue(enumObj);
+        if (bridgedEnumValue != null) {
+          try {
+            return bridgedEnumValue.get(memberName);
+          } on RuntimeD4rtException {
+            // Fall through to the member-absent error below.
+          }
+        }
+      }
+
+      // D2: D4InterpretedProxy unwrap fallback (see visitPropertyAccess).
+      final nativeForUnwrap = bridgedInstance.nativeObject;
+      if (nativeForUnwrap is D4InterpretedProxy) {
+        final inner = nativeForUnwrap.d4rtInstance;
+        if (inner is InterpretedInstance) {
+          try {
+            return inner.get(memberName, visitor: this);
+          } catch (_) {
+            // fall through
+          }
+        }
+      }
+
+      // GEN-107 sync: Universal Object properties for non-enum BridgedInstance
+      // (mirrors GEN-075 fix in tom_d4rt_ast visitPrefixedIdentifier).
+      switch (memberName) {
+        case 'hashCode':
+          return bridgedInstance.nativeObject.hashCode;
+        case 'runtimeType':
+          return bridgedInstance.nativeObject.runtimeType;
+        case 'toString':
+          return NativeFunction(
+            (visitor, args, namedArgs, typeArgs) =>
+                bridgedInstance.nativeObject.toString(),
+            arity: 0,
+            name: 'toString',
+          );
+      }
+
+      throw D4rtNoSuchMethodError(
+        "Undefined property or method '$memberName' on bridged instance of "
+        "'${bridgedInstance.bridgedClass.name}'."
+        "${unbridgedMemberSuffix(bridgedInstance.bridgedClass.name, memberName)}",
+      );
+    } else if (prefixValue is InterpretedRecord) {
+      // Accessing field of a record
+      final record = prefixValue;
+      Logger.debug(
+        "[PrefixedIdentifier] Access on InterpretedRecord: .$memberName",
+      );
+
+      // Check for Object methods (hashCode, runtimeType, toString)
+      switch (memberName) {
+        case 'hashCode':
+          return record.hashCode;
+        case 'runtimeType':
+          return record.runtimeType;
+      }
+
+      // Check if it's a positional field access ($1, $2, ...)
+      if (memberName.startsWith('\$') && memberName.length > 1) {
+        try {
+          final index = int.parse(memberName.substring(1)) - 1;
+          if (index >= 0 && index < record.positionalFields.length) {
+            return record.positionalFields[index];
+          } else {
+            throw RuntimeD4rtException(
+              "Record positional field index \$$index out of bounds (0..${record.positionalFields.length - 1}).",
+            );
+          }
+        } catch (e) {
+          // Handle parse errors or other issues
+          throw RuntimeD4rtException(
+            "Invalid positional record field accessor '$memberName'.",
+          );
+        }
+      } else {
+        // Check if it's a named field access
+        if (record.namedFields.containsKey(memberName)) {
+          return record.namedFields[memberName];
+        } else {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Record has no field named '$memberName'. Available fields: ${record.namedFields.keys.join(', ')}",
+          );
+        }
+      }
+    } else if (prefixValue is Record) {
+      // E6: native Dart Record (e.g., produced by `Iterable.indexed` from
+      // dart:core). Records do not implement reflection without
+      // `dart:mirrors`, so we route positional access via `dynamic`
+      // dispatch ($1..$9) and Object members directly.
+      return _accessNativeRecordField(prefixValue, memberName);
+    } else if (prefixValue is InterpretedExtensionTypeInstance) {
+      // Lim-1 FIX: Handle property access on extension type instances
+      final extensionInstance = prefixValue;
+      Logger.debug(
+        "[PrefixedIdentifier] Access on InterpretedExtensionTypeInstance: .$memberName",
+      );
+
+      // Check for Object methods first (hashCode, runtimeType, toString)
+      switch (memberName) {
+        case 'hashCode':
+          return extensionInstance.representationValue.hashCode;
+        case 'runtimeType':
+          return extensionInstance.extensionType;
+      }
+
+      // Delegate to the extension type instance's get() method
+      try {
+        return extensionInstance.get(memberName, this);
+      } on ReturnException catch (e) {
+        // If get() executes a getter that throws ReturnException
+        return e.value;
+      }
+    } else if (prefixValue is BridgedEnum) {
+      Logger.debug(
+        "[PrefixedIdentifier] Accessing value on BridgedEnum: ${prefixValue.name}.$memberName",
+      );
+      final enumValue = prefixValue.getValue(memberName);
+      if (enumValue != null) {
+        return enumValue; // Return the BridgedEnumValue
+      } else {
+        throw RuntimeD4rtException.resolutionFailure(
+          "Undefined enum value '$memberName' on bridged enum '${prefixValue.name}'.",
+        );
+      }
+    } else if (prefixValue is BridgedEnumValue) {
+      final bridgedEnumValue = prefixValue;
+      Logger.debug(
+        "[PrefixedIdentifier] Accessing property '$memberName' on BridgedEnumValue (within InterpretedEnumValue block): $bridgedEnumValue",
+      );
+      try {
+        // Use the get() method of BridgedEnumValue
+        return bridgedEnumValue.get(memberName);
+      } on ReturnException catch (e) {
+        return e.value;
+      } on RuntimeD4rtException {
+        // Relaunch the RuntimeErrors directly
+        rethrow;
+      } catch (e, s) {
+        // Catch other potential errors (ex: from the adapter)
+        Logger.error(
+          "[PrefixedIdentifier] Native exception during bridged enum property get '$bridgedEnumValue.$memberName': $e\n$s",
+        );
+        throw RuntimeD4rtException(
+          "Native error during bridged enum property get '$memberName' on $bridgedEnumValue: $e",
+          originalException: e,
+          originalStackTrace: s,
+        );
+      }
+    } else if (prefixValue is Callable) {
+      // Handle property access on function types (InterpretedFunction, NativeFunction, etc.)
+      Logger.debug("[PrefixedIdentifier] Access on Callable: .$memberName");
+      switch (memberName) {
+        case 'hashCode':
+          return prefixValue.hashCode;
+        case 'runtimeType':
+          // Return Function as the runtimeType for all callable types
+          return Function;
+        case 'toString':
+          return NativeFunction(
+            (_, args, _, _) {
+              if (args.isNotEmpty) {
+                throw RuntimeD4rtException("toString() takes no arguments.");
+              }
+              return prefixValue.toString();
+            },
+            arity: 0,
+            name: 'toString',
+          );
+      }
+      throw RuntimeD4rtException.resolutionFailure(
+        "Cannot access property '$memberName' on function. Functions only support 'hashCode', 'runtimeType', and 'toString'.",
+      );
+    } else {
+      try {
+        final extensionMember = environment.findExtensionMember(
+          prefixValue,
+          memberName,
+        );
+
+        if (extensionMember is ExtensionMemberCallable) {
+          // Handle extension getter call immediately
+          if (extensionMember.isGetter) {
+            Logger.debug(
+              "[PrefixedIdentifier] Found extension getter '$memberName' (fallback). Calling...",
+            );
+            final extensionPositionalArgs = [
+              prefixValue,
+            ]; // Getter takes receiver
+            return extensionMember.call(this, extensionPositionalArgs, {});
+          } else if (!extensionMember.isOperator && !extensionMember.isSetter) {
+            // Return extension method itself if it's not a getter/setter/operator
+            Logger.debug(
+              "[PrefixedIdentifier] Found extension method '$memberName' (fallback). Returning callable.",
+            );
+            return extensionMember;
+          }
+          // If it's an operator or setter, we probably shouldn't reach here via PrefixedIdentifier
+          // Fall through to Stdlib if it wasn't a getter or regular method.
+        }
+        // If no suitable extension found, proceed to Stdlib call
+        Logger.debug(
+          "[PrefixedIdentifier] No suitable extension found for '$memberName' (fallback). Trying Stdlib...",
+        );
+      } on RuntimeD4rtException catch (findError) {
+        // If findExtensionMember itself threw (e.g., type not found), proceed to Stdlib
+        Logger.debug(
+          "[PrefixedIdentifier] Error finding extension '$memberName' (fallback): ${findError.message}. Trying Stdlib...",
+        );
+      }
+
+      // Fix I: Generic Enum property getter — handles raw native enums
+      // not wrapped in BridgedEnumValue (e.g., returned by bridge getters).
+      // All Dart enums implement the Enum interface with .name and .index.
+      if (prefixValue is Enum) {
+        switch (memberName) {
+          case 'name':
+            return (prefixValue).name;
+          case 'index':
+            return (prefixValue).index;
+          case 'hashCode':
+            return prefixValue.hashCode;
+          case 'runtimeType':
+            return prefixValue.runtimeType;
+          case 'toString':
+            return NativeFunction(
+              (_, args, _, _) => prefixValue.toString(),
+              arity: 0,
+              name: 'toString',
+            );
+        }
+      }
+
+      // GEN-C3c: Universal Object-member fallback for arbitrary native
+      // targets reached via PrefixedIdentifier. Every Dart Object exposes
+      // `toString`, `hashCode`, and `runtimeType`; these must always
+      // resolve. Mirrors the BridgedInstance branch (GEN-107) above and
+      // the same fallback in visitPropertyAccess.
+      if (prefixValue != null) {
+        switch (memberName) {
+          case 'hashCode':
+            return prefixValue.hashCode;
+          case 'runtimeType':
+            return prefixValue.runtimeType;
+          case 'toString':
+            return NativeFunction(
+              (_, args, _, _) => prefixValue.toString(),
+              arity: 0,
+              name: 'toString',
+            );
+        }
+      }
+
+      throw RuntimeD4rtException.resolutionFailure(
+        "Cannot access property '$memberName' on target of type ${prefixValue?.runtimeType}.",
+      );
+    }
+  }
+
+  @override
+  Object? visitBinaryExpression(BinaryExpression node) {
+    final operator = node.operator.type;
+
+    // Handle logical OR (||) with short-circuiting FIRST - don't evaluate right operand yet
+    if (operator == TokenType.BAR_BAR) {
+      final leftValue = node.leftOperand.accept<Object?>(this);
+      if (leftValue is AsyncSuspensionRequest) return leftValue;
+      if (leftValue is! bool) {
+        // SCD93: a `TypeError`, as real Dart raises for a non-bool operand
+        // of `||`. There is no SDK operator to delegate to — short-circuiting
+        // is control flow, not a method — so this is the legitimate kind of
+        // guard: it raises the SDK's TYPE while keeping d4rt's own message,
+        // which names the side and the operator the SDK's own wording does
+        // not. The DOMAIN already matched: `true || 1` short-circuits before
+        // the right operand is ever looked at, exactly as Dart does.
+        throw D4rtTypeError(
+          "Left operand of '||' must be bool, got ${leftValue?.runtimeType}.",
+        );
+      }
+      // If left is true, return true without evaluating right
+      if (leftValue) return true;
+      // Left is false, now evaluate right operand
+      final rightValue = node.rightOperand.accept<Object?>(this);
+      if (rightValue is AsyncSuspensionRequest) return rightValue;
+      if (rightValue is! bool) {
+        // SCD93: a `TypeError`, as real Dart raises for a non-bool operand
+        // of `||`. There is no SDK operator to delegate to — short-circuiting
+        // is control flow, not a method — so this is the legitimate kind of
+        // guard: it raises the SDK's TYPE while keeping d4rt's own message,
+        // which names the side and the operator the SDK's own wording does
+        // not. The DOMAIN already matched: `true || 1` short-circuits before
+        // the right operand is ever looked at, exactly as Dart does.
+        throw D4rtTypeError(
+          "Right operand of '||' must be bool, got ${rightValue?.runtimeType}.",
+        );
+      }
+      return rightValue;
+    }
+
+    // Handle logical AND (&&) with short-circuiting SECOND - don't evaluate right operand yet
+    if (operator == TokenType.AMPERSAND_AMPERSAND) {
+      final leftValue = node.leftOperand.accept<Object?>(this);
+      if (leftValue is AsyncSuspensionRequest) return leftValue;
+      if (leftValue is! bool) {
+        // SCD93: a `TypeError`, as real Dart raises for a non-bool operand
+        // of `&&`. There is no SDK operator to delegate to — short-circuiting
+        // is control flow, not a method — so this is the legitimate kind of
+        // guard: it raises the SDK's TYPE while keeping d4rt's own message,
+        // which names the side and the operator the SDK's own wording does
+        // not. The DOMAIN already matched: `true && 1` short-circuits before
+        // the right operand is ever looked at, exactly as Dart does.
+        throw D4rtTypeError(
+          "Left operand of '&&' must be bool, got ${leftValue?.runtimeType}.",
+        );
+      }
+      // If left is false, return false without evaluating right
+      if (!leftValue) return false;
+      // Left is true, now evaluate right operand
+      final rightValue = node.rightOperand.accept<Object?>(this);
+      if (rightValue is AsyncSuspensionRequest) return rightValue;
+      if (rightValue is! bool) {
+        // SCD93: a `TypeError`, as real Dart raises for a non-bool operand
+        // of `&&`. There is no SDK operator to delegate to — short-circuiting
+        // is control flow, not a method — so this is the legitimate kind of
+        // guard: it raises the SDK's TYPE while keeping d4rt's own message,
+        // which names the side and the operator the SDK's own wording does
+        // not. The DOMAIN already matched: `true && 1` short-circuits before
+        // the right operand is ever looked at, exactly as Dart does.
+        throw D4rtTypeError(
+          "Right operand of '&&' must be bool, got ${rightValue?.runtimeType}.",
+        );
+      }
+      return rightValue;
+    }
+
+    // Handle null-coalescing (??) with short-circuiting - don't evaluate right operand yet
+    if (operator == TokenType.QUESTION_QUESTION) {
+      final leftValue = node.leftOperand.accept<Object?>(this);
+      if (leftValue is AsyncSuspensionRequest) return leftValue;
+      // If left is not null, return it without evaluating right
+      if (leftValue != null) return leftValue;
+      // Left is null, evaluate right operand
+      final rightValue = node.rightOperand.accept<Object?>(this);
+      if (rightValue is AsyncSuspensionRequest) return rightValue;
+      return rightValue;
+    }
+
+    // For all other operators, evaluate both operands — LEFT FIRST, and check
+    // it before touching the right.
+    //
+    // SCD121: these two lines used to sit together with both suspension checks
+    // below them, so when the LEFT operand suspended the RIGHT was evaluated
+    // anyway and its value thrown away. For pure operands that is invisible;
+    // for `(await next()) + (await next())` against a counter it is not — the
+    // discarded pass called `next()` an extra time per suspension, so the sum
+    // came out 4 instead of 3 and three awaits cost six calls. Dart evaluates
+    // `a + b` left to right and never reaches `b` while `a` is still
+    // outstanding, which is exactly what returning here restores.
+    //
+    // Nothing is lost by not evaluating the right operand: a suspension means
+    // the enclosing statement will be re-run once the future resolves, and on
+    // that pass the left replays from `resolvedAwaitResults` while the right
+    // is evaluated for the first time.
+    final leftOperandValue = node.leftOperand.accept<Object?>(this);
+    if (leftOperandValue is AsyncSuspensionRequest) {
+      return leftOperandValue;
+    }
+    final rightOperandValue = node.rightOperand.accept<Object?>(this);
+
+    if (Logger.isDebug) {
+      Logger.debug("[BinaryExpression DEBUG] Operator: ${operator.lexeme}");
+      Logger.debug("  Left operand type: ${leftOperandValue?.runtimeType}");
+      Logger.debug("  Left operand value: $leftOperandValue");
+      Logger.debug("  Right operand type: ${rightOperandValue?.runtimeType}");
+      Logger.debug("  Right operand value: $rightOperandValue");
+    }
+
+    if (rightOperandValue is AsyncSuspensionRequest) {
+      return rightOperandValue;
+    }
+
+    // Perf (particle_field GC freeze): `num`/`String`/`bool` all have
+    // direct-type stdlib bridges, so `toBridgedInstance` would mint a fresh
+    // BridgedInstance for every arithmetic / comparison operand — millions of
+    // throwaway wrappers per second in a physics+paint loop — only for the
+    // value to be immediately unwrapped via `.nativeObject` (which equals the
+    // primitive itself). Skip the wrap for these natively-handled value types:
+    // numeric arithmetic is done inline below, and primitives never dispatch
+    // through a bridged-operator adapter. `(null, false)` is identical in
+    // effect to the wrapped-then-unwrapped result.
+    final leftBridgedInstance =
+        (leftOperandValue is num ||
+            leftOperandValue is String ||
+            leftOperandValue is bool)
+        ? (null, false)
+        : toBridgedInstance(leftOperandValue);
+    // GEN-095 (D8f): an InterpretedFunction is a *function value*, not a
+    // thunk. Auto-invoking it here corrupts equality / null-check semantics
+    // for callbacks (e.g. `onHorizontalDrag == null` would invoke the
+    // closure with zero args and fail when its parameter list isn't empty).
+    // Only auto-call zero-arg functions so the existing arithmetic-on-thunk
+    // leniency (e.g. a getter that yielded a `() => 1` thunk) still works.
+    final left = leftBridgedInstance.$2
+        ? leftBridgedInstance.$1!.nativeObject
+        : (leftOperandValue is InterpretedFunction &&
+              leftOperandValue.canCallWithoutArgs)
+        ? leftOperandValue.call(this, [])
+        : leftOperandValue;
+    final rightBridgedInstance =
+        (rightOperandValue is num ||
+            rightOperandValue is String ||
+            rightOperandValue is bool)
+        ? (null, false)
+        : toBridgedInstance(rightOperandValue);
+    final right = rightBridgedInstance.$2
+        ? rightBridgedInstance.$1!.nativeObject
+        : (rightOperandValue is InterpretedFunction &&
+              rightOperandValue.canCallWithoutArgs)
+        ? rightOperandValue.call(this, [])
+        : rightOperandValue;
+
+    // Plan G: null-propagation for arithmetic and bitwise operators.
+    //
+    // In strict Dart, `null * x`, `x - null`, etc. throw `NoSuchMethodError`
+    // (or a type-cast error inside a bridged adapter). The D4rt interpreter
+    // is intentionally lenient for dynamic UI scripts that may sample
+    // transient nulls — for example, an animated controller value read
+    // before the bridged getter is ready, or a layout parameter that hasn't
+    // been pumped yet — and returns `null` so the surrounding expression can
+    // null-cascade rather than aborting the render pipeline mid-frame.
+    //
+    // Only arithmetic and bitwise operators participate; equality (`==`,
+    // `!=`), comparison (`<`, `<=`, `>`, `>=`), and the short-circuit /
+    // null-coalescing operators (`&&`, `||`, `??`) keep their normal
+    // null-aware semantics. `+` is excluded so String concatenation keeps
+    // its existing `'$left$right'` stringify fallback (`'foo' + null`
+    // continues to produce `'foonull'`).
+    const nullPropagatingOps = <String>{
+      '*',
+      '/',
+      '~/',
+      '%',
+      '-',
+      '&',
+      '|',
+      '^',
+      '<<',
+      '>>',
+      '>>>',
+    };
+    if (nullPropagatingOps.contains(operator.lexeme) &&
+        (left == null || right == null)) {
+      return null;
+    }
+
+    if (left is num && right is num) {
+      switch (operator) {
+        case TokenType.PLUS:
+          return left + right;
+        case TokenType.MINUS:
+          return left - right;
+        case TokenType.STAR:
+          return left * right;
+        case TokenType.SLASH:
+          // `/` always produces a double, so a zero divisor is Infinity or
+          // NaN rather than an error. Both operands are widened because
+          // `int / int` is a double division too.
+          return left.toDouble() / right.toDouble();
+        case TokenType.GT:
+          return left > right;
+        case TokenType.LT:
+          return left < right;
+        case TokenType.GT_EQ:
+          return left >= right;
+        case TokenType.LT_EQ:
+          return left <= right;
+        // SCC30: deliberately NO zero-divisor guard on either operator.
+        // `left` and `right` are native `num`s here, so these dispatch to the
+        // SDK operators, which already raise
+        // `IntegerDivisionByZeroException` — an `UnsupportedError` a script
+        // can catch either by name or by supertype. A guard here can only
+        // disagree with that: the previous one threw a `RuntimeD4rtException`
+        // no `on` clause could name, and because `0.0 == 0` it also fired on
+        // doubles, where `1.0 % 0.0` is NaN and `1.0 ~/ 0.0` is a different
+        // SDK error entirely.
+        case TokenType.PERCENT:
+          return left % right;
+        case TokenType.TILDE_SLASH:
+          return left ~/ right;
+        default:
+          break;
+      }
+    }
+
+    // Moved this block BEFORE standard ==, !=, <, <=, >, >= checks
+    final operatorName = operator.lexeme;
+
+    // Check for class operator methods FIRST (before extensions and built-in operators)
+    if (leftOperandValue is InterpretedInstance) {
+      final operatorMethod = leftOperandValue.findOperator(operatorName);
+      if (operatorMethod != null) {
+        Logger.debug(
+          "[BinaryExpression] Found class operator '$operatorName' on ${leftOperandValue.klass.name}. Calling...",
+        );
+        try {
+          return operatorMethod.bind(leftOperandValue).call(this, [
+            rightOperandValue,
+          ], {});
+        } on ReturnException catch (e) {
+          return e.value;
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Error executing class operator '$operatorName': $e",
+          );
+        }
+      }
+    }
+
+    // DFUB9: dispatch a binary operator declared on an extension type before
+    // the native comparison/arithmetic switch (operator methods are stored on
+    // InterpretedExtensionType.methods keyed by the operator lexeme). This must
+    // run early — comparison operators like `>` would otherwise reach
+    // `left as dynamic > right` and throw NoSuchMethodError on the instance.
+    if (leftOperandValue is InterpretedExtensionTypeInstance) {
+      final operatorMethod =
+          leftOperandValue.extensionType.methods[operatorName];
+      if (operatorMethod != null) {
+        Logger.debug(
+          "[BinaryExpression] Found extension-type operator '$operatorName' on ${leftOperandValue.extensionType.name}. Calling...",
+        );
+        try {
+          return operatorMethod.bind(leftOperandValue).call(this, [
+            rightOperandValue,
+          ], {});
+        } on ReturnException catch (e) {
+          return e.value;
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Error executing extension-type operator '$operatorName': $e",
+          );
+        }
+      }
+    }
+
+    // Fix J: Intercept enum equality BEFORE toBridgedInstance wraps them incorrectly
+    if ((operatorName == '==' || operatorName == '!=') &&
+        (leftOperandValue is Enum ||
+            leftOperandValue is BridgedEnumValue ||
+            rightOperandValue is Enum ||
+            rightOperandValue is BridgedEnumValue)) {
+      // Unwrap BridgedEnumValue to native enum for comparison
+      final leftNative = leftOperandValue is BridgedEnumValue
+          ? leftOperandValue.nativeValue
+          : leftOperandValue;
+      final rightNative = rightOperandValue is BridgedEnumValue
+          ? rightOperandValue.nativeValue
+          : rightOperandValue;
+      if (operatorName == '==') {
+        return leftNative == rightNative;
+      } else {
+        return leftNative != rightNative;
+      }
+    }
+
+    // SCD99: reconcile a `Type` against a `BridgedClass` BEFORE the bridged
+    // operator dispatch below.
+    //
+    // `x.runtimeType == SomeType` was FALSE for every type — `1.runtimeType ==
+    // int`, `'a'.runtimeType == String`, `Duration(seconds: 1).runtimeType ==
+    // Duration` — while the reverse order was true. A script branching on
+    // `x.runtimeType` took the wrong branch with no error, which is the harm
+    // this todo was filed about.
+    //
+    // The reconciliation existed, twenty lines further down in the `==` / `!=`
+    // arms, and never ran: `toBridgedInstance` succeeds on a `Type` object, so
+    // the block below found a bridged `==` adapter and invoked it on the
+    // WRAPPER, comparing a wrapped Type against a `BridgedClass` and answering
+    // false. The wrapper substituted itself for the value — the same shape
+    // SCD98 removed from the constructor, surviving here because a dispatch
+    // site reached it first.
+    //
+    // Hoisted rather than duplicated: the two copies that used to sit in the
+    // arms are gone, because a second implementation of one rule is what let
+    // this diverge unnoticed in the first place.
+    if (operatorName == '==' || operatorName == '!=') {
+      final bool? typeMatch = (left is Type && right is BridgedClass)
+          ? left == right.nativeType
+          : (left is BridgedClass && right is Type)
+          ? left.nativeType == right
+          : null;
+      if (typeMatch != null) {
+        return operatorName == '==' ? typeMatch : !typeMatch;
+      }
+    }
+
+    // Check for bridged operator methods (e.g., +, -, *, /, etc. on BridgedInstance)
+    // Reuse the wrappers already resolved above (lines ~1438/1451): each
+    // `toBridgedInstance` call mints a fresh BridgedInstance and re-runs the
+    // type-resolution walk, so re-calling here would triple the per-operator
+    // bridged-wrapper churn that drives the particle_field GC freeze.
+    if (leftBridgedInstance.$2) {
+      final bridgedInstance = leftBridgedInstance.$1!;
+      final bridgedClass = bridgedInstance.bridgedClass;
+
+      final methodAdapter = bridgedClass.findInstanceMethodAdapter(
+        operatorName,
+      );
+
+      if (methodAdapter != null) {
+        Logger.debug(
+          "[BinaryExpression] Found bridged operator '$operatorName' for ${bridgedClass.name}. Calling adapter...",
+        );
+        try {
+          // Unwrap right operand if it's a BridgedInstance
+          final rightArg = rightBridgedInstance.$2
+              ? rightBridgedInstance.$1!.nativeObject
+              : rightOperandValue;
+          return methodAdapter(
+            this,
+            bridgedInstance.nativeObject,
+            [rightArg],
+            {},
+            null,
+          );
+        } catch (e, s) {
+          Logger.error(
+            "[BinaryExpression] Native exception during bridged operator '$operatorName' on ${bridgedClass.name}: $e\\n$s",
+          );
+          throw RuntimeD4rtException(
+            "Native error during bridged operator '$operatorName' on ${bridgedClass.name}: $e",
+            originalException: e,
+            originalStackTrace: s,
+          );
+        }
+      }
+    }
+
+    // Bridged enum operator methods (e.g. the `&`, `|`, `^` overloads Flutter's
+    // `WidgetState` gains from the `WidgetStateOperators` mixin). `WidgetState`
+    // is bridged as an enum whose definition carries operator adapters, so a
+    // `WidgetState.hovered & ~WidgetState.disabled` expression has a
+    // BridgedEnumValue left operand. Dispatch to the bridged operator adapter
+    // before the built-in switch (which only knows int/BigInt) so these don't
+    // fall through to "Unsupported binary operator".
+    if (leftOperandValue is BridgedEnumValue &&
+        leftOperandValue.hasMethod(operatorName)) {
+      // Unwrap a BridgedEnumValue right operand to its native value so the
+      // native operator receives the type it expects (e.g. a
+      // WidgetStatesConstraint rather than the interpreter's wrapper).
+      final rightArg = rightOperandValue is BridgedEnumValue
+          ? rightOperandValue.nativeValue
+          : rightOperandValue;
+      return leftOperandValue.invoke(this, operatorName, [rightArg], {});
+    }
+
+    // Only try extension immediately for operators where standard checks might bypass it
+    // (e.g., ==, !=, <, >, <=, >= which have generic fallbacks)
+    bool checkExtensionEarly = [
+      '==',
+      '!=',
+      '<',
+      '<=',
+      '>',
+      '>=',
+      '|', // Also check early for missing operators like |
+      '&', // and &
+      '^', // and ^ if BigInt support was incomplete
+      // Add other operators here if needed
+    ].contains(operatorName);
+
+    if (checkExtensionEarly) {
+      // Bucket #14: only the lookup belongs in the outer try. Wrapping the
+      // call invocation here too made the broad `on RuntimeD4rtException`
+      // handler swallow re-thrown call-site errors and fall through to
+      // "Unsupported binary operator", masking the real cause.
+      Callable? extensionOperator;
+      try {
+        extensionOperator = environment.findExtensionMember(
+          leftOperandValue,
+          operatorName,
+        );
+      } on RuntimeD4rtException catch (findError) {
+        // findExtensionMember throws if no member is found at all.
+        Logger.debug(
+          "[BinaryExpression] No extension member '$operatorName' found (early check) for type ${leftOperandValue?.runtimeType}. Error: ${findError.message}",
+        );
+        // Continue to standard checks even if lookup failed early
+      }
+      if (extensionOperator is ExtensionMemberCallable &&
+          extensionOperator.isOperator) {
+        Logger.debug(
+          "[BinaryExpression] Found extension operator '$operatorName' (early check) for type ${leftOperandValue?.runtimeType}. Calling...",
+        );
+        final extensionPositionalArgs = [leftOperandValue, rightOperandValue];
+        try {
+          return extensionOperator.call(this, extensionPositionalArgs, {});
+        } on ReturnException catch (e) {
+          return e.value;
+        } on RuntimeD4rtException {
+          // Already a runtime exception with context — propagate as-is so
+          // the user sees the underlying cause rather than swallowing it.
+          rethrow;
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Error executing extension operator '$operatorName': $e",
+          );
+        }
+      }
+      // If no suitable extension operator found early, continue to standard checks
+      Logger.debug(
+        "[BinaryExpression] No suitable extension operator '$operatorName' found (early check) for type ${leftOperandValue?.runtimeType}. Continuing...",
+      );
+    }
+
+    switch (operator.lexeme) {
+      case '+':
+        if (left is String && right is String) return left + right;
+        if (left is BigInt && right is BigInt) return left + right;
+        if (left is Duration && right is Duration) return left + right;
+        if (left is List && right is List) {
+          // `List.+` demands `List<E>` for the *receiver's* element type, and
+          // d4rt evaluates a list literal to `List<Object?>`. So on a
+          // typed-data receiver `left + right` fails a container cast inside
+          // the SDK even when every element is the right type — the failure is
+          // about the list's type argument, not its contents. Concatenating
+          // element-wise builds the result in the receiver's own element type
+          // and still rejects an element that genuinely does not fit.
+          final combined = left.toList();
+          final wantsDouble = combined is List<double>;
+          for (final element in right) {
+            // SCD29: an `int` into a `List<double>` receiver. Dart accepts
+            // `Float32List(1) + [9]` — in a context expecting `double` an
+            // integer literal IS a double — so refusing it rejected valid Dart.
+            // Narrow on purpose: only int -> double, and only when the receiver
+            // holds doubles. An element that genuinely does not fit still
+            // throws on the `add` below.
+            combined.add(
+              wantsDouble && element is int ? element.toDouble() : element,
+            );
+          }
+          return combined;
+        }
+      case '-':
+        if (left is BigInt && right is BigInt) return left - right;
+        if (left is Duration && right is Duration) return left - right;
+      case '*':
+        if (left is String && right is int) return left * right;
+        if (left is BigInt && right is BigInt) return left * right;
+        if (left is Duration && right is num) return left * right;
+      case '/':
+        if (left is BigInt && right is BigInt) return left / right;
+      case '~/':
+        if (left is BigInt && right is BigInt) return left ~/ right;
+        if (left is Duration && right is int) return left ~/ right;
+      case '%':
+        if (left is BigInt && right is BigInt) return left % right;
+      case '==':
+        // Special handling for BridgedEnumValue comparison
+        if (leftOperandValue is BridgedEnumValue &&
+            rightOperandValue is BridgedEnumValue) {
+          final result = leftOperandValue == rightOperandValue;
+          return result;
+        }
+
+        // Special handling for mixed native enum and BridgedEnumValue comparison
+        if ((leftOperandValue is BridgedEnumValue &&
+                rightOperandValue is Enum) ||
+            (leftOperandValue is Enum &&
+                rightOperandValue is BridgedEnumValue)) {
+          // Convert both to their native enum values for comparison
+          final leftNative = leftOperandValue is BridgedEnumValue
+              ? leftOperandValue.nativeValue
+              : leftOperandValue;
+          final rightNative = rightOperandValue is BridgedEnumValue
+              ? rightOperandValue.nativeValue
+              : rightOperandValue;
+
+          final result = leftNative == rightNative;
+          return result;
+        }
+
+        // SCE84: a native proxy and the interpreted instance behind it are
+        // ONE object. The two carriers are different Dart objects, so
+        // `list.first == theEntryIAdded` compared a BridgedInstance against
+        // an InterpretedInstance and answered false where Dart answers true.
+        // Fires only when one side really is a proxy; comparing two distinct
+        // proxies is unchanged.
+        final leftBehind = D4.interpretedBehind(leftOperandValue);
+        final rightBehind = D4.interpretedBehind(rightOperandValue);
+        if (leftBehind != null || rightBehind != null) {
+          return (leftBehind ?? leftOperandValue) ==
+              (rightBehind ?? rightOperandValue);
+        }
+        return left == right;
+      case '!=':
+        // Special handling for BridgedEnumValue comparison
+        if (leftOperandValue is BridgedEnumValue &&
+            rightOperandValue is BridgedEnumValue) {
+          return leftOperandValue != rightOperandValue;
+        }
+
+        // Special handling for mixed native enum and BridgedEnumValue comparison
+        if ((leftOperandValue is BridgedEnumValue &&
+                rightOperandValue is Enum) ||
+            (leftOperandValue is Enum &&
+                rightOperandValue is BridgedEnumValue)) {
+          final leftNative = leftOperandValue is BridgedEnumValue
+              ? leftOperandValue.nativeValue
+              : leftOperandValue;
+          final rightNative = rightOperandValue is BridgedEnumValue
+              ? rightOperandValue.nativeValue
+              : rightOperandValue;
+          return leftNative != rightNative;
+        }
+
+        // SCE84: the mirror of the `==` arm above — see its comment.
+        final leftBehindNe = D4.interpretedBehind(leftOperandValue);
+        final rightBehindNe = D4.interpretedBehind(rightOperandValue);
+        if (leftBehindNe != null || rightBehindNe != null) {
+          return (leftBehindNe ?? leftOperandValue) !=
+              (rightBehindNe ?? rightOperandValue);
+        }
+        return left != right;
+      case '<':
+        return left as dynamic < right;
+      case '<=':
+        return left as dynamic <= right;
+      case '>':
+        return left as dynamic > right;
+      case '>=':
+        return left as dynamic >= right;
+      // `bool` declares `& | ^` as well as `int` does. They are the
+      // non-short-circuiting siblings of `&& ||` — both operands are already
+      // evaluated by the time we get here, which is exactly the semantics Dart
+      // requires and the one case `&&` cannot express. Only bool-bool is
+      // accepted: `true & 1` is a type error in Dart and must stay one here.
+      case '^':
+        if (left is int && right is int) return left ^ right;
+        if (left is bool && right is bool) return left ^ right;
+        if (left is BigInt && right is BigInt) return left ^ right;
+        return _nativeBinaryFallback(operatorName, left, right);
+      case '&':
+        if (left is int && right is int) return left & right;
+        if (left is bool && right is bool) return left & right;
+        if (left is BigInt && right is BigInt) return left & right;
+        return _nativeBinaryFallback(operatorName, left, right);
+      case '|':
+        if (left is int && right is int) return left | right;
+        if (left is bool && right is bool) return left | right;
+        if (left is BigInt && right is BigInt) return left | right;
+        return _nativeBinaryFallback(operatorName, left, right);
+      case '>>':
+        if (left is int && right is int) return left >> right;
+        if (left is BigInt && right is int) return left >> right;
+        return _nativeBinaryFallback(operatorName, left, right);
+      case '<<':
+        if (left is int && right is int) return left << right;
+        if (left is BigInt && right is int) return left << right;
+        return _nativeBinaryFallback(operatorName, left, right);
+      case '>>>':
+        if (left is int && right is int) return left >>> right;
+        // Note: BigInt doesn't support >>> operator in Dart
+        return _nativeBinaryFallback(operatorName, left, right);
+      default:
+        break;
+    }
+
+    if (operator == TokenType.PLUS && (left is String || right is String)) {
+      return '${stringify(left)}${stringify(right)}'; // stringify already handles BridgedInstance indirectly via toString
+    }
+
+    if (!checkExtensionEarly) {
+      // Only run this if we didn't already check (and potentially succeed/fail) earlier
+      try {
+        final extensionOperator = environment.findExtensionMember(
+          leftOperandValue,
+          operatorName,
+        );
+
+        if (extensionOperator is ExtensionMemberCallable &&
+            extensionOperator.isOperator) {
+          Logger.debug(
+            "[BinaryExpression] Found extension operator '$operatorName' (late check) for type ${leftOperandValue?.runtimeType}. Calling...",
+          );
+          final extensionPositionalArgs = [leftOperandValue, rightOperandValue];
+          try {
+            return extensionOperator.call(this, extensionPositionalArgs, {});
+          } on ReturnException catch (e) {
+            return e.value; // Should not happen for operators, but handle
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing extension operator '$operatorName': $e",
+            );
+          }
+        }
+        Logger.debug(
+          "[BinaryExpression] No suitable extension operator '$operatorName' found (late check) for type ${leftOperandValue?.runtimeType}.",
+        );
+      } on RuntimeD4rtException catch (findError) {
+        Logger.debug(
+          "[BinaryExpression] No extension member '$operatorName' found (late check) for type ${leftOperandValue?.runtimeType}. Error: ${findError.message}",
+        );
+        // Fall through to the final standard error below.
+      }
+    }
+
+    throw RuntimeD4rtException(
+      'Unsupported operator ($operator) for types ${leftOperandValue?.runtimeType} and ${rightOperandValue?.runtimeType}.'
+      '${unbridgedNativeClause(leftOperandValue)}',
+    );
+  }
+
+  /// SCD93: hand `left <operator> right` to the SDK when the typed fast paths
+  /// above could not dispatch it themselves.
+  ///
+  /// The six bitwise and shift arms used to throw
+  /// `RuntimeD4rtException('Unsupported binary operator "…"')` here — a
+  /// d4rt-only type no `on` clause can name, carrying a message that printed
+  /// the TokenType (`AMPERSAND`) rather than the operator. But `left` and
+  /// `right` are already NATIVE at this point (a `BridgedInstance` was
+  /// unwrapped to its `nativeObject` two hundred lines up), so the SDK operator
+  /// is right there and knows the answer exactly:
+  ///
+  ///   - `1 & 2.0`      -> TypeError, 'double' is not a subtype of 'int' of 'other'
+  ///   - `true & 1`     -> TypeError, naming 'bool' -- the parameter type
+  ///                       follows the RECEIVER's own operator
+  ///   - `BigInt << 1.0`-> TypeError, naming the parameter 'shiftAmount'
+  ///   - `'x' & 1`      -> NoSuchMethodError, Class 'String' has no '&'
+  ///   - `null & 1`     -> NoSuchMethodError, The method '&' was called on null
+  ///
+  /// Tabulating that here would be a second implementation of a rule the SDK
+  /// already applies, which is the shape SCC30 removed from `~/` and `%`. The
+  /// comparison arms (`<`, `<=`, `>`, `>=`) have delegated since they were
+  /// written; these six were simply the ones nobody converted.
+  ///
+  /// **The interpreter's own runtime objects are the exception, and it is the
+  /// legitimate kind.** An `InterpretedInstance` has no SDK operator to
+  /// delegate to — its class operators and extension-type operators were
+  /// already given their chance above — so there is nothing to hand the
+  /// question to and the d4rt exception stays. Handing it over anyway would
+  /// name `InterpretedInstance` in a NoSuchMethodError, leaking an internal
+  /// class into a script's diagnostics.
+  Object? _nativeBinaryFallback(String operator, Object? left, Object? right) {
+    if (!_isSdkOperand(left)) {
+      throw RuntimeD4rtException('Unsupported binary operator "$operator"');
+    }
+    final l = left as dynamic;
+    final r = right as dynamic;
+    switch (operator) {
+      case '^':
+        return l ^ r;
+      case '&':
+        return l & r;
+      case '|':
+        return l | r;
+      case '>>':
+        return l >> r;
+      case '<<':
+        return l << r;
+      case '>>>':
+        return l >>> r;
+    }
+    throw RuntimeD4rtException('Unsupported binary operator "$operator"');
+  }
+
+  /// SCD93: whether [value] is something the SDK can answer an operator
+  /// question about — that is, NOT one of the interpreter's own runtime
+  /// objects.
+  ///
+  /// `null` is deliberately included: `null & 1` raises
+  /// `NoSuchMethodError: The method '&' was called on null` in real Dart, and
+  /// delegating reproduces it exactly.
+  static bool _isSdkOperand(Object? value) =>
+      value is! RuntimeValue && value is! Callable && value is! RuntimeType;
+
+  @override
+  Object? visitIndexExpression(IndexExpression node) {
+    final target = node.target;
+    final index = node.index;
+    final targetValue = target?.accept<Object?>(this);
+
+    // Handle null-aware indexing: x?[i] returns null if x is null
+    if (node.isNullAware && targetValue == null) {
+      return null;
+    }
+
+    // C21 — Dart null-shorting: when an inner selector in this chain
+    // uses `?.`/`?[…]` (e.g. `a?.b[i]` where `a == null`), the outer
+    // index access must short-circuit to null instead of throwing.
+    if (targetValue == null && _chainHasNullAwareSelector(node.target)) {
+      return null;
+    }
+
+    final indexValue = index.accept<Object?>(this);
+
+    if (targetValue is AsyncSuspensionRequest) return targetValue;
+    if (indexValue is AsyncSuspensionRequest) return indexValue;
+
+    if (targetValue is Map) {
+      // A lookup key normalises as a stored key does (SCC32, SCF40): a
+      // wrapped enum or instance becomes its native, and a class name its
+      // native `Type`, which an identity map needs to find it.
+      final key = _unwrapHashKey(indexValue);
+      return targetValue[key];
+    }
+    if (targetValue is String && indexValue is int) {
+      return targetValue[indexValue];
+    } else if (targetValue is List) {
+      // SCD93: no bounds test and no `is int` test — both operands are already
+      // native, so the SDK's own `List.[]` decides, and it decides better than
+      // the guards did. Out of range it raises `RangeError (length)` where the
+      // hand-written guard said `RangeError (index)`; on a non-int index it
+      // raises `TypeError` where the guard raised an uncatchable
+      // `RuntimeD4rtException`; and on an unmodifiable list it raises
+      // `UnsupportedError`, which the bounds guard used to pre-empt with a
+      // RangeError. See `scd93_native_operator_guards_test.dart`.
+      return (targetValue as dynamic)[indexValue];
+    } else if (targetValue is InterpretedInstance) {
+      // Check for class operator [] method
+      final operatorMethod = targetValue.findOperator('[]');
+      if (operatorMethod != null) {
+        Logger.debug(
+          "[visitIndexExpression] Found class operator '[]' on ${targetValue.klass.name}. Calling...",
+        );
+        try {
+          return operatorMethod.bind(targetValue).call(this, [indexValue], {});
+        } on ReturnException catch (e) {
+          return e.value;
+        } catch (e) {
+          throw RuntimeD4rtException("Error executing class operator '[]': $e");
+        }
+      }
+    } else if (targetValue is InterpretedExtensionTypeInstance) {
+      // DFUB9: index operator `[]` declared on an extension type.
+      final operatorMethod = targetValue.extensionType.methods['[]'];
+      if (operatorMethod != null) {
+        Logger.debug(
+          "[visitIndexExpression] Found extension-type operator '[]' on ${targetValue.extensionType.name}. Calling...",
+        );
+        try {
+          return operatorMethod.bind(targetValue).call(this, [indexValue], {});
+        } on ReturnException catch (e) {
+          return e.value;
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Error executing extension-type operator '[]': $e",
+          );
+        }
+      }
+    } else if (toBridgedInstance(targetValue).$2) {
+      final bridgedInstance = toBridgedInstance(targetValue).$1!;
+      final bridgedClass = bridgedInstance.bridgedClass;
+      final operatorName = '[]';
+
+      final methodAdapter = bridgedClass.findInstanceMethodAdapter(
+        operatorName,
+      );
+
+      if (methodAdapter != null) {
+        Logger.debug(
+          "[visitIndexExpression] Found bridged operator '$operatorName' for ${bridgedClass.name}. Calling adapter...",
+        );
+        try {
+          return methodAdapter(
+            this,
+            bridgedInstance.nativeObject,
+            [_bridgeInterpreterValueToNative(indexValue)],
+            {},
+            null,
+          );
+        } catch (e, s) {
+          Logger.error(
+            "[visitIndexExpression] Native exception during bridged operator '$operatorName' on ${bridgedClass.name}: $e\\n$s",
+          );
+          throw RuntimeD4rtException(
+            "Native error during bridged operator '$operatorName' on ${bridgedClass.name}: $e",
+            originalException: e,
+            originalStackTrace: s,
+          );
+        }
+      }
+      Logger.debug(
+        "[visitIndexExpression] Bridged operator '$operatorName' not found directly for ${bridgedClass.name}. Trying extensions.",
+      );
+    }
+
+    const operatorNameForExtension = '[]';
+    try {
+      final extensionOperator = environment.findExtensionMember(
+        targetValue,
+        operatorNameForExtension,
+      );
+
+      if (extensionOperator is ExtensionMemberCallable &&
+          extensionOperator.isOperator) {
+        Logger.debug(
+          "[IndexExpression] Found extension operator '[]' for type ${targetValue?.runtimeType}. Calling...",
+        );
+        final extensionPositionalArgs = [targetValue, indexValue];
+        try {
+          return extensionOperator.call(this, extensionPositionalArgs, {});
+        } on ReturnException catch (e) {
+          return e.value;
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Error executing extension operator '[]': $e",
+          );
+        }
+      }
+      Logger.debug(
+        "[IndexExpression] No suitable extension operator '[]' found for type ${targetValue?.runtimeType}.",
+      );
+    } on RuntimeD4rtException catch (findError) {
+      Logger.debug(
+        "[IndexExpression] No extension member '[]' found for type ${targetValue?.runtimeType}. Error: ${findError.message}",
+      );
+    }
+
+    throw RuntimeD4rtException(
+      'Unsupported target for indexing: ${targetValue?.runtimeType}.'
+      '${unbridgedNativeClause(targetValue)}',
+    );
+  }
+
+  /// OPEN B.9 — propagate a bare-identifier write that landed on a static-field
+  /// snapshot back to the owner class's authoritative static slot.
+  ///
+  /// Inside a static member, [InterpretedFunction._prepareExecutionEnvironment]
+  /// snapshots the owner class's static fields into the member's top execution
+  /// environment (so they read without a class prefix) and marks that scope via
+  /// [Environment.staticFieldSnapshotOwner]. A bare assignment only mutates that
+  /// snapshot, which is discarded when the call returns — so the write must also
+  /// be mirrored to `InterpretedClass.setStaticField` to survive across calls.
+  ///
+  /// Shadow-safe: a local that shadows a static field lives in a different
+  /// (unmarked) environment, so [definingEnv] is not the snapshot scope and no
+  /// propagation occurs.
+  void _propagateStaticFieldWrite(
+    Environment definingEnv,
+    String variableName,
+    Object? value,
+  ) {
+    final owner = definingEnv.staticFieldSnapshotOwner;
+    if (owner != null && owner.staticFields.containsKey(variableName)) {
+      owner.setStaticField(variableName, value);
+    }
+  }
+
+  /// The class in [klass]'s chain that declares a STATIC FIELD named [name].
+  ///
+  /// SCE125. A bare name written from inside an instance method used to land on
+  /// the INSTANCE — `thisInstance.set(name, …)` creates a field when none
+  /// exists — so `class Box { static int v = 1; void go() { v += 1; } }` left
+  /// `Box.v` at 1 and gave the instance a private `v` of 2. The method could
+  /// read its own write back, which is what made it silent: a test that checks
+  /// the value INSIDE the method passes, and only a reader outside the instance
+  /// sees the static unchanged. Two instances did not even agree with each
+  /// other.
+  ///
+  /// The READ path was always right — [InterpretedInstance.get] walks the class
+  /// chain and finds the static when no instance field shadows it — which is
+  /// why the two halves disagreed rather than both being wrong. This mirrors
+  /// that walk so a bare write resolves exactly where a bare read does.
+  ///
+  /// In Dart a class cannot declare a static and an instance member with the
+  /// same name, so finding a static means there is no instance member to
+  /// prefer; the check can come first.
+  InterpretedClass? _staticFieldOwner(InterpretedClass? klass, String name) {
+    var walk = klass;
+    while (walk != null) {
+      if (walk.staticFields.containsKey(name)) return walk;
+      walk = walk.superclass;
+    }
+    return null;
+  }
+
+  /// The setter a bare write to [name] reaches through the lexical scope, or
+  /// null when there is none or a closer binding of the plain name shadows it.
+  ///
+  /// SCF25. A setter is bound under `v=` ([Environment.setterKey]) — top-level
+  /// ones by the declaration passes, a class's static ones by the static
+  /// snapshot a static member runs in. A binding of `v` itself that sits
+  /// strictly INSIDE the setter's scope (a local, a parameter) is what the
+  /// bare name means, as in Dart; one in the same scope is the getter of the
+  /// pair, and does not shadow its own setter.
+  Callable? _bareSetterFor(String name) {
+    final key = Environment.setterKey(name);
+    final setterEnv = environment.findDefiningEnvironment(key);
+    if (setterEnv == null) return null;
+    final plainEnv = environment.findDefiningEnvironment(name);
+    for (Environment? e = environment; e != null; e = e.enclosing) {
+      if (identical(e, setterEnv)) break;
+      if (identical(e, plainEnv)) return null;
+    }
+    final setter = setterEnv.get(key);
+    return setter is Callable ? setter : null;
+  }
+
+  /// The STATIC SETTER named [name] in [klass]'s chain, or null — the setter
+  /// counterpart of [_staticFieldOwner] (SCF25).
+  InterpretedFunction? _staticSetterFor(InterpretedClass? klass, String name) {
+    var walk = klass;
+    while (walk != null) {
+      final setter = walk.findStaticSetter(name);
+      if (setter != null) return setter;
+      walk = walk.superclass;
+    }
+    return null;
+  }
+
+  /// Write a bare increment/decrement to the same slot its read resolves to.
+  void _assignBareStepValue(String name, Object? value) {
+    final bareSetter = _bareSetterFor(name);
+    if (bareSetter != null) {
+      bareSetter.call(this, [value], {});
+      return;
+    }
+    final definingScope = environment.findDefiningEnvironment(name);
+    if (definingScope != null) {
+      environment.assign(name, value);
+      _propagateStaticFieldWrite(definingScope, name, value);
+      return;
+    }
+    final receiver = environment.lookup('this');
+    if (receiver is InterpretedInstance) {
+      final staticOwner = _staticFieldOwner(receiver.klass, name);
+      if (staticOwner != null) {
+        staticOwner.setStaticField(name, value);
+        return;
+      }
+      final staticSetter = _staticSetterFor(receiver.klass, name);
+      if (staticSetter != null) {
+        staticSetter.call(this, [value], {});
+        return;
+      }
+      final setter = receiver.klass.findInstanceSetter(name);
+      if (setter != null) {
+        setter.bind(receiver).call(this, [value], {});
+      } else {
+        receiver.set(name, value, this);
+      }
+      return;
+    }
+    throw undefinedNameError(name);
+  }
+
+  @override
+  Object? visitAssignmentExpression(AssignmentExpression node) {
+    final lhs = node.leftHandSide;
+    // Evaluate RHS once, used by multiple branches below
+    Object? rhsValue = node.rightHandSide.accept<Object?>(this);
+
+    // Handle suspension on the right-hand side
+    if (rhsValue is AsyncSuspensionRequest) {
+      Logger.debug(
+        "[visitAssignmentExpression] RHS suspended. Propagating suspension.",
+      );
+      // The state machine (_determineNextNodeAfterAwait) will handle resumption.
+      // It needs to know this AssignmentExpression was the context.
+      return rhsValue;
+    }
+    // END NEW
+
+    final operatorType = node.operator.type;
+
+    // Case 1: Simple variable assignment (lexical or implicit this)
+    if (lhs is SimpleIdentifier) {
+      final variableName = lhs.name;
+
+      // SCF25: a bare write to a name the scope binds a SETTER for calls it.
+      // It used to rebind the name and drop the write. See [_bareSetterFor].
+      final bareSetter = _bareSetterFor(variableName);
+      if (bareSetter != null) {
+        final Object? newValue = operatorType == TokenType.EQ
+            ? rhsValue
+            : computeCompoundValue(
+                lhs.accept<Object?>(this),
+                rhsValue,
+                operatorType,
+              );
+        bareSetter.call(this, [newValue], {});
+        return newValue;
+      }
+
+      Environment? definingEnv = environment.findDefiningEnvironment(
+        variableName,
+      );
+
+      if (definingEnv != null) {
+        // Check if the variable is a LateVariable
+        final variableValue = definingEnv.get(variableName);
+        if (variableValue is LateVariable) {
+          if (operatorType == TokenType.EQ) {
+            // Simple assignment to late variable
+            variableValue.assign(rhsValue);
+            return rhsValue;
+          } else {
+            // Compound assignment to late variable
+            final currentValue =
+                variableValue.value; // May throw if not initialized
+            Object? newValue = computeCompoundValue(
+              currentValue,
+              rhsValue,
+              operatorType,
+            );
+            variableValue.assign(newValue);
+            return newValue;
+          }
+        } else {
+          // Regular variable handling
+          if (operatorType == TokenType.EQ) {
+            final assigned = environment.assign(
+              variableName,
+              rhsValue,
+            ); // Use original assign for lexical
+            _propagateStaticFieldWrite(definingEnv, variableName, rhsValue);
+            return assigned;
+          } else {
+            // Handle compound assignments on lexical variables
+            final currentValue = environment.get(
+              variableName,
+            ); // Get from lexical scope
+            Object? newValue = computeCompoundValue(
+              currentValue,
+              rhsValue,
+              operatorType,
+            );
+            final assigned = environment.assign(
+              variableName,
+              newValue,
+            ); // Assign back to lexical scope
+            _propagateStaticFieldWrite(definingEnv, variableName, newValue);
+            return assigned;
+          }
+        }
+      } else {
+        try {
+          final thisInstance = environment.get('this');
+          if (thisInstance is InterpretedInstance) {
+            // SCE125: a bare name the class declares `static` is a write to the
+            // STATIC, not to this instance. See [_staticFieldOwner].
+            final staticOwner = _staticFieldOwner(
+              thisInstance.klass,
+              variableName,
+            );
+            if (staticOwner != null) {
+              if (operatorType == TokenType.EQ) {
+                staticOwner.setStaticField(variableName, rhsValue);
+                return rhsValue;
+              }
+              final newValue = computeCompoundValue(
+                staticOwner.getStaticField(variableName),
+                rhsValue,
+                operatorType,
+              );
+              staticOwner.setStaticField(variableName, newValue);
+              return newValue;
+            }
+            // SCF25: and a bare name the class chain declares a static SETTER
+            // for calls it, as the static field above is written.
+            final staticSetter = _staticSetterFor(
+              thisInstance.klass,
+              variableName,
+            );
+            if (staticSetter != null) {
+              final Object? newValue = operatorType == TokenType.EQ
+                  ? rhsValue
+                  : computeCompoundValue(
+                      lhs.accept<Object?>(this),
+                      rhsValue,
+                      operatorType,
+                    );
+              staticSetter.call(this, [newValue], {});
+              return newValue;
+            }
+            if (operatorType == TokenType.EQ) {
+              Logger.debug(
+                "[Assignment - implicit this] Checking for direct setter '$variableName' on ${thisInstance.runtimeType}",
+              );
+              final setter = thisInstance.klass.findInstanceSetter(
+                variableName,
+              );
+              if (setter != null) {
+                Logger.debug(
+                  "[Assignment - implicit this] Found direct setter. Calling...",
+                );
+                // Call setter on 'this'
+                setter.bind(thisInstance).call(this, [rhsValue], {});
+                return rhsValue; // Assignment expression returns RHS value
+              } else {
+                Logger.debug(
+                  "[Assignment - implicit this] No direct setter found. Trying extension setter for '$variableName' on ${thisInstance.runtimeType}",
+                );
+                final extensionSetter = environment.findExtensionMember(
+                  thisInstance,
+                  variableName,
+                );
+                if (extensionSetter is ExtensionMemberCallable &&
+                    extensionSetter.isSetter) {
+                  Logger.debug(
+                    "[Assignment - implicit this] Found extension setter '$variableName'. Calling...",
+                  );
+                  final extensionPositionalArgs = [
+                    thisInstance, // Target is 'this'
+                    rhsValue, // Value to assign
+                  ];
+                  try {
+                    extensionSetter.call(this, extensionPositionalArgs, {});
+                    Logger.debug(
+                      "[Assignment - implicit this] Extension setter call finished.",
+                    );
+                    return rhsValue; // Simple assignment returns RHS
+                  } catch (e) {
+                    throw RuntimeD4rtException(
+                      "Error executing extension setter '$variableName' via implicit 'this': $e",
+                    );
+                  }
+                } else {
+                  Logger.debug(
+                    "[Assignment - implicit this] No extension setter found for '$variableName'. Falling back to direct field set.",
+                  );
+                  // Assign directly to field on 'this' (original fallback)
+                  // WARNING: This might be incorrect if the intent was purely extension based.
+                  // Dart would typically throw if no setter (direct or extension) exists and no field exists.
+                  // Consider throwing here if direct field assignment isn't desired.
+                  try {
+                    thisInstance.set(variableName, rhsValue, this);
+                    Logger.debug(
+                      "[Assignment - implicit this] Direct field set successful (?).",
+                    );
+                    return rhsValue; // Assignment expression returns RHS value
+                  } on RuntimeD4rtException catch (fieldSetError) {
+                    Logger.debug(
+                      "[Assignment - implicit this] Direct field set failed: ${fieldSetError.message}",
+                    );
+                    // If both direct setter, extension setter, and direct field set fail, THEN throw.
+                    throw RuntimeD4rtException(
+                      "Cannot assign to '$variableName' on implicit 'this': No setter (direct or extension) or assignable field found.",
+                      originalException: fieldSetError.originalException,
+                      originalStackTrace: fieldSetError.originalStackTrace,
+                    );
+                  }
+                }
+              }
+            } else {
+              // 1. Get current value from 'this' (field or getter)
+              final currentValue = thisInstance.get(
+                variableName,
+              ); // May throw if undefined on instance
+
+              // 2. Calculate new value
+              Object? newValue = computeCompoundValue(
+                currentValue,
+                rhsValue,
+                operatorType,
+              );
+
+              // 3. Set new value on 'this' (field or setter)
+              final setter = thisInstance.klass.findInstanceSetter(
+                variableName,
+              );
+              if (setter != null) {
+                setter.bind(thisInstance).call(this, [newValue], {});
+              } else {
+                thisInstance.set(variableName, newValue, this);
+              }
+              // Compound assignment returns the NEW value
+              return newValue;
+            }
+          } else if (toBridgedInstance(thisInstance).$2) {
+            if (rhsValue is BridgedEnumValue) {
+              rhsValue = rhsValue.nativeValue;
+            } else if (rhsValue is BridgedInstance) {
+              // GEN-079: Unwrap BridgedInstance for native setter calls so
+              // covariant typed generic setters (e.g. ValueNotifier<Color>)
+              // receive the underlying native object rather than the wrapper.
+              rhsValue = rhsValue.nativeObject;
+            }
+            final bridgedInstance = toBridgedInstance(thisInstance).$1!;
+            final bridgedClass = bridgedInstance.bridgedClass;
+            final setterAdapter = bridgedClass.findInstanceSetterAdapter(
+              variableName,
+            );
+
+            if (setterAdapter != null) {
+              if (operatorType == TokenType.EQ) {
+                // Simple assignment: this.bridgedProp = value
+                Logger.debug(
+                  "[Assignment] Assigning to bridged 'this'.$variableName via setter adapter.",
+                );
+                D4.withActiveVisitor<void>(
+                  this,
+                  () =>
+                      setterAdapter(this, thisInstance.nativeObject, rhsValue),
+                );
+                return rhsValue; // Simple assignment returns RHS value
+              } else {
+                // Compound assignment: this.bridgedProp op= value
+                // 1. Get current value (requires a getter adapter)
+                final getterAdapter = bridgedClass.findInstanceGetterAdapter(
+                  variableName,
+                );
+                if (getterAdapter == null) {
+                  throw RuntimeD4rtException(
+                    "Cannot perform compound assignment on '${bridgedClass.name}.$variableName' via implicit 'this': No getter found.",
+                  );
+                }
+                final currentValue = getterAdapter(
+                  this,
+                  thisInstance.nativeObject,
+                );
+                // 2. Calculate new value
+                Object? newValue = computeCompoundValue(
+                  currentValue,
+                  rhsValue,
+                  operatorType,
+                );
+                // 3. Set new value via setter adapter
+                Logger.debug(
+                  "[Assignment] Compound assigning to bridged 'this'.$variableName via setter adapter.",
+                );
+                D4.withActiveVisitor<void>(
+                  this,
+                  () =>
+                      setterAdapter(this, thisInstance.nativeObject, newValue),
+                );
+                return newValue; // Compound assignment returns new value
+              }
+            } else {
+              // No setter adapter found
+              throw RuntimeD4rtException(
+                "Cannot assign to property '$variableName' on bridged instance of '${bridgedClass.name}' accessed via implicit 'this': No setter found.",
+              );
+            }
+          } else {
+            // 'this' exists but is not an InterpretedInstance or BridgedInstance
+            throw RuntimeD4rtException.resolutionFailure(
+              "Assigning to undefined variable '$variableName'.",
+            );
+          }
+        } on RuntimeD4rtException catch (e) {
+          // If 'this' doesn't exist or getting/setting on 'this' failed
+          // Use the original error if it came from get/set, otherwise standard undefined.
+          // SCD86 typed the static-member half. The two clauses ask different
+          // questions on purpose — instance-member absence gates extension
+          // lookup, static-member absence gates this compound-assignment
+          // fallback — so they stay two types rather than one.
+          //
+          // Note the asymmetry: the instance clause compares `memberName`, this
+          // one does not. That is the condition it replaced, preserved. The old
+          // `e.message.contains("Undefined static member")` carried no name
+          // check, so adding one here would have narrowed the branch rather
+          // than typed it. The name is on the exception either way.
+          // SCD87 deliberately does NOT add its identity check here, and the
+          // reason is the direction this branch decides in. At the seven
+          // extension-lookup sites the branch means "treat the member as
+          // absent and look for an extension", so a same-named inner failure
+          // being admitted makes an extension answer for a real error —
+          // narrowing with `identical` is the fix. Here the branch means
+          // "propagate the specific error instead of relabelling it as
+          // `Assigning to undefined variable`". Narrowing it would send MORE
+          // failures to the relabelling path, hiding genuine errors behind a
+          // message about the wrong thing. Same defect, opposite direction.
+          //
+          // (The receiver is also out of scope at this catch — `thisInstance`
+          // is declared inside the try — which is how the difference was
+          // noticed rather than reasoned about in advance.)
+          if ((e is UndefinedMemberD4rtException &&
+                  e.memberName == variableName) ||
+              e is UndefinedStaticMemberD4rtException) {
+            rethrow; // Propagate specific error from get/set
+          }
+          throw RuntimeD4rtException.resolutionFailure(
+            "Assigning to undefined variable '$variableName'.",
+          );
+        }
+      }
+    }
+    // Case 2: PropertyAccess assignment (target.property op= value)
+    else if (lhs is PropertyAccess) {
+      final targetExpression = lhs.target; // Keep expression for check below
+      final targetValue = targetExpression?.accept<Object?>(this);
+      final propertyName = lhs.propertyName.name;
+      // rhsValue and operatorType already available from the top
+
+      if (targetValue is BoundSuper) {
+        // This handles cases like: super.value = expression; or super.value += expression;
+        final instance = targetValue.instance;
+        final startClass = targetValue.startLookupClass;
+        InterpretedClass? currentClass = startClass;
+        InterpretedFunction? superSetter;
+        InterpretedFunction? superGetter;
+
+        // Look for the setter in the superclass hierarchy starting from startClass
+        BridgedClass? bridgedSetter;
+        while (currentClass != null) {
+          final setter = currentClass.findInstanceSetter(propertyName);
+          if (setter != null) {
+            superSetter = setter;
+            break;
+          }
+          // Check bridged superclass
+          if (currentClass.bridgedSuperclass != null) {
+            final bridged = currentClass.bridgedSuperclass!;
+            if (bridged.setters.containsKey(propertyName)) {
+              bridgedSetter = bridged;
+              break;
+            }
+          }
+          currentClass = currentClass.superclass;
+        }
+
+        // For compound operators, we also need to get the current value
+        Object? currentValue;
+        BridgedClass? bridgedGetter;
+        if (operatorType != TokenType.EQ) {
+          // First try to find a getter
+          currentClass = startClass;
+          while (currentClass != null) {
+            final getter = currentClass.findInstanceGetter(propertyName);
+            if (getter != null) {
+              superGetter = getter;
+              break;
+            }
+            // Check bridged superclass
+            if (currentClass.bridgedSuperclass != null) {
+              final bridged = currentClass.bridgedSuperclass!;
+              if (bridged.getters.containsKey(propertyName)) {
+                bridgedGetter = bridged;
+                break;
+              }
+            }
+            currentClass = currentClass.superclass;
+          }
+
+          // Get the current value using getter or bridged getter
+          if (superGetter != null) {
+            currentValue = superGetter.bind(instance).call(this, [], {});
+          } else if (bridgedGetter != null) {
+            final bridgedTarget = instance.bridgedSuperObject;
+            if (bridgedTarget == null) {
+              throw RuntimeD4rtException(
+                "Cannot access bridged property '$propertyName': bridgedSuperObject is null",
+              );
+            }
+            currentValue = bridgedGetter.getters[propertyName]!(
+              this,
+              bridgedTarget,
+            );
+          } else {
+            // Try to get field value directly
+            try {
+              currentValue = instance.get(propertyName, visitor: this);
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Cannot read '$propertyName' from superclass chain of '${instance.klass.name}' for compound 'super' assignment: $e",
+              );
+            }
+          }
+        }
+
+        if (operatorType == TokenType.EQ) {
+          // Simple assignment: super.value = rhsValue
+          if (superSetter != null) {
+            superSetter.bind(instance).call(this, [rhsValue], {});
+            return rhsValue;
+          } else if (bridgedSetter != null) {
+            final bridgedTarget = instance.bridgedSuperObject;
+            if (bridgedTarget == null) {
+              throw RuntimeD4rtException(
+                "Cannot set bridged property '$propertyName': bridgedSuperObject is null",
+              );
+            }
+            bridgedSetter.setters[propertyName]!(this, bridgedTarget, rhsValue);
+            return rhsValue;
+          } else {
+            // Try direct field assignment
+            try {
+              instance.set(propertyName, rhsValue);
+              return rhsValue;
+            } catch (e) {
+              throw RuntimeD4rtException.resolutionFailure(
+                "Setter for '$propertyName' not found in superclass chain of '${instance.klass.name}' for 'super' assignment: $e",
+              );
+            }
+          }
+        } else {
+          // Compound assignment: super.value += rhsValue, etc.
+          // Compute new value
+          final newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+
+          // Set new value
+          if (superSetter != null) {
+            superSetter.bind(instance).call(this, [newValue], {});
+          } else if (bridgedSetter != null) {
+            final bridgedTarget = instance.bridgedSuperObject;
+            if (bridgedTarget == null) {
+              throw RuntimeD4rtException(
+                "Cannot set bridged property '$propertyName': bridgedSuperObject is null",
+              );
+            }
+            bridgedSetter.setters[propertyName]!(this, bridgedTarget, newValue);
+          } else {
+            // Try direct field assignment
+            try {
+              instance.set(propertyName, newValue);
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Cannot set '$propertyName' in superclass chain of '${instance.klass.name}' for compound 'super' assignment: $e",
+              );
+            }
+          }
+
+          return newValue;
+        }
+      } else if (targetValue is InterpretedInstance) {
+        // This code block was accidentally removed or modified, restore it.
+        if (operatorType == TokenType.EQ) {
+          // Simple assignment: target.property = rhsValue
+          final setter = targetValue.klass.findInstanceSetter(propertyName);
+          if (setter != null) {
+            setter.bind(targetValue).call(this, [rhsValue], {});
+            Logger.debug(
+              "[Assignment] Assigned via direct setter for '$propertyName'",
+            );
+            return rhsValue;
+          }
+          // No direct setter, try extension setter
+          final extensionSetter = environment.findExtensionMember(
+            targetValue,
+            propertyName,
+          );
+          if (extensionSetter is ExtensionMemberCallable &&
+              extensionSetter.isSetter) {
+            Logger.debug(
+              "[Assignment] Assigning via extension setter for '$propertyName'",
+            );
+            final extensionPositionalArgs = [
+              targetValue,
+              rhsValue,
+            ]; // Target + value
+            try {
+              extensionSetter.call(this, extensionPositionalArgs, {});
+              return rhsValue;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing extension setter '$propertyName': $e",
+              );
+            }
+          }
+          // No direct or extension setter, assign to field
+          Logger.debug(
+            "[Assignment] No direct or extension setter found for '$propertyName', assigning to field.",
+          );
+          targetValue.set(propertyName, rhsValue, this);
+          return rhsValue; // Simple Assignment returns RHS value
+        } else {
+          // Compound assignment: target.property op= rhsValue
+          // 1. Get current value
+          final currentValue = targetValue.get(
+            propertyName,
+          ); // Use instance.get (handles field/getter)
+          // 2. Calculate new value
+          Object? newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+          // 3. Set new value (via setter or direct field access)
+          final setter = targetValue.klass.findInstanceSetter(propertyName);
+          if (setter != null) {
+            setter.bind(targetValue).call(this, [newValue], {});
+          } else {
+            // Assign directly to field if no setter (using the instance's set method)
+            targetValue.set(propertyName, newValue, this);
+          }
+          return newValue; // Compound returns new value
+        }
+      }
+      // Handle assignment to static property (targetValue is InterpretedClass)
+      else if (targetValue is InterpretedClass) {
+        if (operatorType == TokenType.EQ) {
+          // Simple assignment: Class.property = rhsValue
+          final staticSetter = targetValue.findStaticSetter(propertyName);
+          if (staticSetter != null) {
+            staticSetter.call(this, [rhsValue], {});
+          } else {
+            // Assign directly to static field if no setter
+            targetValue.setStaticField(propertyName, rhsValue);
+          }
+          return rhsValue; // Simple Assignment returns RHS value
+        } else {
+          // Compound assignment: Class.property op= rhsValue
+          // 1. Get current value (static field or getter)
+          Object? currentValue;
+          final staticGetter = targetValue.findStaticGetter(propertyName);
+          if (staticGetter != null) {
+            currentValue = staticGetter.call(this, [], {});
+          } else {
+            // If no getter, try getting the field directly
+            try {
+              currentValue = targetValue.getStaticField(propertyName);
+            } catch (_) {
+              throw RuntimeD4rtException(
+                "Cannot get value for compound assignment on static member '$propertyName'. No getter or field found.",
+              );
+            }
+          }
+
+          // 2. Calculate new value
+          Object? newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+
+          // 3. Set new value (static setter or direct field access)
+          final staticSetter = targetValue.findStaticSetter(propertyName);
+          if (staticSetter != null) {
+            staticSetter.call(this, [newValue], {});
+          } else {
+            targetValue.setStaticField(propertyName, newValue);
+          }
+          return newValue; // Compound returns new value
+        }
+      } else if (toBridgedInstance(targetValue).$2) {
+        if (rhsValue is BridgedEnumValue) {
+          rhsValue = rhsValue.nativeValue;
+        } else if (rhsValue is BridgedInstance) {
+          // GEN-079: Unwrap BridgedInstance for native setter calls so
+          // covariant typed generic setters (e.g. ValueNotifier<Color>)
+          // receive the underlying native object rather than the wrapper.
+          rhsValue = rhsValue.nativeObject;
+        }
+        final bridgedInstance = toBridgedInstance(targetValue).$1!;
+        final setterAdapter = bridgedInstance.bridgedClass
+            .findInstanceSetterAdapter(propertyName);
+
+        if (setterAdapter != null) {
+          if (operatorType == TokenType.EQ) {
+            // Simple assignment: bridgedInstance.property = value
+            Logger.debug(
+              "[Assignment] Assigning to bridged instance property '${bridgedInstance.bridgedClass.name}.$propertyName' via setter adapter.",
+            );
+            // Wrap with withActiveVisitor so D4 helpers can resolve the
+            // visitor for interface proxy creation when coercing args.
+            D4.withActiveVisitor<void>(
+              this,
+              () => setterAdapter(this, bridgedInstance.nativeObject, rhsValue),
+            );
+            return rhsValue; // Simple assignment returns RHS value
+          } else {
+            // Compound assignment: bridgedInstance.property op= value
+            // 1. Get current value (requires a getter adapter)
+            final getterAdapter = bridgedInstance.bridgedClass
+                .findInstanceGetterAdapter(propertyName);
+            if (getterAdapter == null) {
+              throw RuntimeD4rtException(
+                "Cannot perform compound assignment on '${bridgedInstance.bridgedClass.name}.$propertyName': No getter adapter found.",
+              );
+            }
+            final currentValue = getterAdapter(
+              this,
+              bridgedInstance.nativeObject,
+            );
+            // 2. Calculate new value
+            Object? newValue = computeCompoundValue(
+              currentValue,
+              rhsValue,
+              operatorType,
+            );
+            // 3. Set new value via setter adapter
+            Logger.debug(
+              "[Assignment] Compound assigning to bridged instance property '${bridgedInstance.bridgedClass.name}.$propertyName' via setter adapter.",
+            );
+            // Wrap with withActiveVisitor so D4 helpers can resolve the
+            // visitor for interface proxy creation when coercing args.
+            D4.withActiveVisitor<void>(
+              this,
+              () => setterAdapter(this, bridgedInstance.nativeObject, newValue),
+            );
+            return newValue; // Compound assignment returns new value
+          }
+        } else {
+          // 1401-TODO #7 (F9): no setter adapter on the bridge. Before
+          // throwing, check the native↔interpreted reverse map: if this
+          // native object is the bridged super of an InterpretedInstance
+          // that declares the property (script-defined field/setter),
+          // route the assignment to the InterpretedInstance side. Mirror
+          // of tom_d4rt_ast/lib/src/runtime/interpreter_visitor.dart.
+          final interpretedObj = D4.interpretedForNative(
+            bridgedInstance.nativeObject,
+          );
+          if (interpretedObj is InterpretedInstance) {
+            final scriptSetter = interpretedObj.klass.findInstanceSetter(
+              propertyName,
+            );
+            final hasField = interpretedObj.klass
+                .getInstanceFieldNames()
+                .contains(propertyName);
+            if (scriptSetter != null || hasField) {
+              if (operatorType == TokenType.EQ) {
+                if (scriptSetter != null) {
+                  scriptSetter.bind(interpretedObj).call(this, [rhsValue], {});
+                } else {
+                  interpretedObj.set(propertyName, rhsValue, this);
+                }
+                return rhsValue;
+              } else {
+                final getter = interpretedObj.klass.findInstanceGetter(
+                  propertyName,
+                );
+                final Object? currentValue = getter != null
+                    ? getter.bind(interpretedObj).call(this, [], {})
+                    : interpretedObj.get(propertyName, visitor: this);
+                final Object? newValue = computeCompoundValue(
+                  currentValue,
+                  rhsValue,
+                  operatorType,
+                );
+                if (scriptSetter != null) {
+                  scriptSetter.bind(interpretedObj).call(this, [newValue], {});
+                } else {
+                  interpretedObj.set(propertyName, newValue, this);
+                }
+                return newValue;
+              }
+            }
+          }
+          // No setter adapter found and no script-defined fallback.
+          throw RuntimeD4rtException(
+            "Cannot assign to property '$propertyName' on bridged instance of '${bridgedInstance.bridgedClass.name}': No setter adapter found.",
+          );
+        }
+      } else if (targetValue is BoundBridgedSuper) {
+        if (rhsValue is BridgedEnumValue) {
+          rhsValue = rhsValue.nativeValue;
+        } else if (rhsValue is BridgedInstance) {
+          // GEN-079: Unwrap BridgedInstance for native setter calls so
+          // covariant typed generic setters (e.g. ValueNotifier<Color>)
+          // receive the underlying native object rather than the wrapper.
+          rhsValue = rhsValue.nativeObject;
+        }
+        // This handles: super.property = rhsValue; or super.property += rhsValue;
+        final instance = targetValue.instance; // Instance 'this'
+        final bridgedSuper = targetValue.startLookupClass;
+        final nativeSuperObject = instance.bridgedSuperObject;
+
+        if (nativeSuperObject == null) {
+          throw RuntimeD4rtException(
+            "Internal error: Cannot assign to super property '$propertyName' on bridged superclass '${bridgedSuper.name}' because the native super object is missing.",
+          );
+        }
+
+        // Find the bridged setter adapter
+        final setterAdapter = bridgedSuper.findReachableSetterAdapter(
+          propertyName,
+          this,
+        );
+
+        if (operatorType == TokenType.EQ) {
+          // Simple assignment
+          if (setterAdapter != null) {
+            try {
+              // Call the setter adapter with the native object and the new value
+              D4.withActiveVisitor<void>(
+                this,
+                () => setterAdapter(this, nativeSuperObject, rhsValue),
+              );
+              return rhsValue; // Assignment returns the right value
+            } catch (e, s) {
+              Logger.error(
+                "Native exception during super assignment to bridged setter '${bridgedSuper.name}.$propertyName': $e\\n$s",
+              );
+              throw RuntimeD4rtException(
+                "Native error during super assignment to bridged setter '$propertyName': $e",
+                originalException: e,
+                originalStackTrace: s,
+              );
+            }
+          } else {
+            // No setter found
+            throw RuntimeD4rtException.resolutionFailure(
+              "Setter for '$propertyName' not found in bridged superclass '${bridgedSuper.name}' for 'super' assignment.",
+            );
+          }
+        } else {
+          // Compound assignment: super.property += rhsValue, etc.
+          // Need both getter and setter
+          final getterAdapter = bridgedSuper.findReachableGetterAdapter(
+            propertyName,
+            this,
+          );
+          if (getterAdapter == null) {
+            throw RuntimeD4rtException(
+              "Cannot perform compound assignment on bridged super property '${bridgedSuper.name}.$propertyName': No getter adapter found.",
+            );
+          }
+          if (setterAdapter == null) {
+            throw RuntimeD4rtException(
+              "Cannot perform compound assignment on bridged super property '${bridgedSuper.name}.$propertyName': No setter adapter found.",
+            );
+          }
+
+          try {
+            // Get current value
+            final currentValue = getterAdapter(this, nativeSuperObject);
+
+            // Compute new value
+            final newValue = computeCompoundValue(
+              currentValue,
+              rhsValue,
+              operatorType,
+            );
+
+            // Set new value
+            D4.withActiveVisitor<void>(
+              this,
+              () => setterAdapter(this, nativeSuperObject, newValue),
+            );
+
+            return newValue;
+          } catch (e, s) {
+            Logger.error(
+              "Native exception during compound super assignment to bridged property '${bridgedSuper.name}.$propertyName': $e\\n$s",
+            );
+            throw RuntimeD4rtException(
+              "Native error during compound super assignment to bridged property '$propertyName': $e",
+              originalException: e,
+              originalStackTrace: s,
+            );
+          }
+        }
+      } else if (targetValue is InterpretedExtensionTypeInstance) {
+        // DFUB4: assignment to an extension-type setter (property access).
+        if (operatorType == TokenType.EQ) {
+          targetValue.set(propertyName, rhsValue, this);
+          return rhsValue;
+        } else {
+          final currentValue = targetValue.get(propertyName, this);
+          final newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+          targetValue.set(propertyName, newValue, this);
+          return newValue;
+        }
+      } else {
+        throw RuntimeD4rtException(
+          "Assignment target must be an instance, class, or super property, got ${targetValue?.runtimeType}."
+          '${unbridgedNativeClause(targetValue)}',
+        );
+      }
+    }
+    // Case 3: PrefixedIdentifier assignment (prefix.identifier op= value)
+    else if (lhs is PrefixedIdentifier) {
+      final target = lhs.prefix.accept<Object?>(this);
+      final propertyName = lhs.identifier.name;
+      // rhsValue and operatorType already available from the top
+
+      if (target is InterpretedInstance) {
+        if (operatorType == TokenType.EQ) {
+          // Simple assignment: target.property = rhsValue
+          final setter = target.klass.findInstanceSetter(propertyName);
+          if (setter != null) {
+            setter.bind(target).call(this, [rhsValue], {});
+            Logger.debug(
+              "[Assignment] Assigned via direct setter for PrefixedIdentifier '$propertyName'",
+            );
+            return rhsValue;
+          }
+
+          final extensionSetter = environment.findExtensionMember(
+            target,
+            propertyName,
+          );
+          if (extensionSetter is ExtensionMemberCallable &&
+              extensionSetter.isSetter) {
+            Logger.debug(
+              "[Assignment] Assigning via extension setter for PrefixedIdentifier '$propertyName'",
+            );
+            final extensionPositionalArgs = [
+              target,
+              rhsValue,
+            ]; // Target + value
+            try {
+              extensionSetter.call(this, extensionPositionalArgs, {});
+              return rhsValue;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing extension setter '$propertyName': $e",
+              );
+            }
+          }
+
+          Logger.debug(
+            "[Assignment] No direct or extension setter found for PrefixedIdentifier '$propertyName', assigning to field.",
+          );
+          target.set(propertyName, rhsValue, this);
+          return rhsValue; // Simple Assignment returns RHS value
+        } else {
+          // Compound assignment: target.property op= rhsValue
+          final currentValue = target.get(propertyName, visitor: this);
+          Object? newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+          final setter = target.klass.findInstanceSetter(propertyName);
+          if (setter != null) {
+            setter.bind(target).call(this, [newValue], {});
+          } else {
+            target.set(propertyName, newValue, this);
+          }
+          return newValue; // Compound returns new value
+        }
+      } else if (target is InterpretedClass) {
+        if (operatorType == TokenType.EQ) {
+          // Simple assignment: Class.property = rhsValue
+          final staticSetter = target.findStaticSetter(propertyName);
+          if (staticSetter != null) {
+            staticSetter.call(this, [rhsValue], {});
+          } else {
+            // Assign directly to static field if no setter
+            target.setStaticField(propertyName, rhsValue);
+          }
+          return rhsValue; // Simple Assignment returns RHS value
+        } else {
+          // Compound assignment: Class.property op= rhsValue
+          Object? currentValue;
+          final staticGetter = target.findStaticGetter(propertyName);
+          if (staticGetter != null) {
+            currentValue = staticGetter.call(this, [], {});
+          } else {
+            try {
+              currentValue = target.getStaticField(propertyName);
+            } catch (_) {
+              throw RuntimeD4rtException(
+                "Cannot get value for compound assignment on static member '$propertyName'. No getter or field found.",
+              );
+            }
+          }
+          Object? newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+          final staticSetter = target.findStaticSetter(propertyName);
+          if (staticSetter != null) {
+            staticSetter.call(this, [newValue], {});
+          } else {
+            target.setStaticField(propertyName, newValue);
+          }
+          return newValue; // Compound returns new value
+        }
+      } else if (target is BridgedClass) {
+        final bridgedClass = target;
+        if (operatorType == TokenType.EQ) {
+          // Simple assignment: BridgedClass.property = rhsValue
+          final staticSetter = bridgedClass.findStaticSetterAdapter(
+            propertyName,
+          );
+          if (staticSetter == null) {
+            throw RuntimeD4rtException.resolutionFailure(
+              "Bridged class '${bridgedClass.name}' has no static setter named '$propertyName'.",
+            );
+          }
+          Logger.debug(
+            "[Assignment] Assigning to static bridged property '${bridgedClass.name}.$propertyName' via setter adapter.",
+          );
+          staticSetter(this, rhsValue);
+          return rhsValue; // Simple Assignment returns RHS value
+        } else {
+          // Compound assignment: BridgedClass.property op= rhsValue
+          // 1. Get current static value
+          final staticGetter = bridgedClass.findStaticGetterAdapter(
+            propertyName,
+          );
+          if (staticGetter == null) {
+            throw RuntimeD4rtException(
+              "Cannot perform compound assignment on static '${bridgedClass.name}.$propertyName': No static getter found.",
+            );
+          }
+          final currentValue = staticGetter(this);
+          // 2. Calculate new value
+          Object? newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+          // 3. Set new static value
+          final staticSetter = bridgedClass.findStaticSetterAdapter(
+            propertyName,
+          );
+          if (staticSetter == null) {
+            // Should have been caught by getter check, but defensive programming
+            throw RuntimeD4rtException(
+              "Cannot perform compound assignment on static '${bridgedClass.name}.$propertyName': No static setter found after getter.",
+            );
+          }
+          Logger.debug(
+            "[Assignment] Compound assigning to static bridged property '${bridgedClass.name}.$propertyName' via setter adapter.",
+          );
+          staticSetter(this, newValue);
+          return newValue; // Compound returns new value
+        }
+      } else if (target is InterpretedExtension) {
+        final extension = target;
+        if (operatorType == TokenType.EQ) {
+          // Simple assignment: Extension.staticField = rhsValue
+          final staticSetter = extension.findStaticSetter(propertyName);
+          if (staticSetter != null) {
+            staticSetter.call(this, [rhsValue], {});
+            Logger.debug(
+              "[Assignment] Assigned to static extension property '${extension.name ?? '<unnamed>'}.$propertyName' via setter.",
+            );
+          } else if (extension.staticFields.containsKey(propertyName)) {
+            extension.setStaticField(propertyName, rhsValue);
+            Logger.debug(
+              "[Assignment] Assigned to static extension field '${extension.name ?? '<unnamed>'}.$propertyName'.",
+            );
+          } else {
+            throw RuntimeD4rtException.resolutionFailure(
+              "Extension '${extension.name ?? '<unnamed>'}' has no static setter or field named '$propertyName'.",
+            );
+          }
+          return rhsValue;
+        } else {
+          // Compound assignment: Extension.property op= rhsValue
+          // 1. Get current value
+          Object? currentValue;
+          final staticGetter = extension.findStaticGetter(propertyName);
+          if (staticGetter != null) {
+            currentValue = staticGetter.call(this, [], {});
+          } else if (extension.staticFields.containsKey(propertyName)) {
+            currentValue = extension.getStaticField(propertyName);
+          } else {
+            throw RuntimeD4rtException(
+              "Cannot get value for compound assignment on static extension member '$propertyName'. No getter or field found.",
+            );
+          }
+          // 2. Calculate new value
+          Object? newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+          // 3. Set new value
+          final staticSetter = extension.findStaticSetter(propertyName);
+          if (staticSetter != null) {
+            staticSetter.call(this, [newValue], {});
+          } else if (extension.staticFields.containsKey(propertyName)) {
+            extension.setStaticField(propertyName, newValue);
+          } else {
+            throw RuntimeD4rtException(
+              "Cannot set value for compound assignment on static extension member '$propertyName'. No setter or field found.",
+            );
+          }
+          return newValue;
+        }
+      } else if (toBridgedInstance(target).$2) {
+        if (rhsValue is BridgedEnumValue) {
+          rhsValue = rhsValue.nativeValue;
+        } else if (rhsValue is BridgedInstance) {
+          // GEN-079: Unwrap BridgedInstance for native setter calls so
+          // covariant typed generic setters (e.g. ValueNotifier<Color>)
+          // receive the underlying native object rather than the wrapper.
+          rhsValue = rhsValue.nativeObject;
+        }
+        final bridgedInstance = toBridgedInstance(target).$1!;
+
+        final setterAdapter = bridgedInstance.bridgedClass
+            .findInstanceSetterAdapter(propertyName);
+
+        if (setterAdapter != null) {
+          if (operatorType == TokenType.EQ) {
+            // Simple assignment: bridgedInstance.property = value
+            Logger.debug(
+              "[Assignment - PropertyAccess] Assigning to bridged instance property '${bridgedInstance.bridgedClass.name}.$propertyName' via setter adapter.",
+            );
+            // Wrap with withActiveVisitor so D4 helpers can resolve the
+            // visitor for interface proxy creation when coercing args.
+            D4.withActiveVisitor<void>(
+              this,
+              () => setterAdapter(this, bridgedInstance.nativeObject, rhsValue),
+            );
+            return rhsValue; // Simple assignment returns RHS value
+          } else {
+            // Compound assignment: bridgedInstance.property op= value
+            // 1. Get current value (requires a getter adapter)
+            final getterAdapter = bridgedInstance.bridgedClass
+                .findInstanceGetterAdapter(propertyName);
+            if (getterAdapter == null) {
+              throw RuntimeD4rtException(
+                "Cannot perform compound assignment on '${bridgedInstance.bridgedClass.name}.$propertyName': No getter adapter found.",
+              );
+            }
+            final currentValue = getterAdapter(
+              this,
+              bridgedInstance.nativeObject,
+            );
+            // 2. Calculate new value
+            Object? newValue = computeCompoundValue(
+              currentValue,
+              rhsValue,
+              operatorType,
+            );
+            // 3. Set new value via setter adapter
+            Logger.debug(
+              "[Assignment - PropertyAccess] Compound assigning to bridged instance property '${bridgedInstance.bridgedClass.name}.$propertyName' via setter adapter.",
+            );
+            // Wrap with withActiveVisitor so D4 helpers can resolve the
+            // visitor for interface proxy creation when coercing args.
+            D4.withActiveVisitor<void>(
+              this,
+              () => setterAdapter(this, bridgedInstance.nativeObject, newValue),
+            );
+            return newValue; // Compound assignment returns new value
+          }
+        } else {
+          // 1401-TODO #7 (F9): PrefixedIdentifier variant — same shape
+          // as the PropertyAccess branch above. The script's
+          // `renderObject.onLayout = …` may be parsed as a prefixed
+          // identifier; if the bridge has no `onLayout` setter, check
+          // the native↔interpreted reverse map for a script-defined
+          // setter/field on the wrapping InterpretedInstance.
+          final interpretedObj = D4.interpretedForNative(
+            bridgedInstance.nativeObject,
+          );
+          if (interpretedObj is InterpretedInstance) {
+            final scriptSetter = interpretedObj.klass.findInstanceSetter(
+              propertyName,
+            );
+            final hasField = interpretedObj.klass
+                .getInstanceFieldNames()
+                .contains(propertyName);
+            if (scriptSetter != null || hasField) {
+              if (operatorType == TokenType.EQ) {
+                if (scriptSetter != null) {
+                  scriptSetter.bind(interpretedObj).call(this, [rhsValue], {});
+                } else {
+                  interpretedObj.set(propertyName, rhsValue, this);
+                }
+                return rhsValue;
+              } else {
+                final getter = interpretedObj.klass.findInstanceGetter(
+                  propertyName,
+                );
+                final Object? currentValue = getter != null
+                    ? getter.bind(interpretedObj).call(this, [], {})
+                    : interpretedObj.get(propertyName, visitor: this);
+                final Object? newValue = computeCompoundValue(
+                  currentValue,
+                  rhsValue,
+                  operatorType,
+                );
+                if (scriptSetter != null) {
+                  scriptSetter.bind(interpretedObj).call(this, [newValue], {});
+                } else {
+                  interpretedObj.set(propertyName, newValue, this);
+                }
+                return newValue;
+              }
+            }
+          }
+          // No setter adapter found and no script-defined fallback.
+          throw RuntimeD4rtException(
+            "Cannot assign to property '$propertyName' on bridged instance of '${bridgedInstance.bridgedClass.name}': No setter adapter found.",
+          );
+        }
+      } else if (target is InterpretedExtensionTypeInstance) {
+        // DFUB4: assignment to an extension-type setter (prefixed identifier).
+        if (operatorType == TokenType.EQ) {
+          target.set(propertyName, rhsValue, this);
+          return rhsValue;
+        } else {
+          final currentValue = target.get(propertyName, this);
+          final newValue = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+          target.set(propertyName, newValue, this);
+          return newValue;
+        }
+      } else {
+        throw RuntimeD4rtException(
+          "Assignment target must be an instance or class for PrefixedIdentifier, got ${target?.runtimeType}."
+          '${unbridgedNativeClause(target)}',
+        );
+      }
+    } else {
+      if (lhs is IndexExpression) {
+        final targetValue = lhs.target?.accept<Object?>(this);
+        final rawIndexValue = lhs.index.accept<Object?>(this);
+        // Unwrap BridgedEnumValue for Map key operations
+        final indexValue = rawIndexValue is BridgedEnumValue
+            ? rawIndexValue.nativeValue
+            : rawIndexValue;
+
+        // Determine the value to actually assign
+        Object? finalValueToAssign;
+        if (operatorType == TokenType.EQ) {
+          finalValueToAssign = rhsValue; // Simple assignment
+        } else {
+          // Compound assignment (e.g., list[i] += 10)
+          // 1. Get current value using index operator []
+          Object? currentValue;
+          if (targetValue is Map) {
+            currentValue = targetValue[indexValue];
+          } else if (targetValue is List) {
+            // SCD93: the SDK decides — see `visitIndexExpression`.
+            currentValue = (targetValue as dynamic)[indexValue];
+          } else if (targetValue is InterpretedInstance) {
+            // Check for class operator [] method for reading current value
+            final operatorMethod = targetValue.findOperator('[]');
+            if (operatorMethod != null) {
+              try {
+                currentValue = operatorMethod.bind(targetValue).call(this, [
+                  indexValue,
+                ], {});
+              } on ReturnException catch (e) {
+                currentValue = e.value;
+              } catch (e) {
+                throw RuntimeD4rtException(
+                  "Error executing class operator '[]' for compound read: $e",
+                );
+              }
+            } else {
+              // No class operator found, try extensions
+              try {
+                final extensionGetter = environment.findExtensionMember(
+                  targetValue,
+                  '[]',
+                );
+                if (extensionGetter is ExtensionMemberCallable &&
+                    extensionGetter.isOperator) {
+                  final extensionPositionalArgs = [targetValue, indexValue];
+                  try {
+                    currentValue = extensionGetter.call(
+                      this,
+                      extensionPositionalArgs,
+                      {},
+                    );
+                  } on ReturnException catch (e) {
+                    currentValue = e.value;
+                  } catch (e) {
+                    throw RuntimeD4rtException(
+                      "Error executing extension operator '[]' for compound read: $e",
+                    );
+                  }
+                } else {
+                  throw RuntimeD4rtException(
+                    'Cannot read current value for compound index assignment on ${targetValue.klass.name}: No operator [] found (class or extension).',
+                  );
+                }
+              } on RuntimeD4rtException catch (e) {
+                throw RuntimeD4rtException(
+                  'Cannot read current value for compound index assignment on ${targetValue.klass.name}: ${e.message}',
+                  originalException: e.originalException,
+                  originalStackTrace: e.originalStackTrace,
+                );
+              }
+            }
+          } else if (toBridgedInstance(targetValue).$2) {
+            // Handle BridgedInstance for reading current value via [] operator
+            final bridgedInstance = toBridgedInstance(targetValue).$1!;
+            final bridgedClass = bridgedInstance.bridgedClass;
+            final operatorName = '[]';
+
+            final methodAdapter = bridgedClass.findInstanceMethodAdapter(
+              operatorName,
+            );
+            if (methodAdapter != null) {
+              Logger.debug(
+                "[visitAssignmentExpression-Index] Found bridged operator '$operatorName' for ${bridgedClass.name}. Calling adapter for compound read...",
+              );
+              try {
+                currentValue = methodAdapter(
+                  this,
+                  bridgedInstance.nativeObject,
+                  [indexValue],
+                  {},
+                  null,
+                );
+              } catch (e, s) {
+                Logger.error(
+                  "[visitAssignmentExpression-Index] Native exception during bridged operator '$operatorName' read on ${bridgedClass.name}: $e\\n$s",
+                );
+                throw RuntimeD4rtException(
+                  "Native error during bridged operator '$operatorName' read on ${bridgedClass.name}: $e",
+                  originalException: e,
+                  originalStackTrace: s,
+                );
+              }
+            } else {
+              throw RuntimeD4rtException(
+                'Cannot read current value for compound index assignment on ${bridgedClass.name}: No bridged operator [] found.',
+              );
+            }
+          } else {
+            try {
+              final extensionGetter = environment.findExtensionMember(
+                targetValue,
+                '[]',
+              );
+              if (extensionGetter is ExtensionMemberCallable &&
+                  extensionGetter.isOperator) {
+                final extensionPositionalArgs = [targetValue, indexValue];
+                try {
+                  currentValue = extensionGetter.call(
+                    this,
+                    extensionPositionalArgs,
+                    {},
+                  );
+                } on ReturnException catch (e) {
+                  currentValue = e.value;
+                } // Handle potential returns
+                catch (e) {
+                  throw RuntimeD4rtException(
+                    "Error executing extension operator '[]' for compound read: $e",
+                  );
+                }
+              } else {
+                throw RuntimeD4rtException(
+                  'Cannot read current value for compound index assignment on type ${targetValue?.runtimeType}: No standard or extension operator [] found.',
+                );
+              }
+            } on RuntimeD4rtException catch (e) {
+              throw RuntimeD4rtException(
+                'Cannot read current value for compound index assignment on type ${targetValue?.runtimeType}: ${e.message}',
+                originalException: e.originalException,
+                originalStackTrace: e.originalStackTrace,
+              );
+            }
+          }
+
+          // 2. Calculate the new value
+          finalValueToAssign = computeCompoundValue(
+            currentValue,
+            rhsValue,
+            operatorType,
+          );
+        }
+
+        // Now, perform the assignment with finalValueToAssign
+        if (targetValue is Map) {
+          // A stored key normalises as a literal's does (SCC32, SCD198):
+          // `m[String] = v` must reach the entry `m[x.runtimeType]` reads
+          // (SCF40). Every `[]=` store on a Map below does the same.
+          targetValue[_unwrapHashKey(indexValue)] = finalValueToAssign;
+          return finalValueToAssign;
+        } else if (targetValue is List) {
+          // SCD93: the SDK decides — see `visitIndexExpression`.
+          (targetValue as dynamic)[indexValue] = finalValueToAssign;
+          return finalValueToAssign;
+        } else if (targetValue is InterpretedInstance) {
+          // Check for class operator []= method
+          final operatorMethod = targetValue.findOperator('[]=');
+          if (operatorMethod != null) {
+            Logger.debug(
+              "[visitAssignmentExpression-Index] Found class operator '[]=' on ${targetValue.klass.name}. Calling...",
+            );
+            try {
+              operatorMethod.bind(targetValue).call(this, [
+                indexValue,
+                finalValueToAssign,
+              ], {});
+              return finalValueToAssign;
+            } on ReturnException catch (_) {
+              return finalValueToAssign; // []= should not return a value, but assignment expression returns assigned value
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing class operator '[]=': $e",
+              );
+            }
+          } else {
+            // No class operator found, try extensions
+            const operatorName = '[]=';
+            try {
+              final extensionSetter = environment.findExtensionMember(
+                targetValue,
+                operatorName,
+              );
+              if (extensionSetter is ExtensionMemberCallable &&
+                  extensionSetter.isOperator) {
+                Logger.debug(
+                  "[Assignment] Found extension operator '[]=' for ${targetValue.klass.name}. Calling...",
+                );
+                // Args: receiver (targetValue), index (indexValue), value (finalValueToAssign)
+                final extensionPositionalArgs = [
+                  targetValue,
+                  indexValue,
+                  finalValueToAssign,
+                ];
+                try {
+                  extensionSetter.call(this, extensionPositionalArgs, {});
+                  // '[]=' operator should not return a meaningful value, but the assignment expression returns the assigned value
+                  return finalValueToAssign;
+                } catch (e) {
+                  throw RuntimeD4rtException(
+                    "Error executing extension operator '[]=': $e",
+                  );
+                }
+              } else {
+                throw RuntimeD4rtException(
+                  'Cannot assign to index on ${targetValue.klass.name}: No operator []= found (class or extension).',
+                );
+              }
+            } on RuntimeD4rtException catch (findError) {
+              throw RuntimeD4rtException(
+                'Cannot assign to index on ${targetValue.klass.name}: ${findError.message}',
+                originalException: findError.originalException,
+                originalStackTrace: findError.originalStackTrace,
+              );
+            }
+          }
+        } else if (targetValue is InterpretedExtensionTypeInstance) {
+          // DFUB9: index-set operator `[]=` declared on an extension type.
+          final operatorMethod = targetValue.extensionType.methods['[]='];
+          if (operatorMethod != null) {
+            Logger.debug(
+              "[visitAssignmentExpression-Index] Found extension-type operator '[]=' on ${targetValue.extensionType.name}. Calling...",
+            );
+            try {
+              operatorMethod.bind(targetValue).call(this, [
+                indexValue,
+                finalValueToAssign,
+              ], {});
+              return finalValueToAssign;
+            } on ReturnException catch (_) {
+              return finalValueToAssign;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing extension-type operator '[]=': $e",
+              );
+            }
+          }
+          throw RuntimeD4rtException(
+            'Cannot assign to index on extension type '
+            '${targetValue.extensionType.name}: No operator []= found.',
+          );
+        } else if (toBridgedInstance(targetValue).$2) {
+          final bridgedInstance = toBridgedInstance(targetValue).$1!;
+          final bridgedClass = bridgedInstance.bridgedClass;
+          final operatorName = '[]=';
+
+          final methodAdapter = bridgedClass.findInstanceMethodAdapter(
+            operatorName,
+          );
+          if (methodAdapter != null) {
+            Logger.debug(
+              "[visitAssignmentExpression-Index] Found bridged operator '$operatorName' for ${bridgedClass.name}. Calling adapter...",
+            );
+            try {
+              methodAdapter(
+                this,
+                bridgedInstance.nativeObject,
+                [
+                  _bridgeInterpreterValueToNative(indexValue),
+                  finalValueToAssign,
+                ],
+                {},
+                null,
+              );
+              return finalValueToAssign;
+            } catch (e, s) {
+              Logger.error(
+                "[visitAssignmentExpression-Index] Native exception during bridged operator '$operatorName' on ${bridgedClass.name}: $e\\n$s",
+              );
+              throw RuntimeD4rtException(
+                "Native error during bridged operator '$operatorName' on ${bridgedClass.name}: $e",
+                originalException: e,
+                originalStackTrace: s,
+              );
+            }
+          }
+          throw RuntimeD4rtException(
+            "[Bridged operator '$operatorName' not found directly for ${bridgedClass.name}. Trying extensions.",
+          );
+        } else {
+          const operatorName = '[]=';
+          try {
+            final extensionSetter = environment.findExtensionMember(
+              targetValue,
+              operatorName,
+            );
+            if (extensionSetter is ExtensionMemberCallable &&
+                extensionSetter.isOperator) {
+              Logger.debug(
+                "[Assignment] Found extension operator '[]=' for type ${targetValue?.runtimeType}. Calling...",
+              );
+              // Args: receiver (targetValue), index (indexValue), value (finalValueToAssign)
+              final extensionPositionalArgs = [
+                targetValue,
+                indexValue,
+                finalValueToAssign,
+              ];
+              try {
+                extensionSetter.call(this, extensionPositionalArgs, {});
+                // '[]=' operator should not return a meaningful value, but the assignment expression returns the assigned value
+                return finalValueToAssign;
+              } catch (e) {
+                throw RuntimeD4rtException(
+                  "Error executing extension operator '[]=': $e",
+                );
+              }
+            } // else: No suitable extension operator found, fall through
+            Logger.debug(
+              "[Assignment] No suitable extension operator '[]=' found for type ${targetValue?.runtimeType}.",
+            );
+          } on RuntimeD4rtException catch (findError) {
+            Logger.debug(
+              "[Assignment] No extension member '[]=' found for type ${targetValue?.runtimeType}. Error: ${findError.message}",
+            );
+            // Fall through to the final error
+          }
+
+          // If neither standard nor extension assignment worked
+          throw RuntimeD4rtException(
+            'Unsupported target for index assignment: ${targetValue?.runtimeType}',
+          );
+        }
+      } else {
+        throw UnimplementedD4rtException(
+          'Assignation à une cible non gérée: ${lhs.runtimeType}',
+        );
+      }
+    }
+  }
+
+  @override
+  Object? visitMethodInvocation(MethodInvocation node) {
+    Object? calleeValue;
+    Object? targetValue; // Keep track of the target object/class
+    // Argument lists - declared here, evaluated later if needed
+
+    if (node.target == null) {
+      // Simple function call (or class constructor call)
+      calleeValue = node.methodName.accept<Object?>(this);
+      targetValue = null; // No target
+    } else {
+      // Property/Method call on a target (instance or class)
+      targetValue = node.target!.accept<Object?>(this);
+
+      // SCB14 — `await` in RECEIVER position, e.g. `(await f).join(',')`.
+      // Why: evaluating the target can suspend, and the sentinel must travel
+      // back up to the statement machine so it can re-enter this statement once
+      // the future completes. Without this the sentinel is treated as an
+      // ordinary receiver and surfaces as "Undefined property or method '<x>'
+      // on AsyncSuspensionRequest". The argument lists below already propagate
+      // (see the `_evaluateArgumentsAsync` sites); the receiver slot did not.
+      // Matches the idiom used by visitIndexExpression.
+      if (targetValue is AsyncSuspensionRequest) return targetValue;
+
+      final methodName = node.methodName.name;
+
+      // Null safety support: if the target is null and the call is null-aware, return null.
+      // Determine null-awareness by inspecting the source only on this rare
+      // null-target path — `toSource()` is expensive and was previously built
+      // on every invocation just for this check.
+      if (targetValue == null) {
+        if (node.toSource().contains('?.')) {
+          return null;
+        }
+        // C21 — Dart null-shorting: when an inner selector in this chain
+        // uses `?.` (e.g. `a?.b.c()` where `a == null`), the outer `.c()`
+        // must short-circuit to null instead of throwing.
+        if (_chainHasNullAwareSelector(node.target)) {
+          return null;
+        }
+        throw RuntimeD4rtException(
+          "Cannot invoke method '$methodName' on null. Use '?.' for null-aware method invocation.",
+        );
+      }
+
+      // BLOCK FOR HANDLING PREFIXED IMPORTS
+      if (targetValue is Environment) {
+        Logger.debug(
+          "[MethodInvocation] Target is an Environment (prefixed import '${node.target!.toSource()}'). Looking for method '$methodName' in this environment.",
+        );
+        try {
+          calleeValue = targetValue.get(methodName);
+          // The 'targetValue' for the call will be null because this is not an instance method on the environment itself,
+          // but a function retrieved from this environment.
+          // Functions obtained in this way are already "autonomous" or correctly bound if they come from classes.
+        } on RuntimeD4rtException catch (e) {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Method '$methodName' not found in imported module '${node.target!.toSource()}'. Error: ${e.message}",
+            originalException: e.originalException,
+            originalStackTrace: e.originalStackTrace,
+          );
+        }
+        // calleeValue is now the function/method of the imported module.
+        // The call logic will be handled in the final visitMethodInvocation.
+      } else if (targetValue is InterpretedInstance) {
+        // Instance method call
+        try {
+          // Get should return the BOUND method
+          calleeValue = targetValue.getForInvocation(methodName, visitor: this);
+          Logger.debug(
+            "[MethodInvocation] Found direct instance member '$methodName' on ${targetValue.klass.name}. Type: ${calleeValue?.runtimeType}",
+          );
+        } on RuntimeD4rtException catch (e) {
+          if (e is UndefinedMemberD4rtException &&
+              e.memberName == methodName &&
+              identical(e.receiver, targetValue)) {
+            Logger.debug(
+              "[MethodInvocation] Direct instance method '$methodName' failed/not found on ${targetValue.klass.name}. Error: ${e.message}. Trying extension method...",
+            );
+            try {
+              final extensionCallable = environment.findExtensionMember(
+                targetValue,
+                methodName,
+              );
+
+              if (extensionCallable is ExtensionMemberCallable &&
+                  !extensionCallable
+                      .isOperator && // Ensure it's a regular method
+                  !extensionCallable.isGetter &&
+                  !extensionCallable.isSetter) {
+                Logger.debug(
+                  "[MethodInvocation] Found extension method '$methodName'. Evaluating args and calling...",
+                );
+
+                // Evaluate arguments (must be done here as direct call failed)
+                final evaluationResult = _evaluateArgumentsAsync(
+                  node.argumentList,
+                );
+                if (evaluationResult is AsyncSuspensionRequest) {
+                  return evaluationResult; // Propagate suspension
+                }
+                final (positionalArgs, namedArgs) =
+                    evaluationResult as (List<Object?>, Map<String, Object?>);
+                List<RuntimeType>? evaluatedTypeArguments;
+                final typeArgsNode = node.typeArguments;
+                if (typeArgsNode != null) {
+                  evaluatedTypeArguments = typeArgsNode.arguments
+                      .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                      .toList();
+                }
+
+                // Prepare arguments for extension method:
+                // First arg is the receiver (the target instance)
+                final extensionPositionalArgs = [
+                  targetValue,
+                  ...positionalArgs,
+                ];
+
+                // Call the extension method
+                try {
+                  // Return the result of the extension call directly
+                  return extensionCallable.call(
+                    this,
+                    extensionPositionalArgs,
+                    namedArgs,
+                    evaluatedTypeArguments,
+                  );
+                } on ReturnException catch (returnExc) {
+                  return returnExc.value;
+                } catch (execError) {
+                  throw RuntimeD4rtException(
+                    "Error executing extension method '$methodName': $execError",
+                  );
+                }
+              } else {
+                // No suitable extension found - check for noSuchMethod
+                Logger.debug(
+                  "[MethodInvocation] Extension method '$methodName' not found or not applicable. Checking for noSuchMethod...",
+                );
+
+                // Bug-78 FIX: Check for noSuchMethod before throwing error
+                final noSuchMethod = targetValue.klass.findInstanceMethod(
+                  'noSuchMethod',
+                );
+                if (noSuchMethod != null) {
+                  Logger.debug(
+                    "[MethodInvocation] Found noSuchMethod on ${targetValue.klass.name}. Invoking...",
+                  );
+
+                  // Evaluate arguments for the noSuchMethod call
+                  final evaluationResult = _evaluateArgumentsAsync(
+                    node.argumentList,
+                  );
+                  if (evaluationResult is AsyncSuspensionRequest) {
+                    return evaluationResult;
+                  }
+                  final (positionalArgs, namedArgs) =
+                      evaluationResult as (List<Object?>, Map<String, Object?>);
+
+                  // Create an Invocation.method for this method call
+                  final namedArgsSymbol = namedArgs.map(
+                    (key, value) => MapEntry(Symbol(key), value),
+                  );
+                  final invocation = Invocation.method(
+                    Symbol(methodName),
+                    positionalArgs,
+                    namedArgsSymbol,
+                  );
+
+                  final boundNoSuchMethod = noSuchMethod.bind(targetValue);
+                  try {
+                    return boundNoSuchMethod.call(this, [invocation], {});
+                  } on ReturnException catch (returnExc) {
+                    return returnExc.value;
+                  }
+                }
+
+                throw D4rtNoSuchMethodError(
+                  "Instance of '${targetValue.klass.name}' has no method named '$methodName' and no suitable extension method found. Original error: (${e.message})",
+                );
+              }
+            } on RuntimeD4rtException catch (findError) {
+              // Error during the findExtensionMember call itself
+              Logger.debug(
+                "[MethodInvocation] Error during extension lookup for '$methodName': ${findError.message}. Checking for noSuchMethod...",
+              );
+
+              // Bug-78 FIX: Check for noSuchMethod before throwing error
+              final noSuchMethod = targetValue.klass.findInstanceMethod(
+                'noSuchMethod',
+              );
+              if (noSuchMethod != null) {
+                Logger.debug(
+                  "[MethodInvocation] Found noSuchMethod on ${targetValue.klass.name}. Invoking...",
+                );
+
+                // Evaluate arguments for the noSuchMethod call
+                final evaluationResult = _evaluateArgumentsAsync(
+                  node.argumentList,
+                );
+                if (evaluationResult is AsyncSuspensionRequest) {
+                  return evaluationResult;
+                }
+                final (positionalArgs, namedArgs) =
+                    evaluationResult as (List<Object?>, Map<String, Object?>);
+
+                // Create an Invocation.method for this method call
+                final namedArgsSymbol = namedArgs.map(
+                  (key, value) => MapEntry(Symbol(key), value),
+                );
+                final invocation = Invocation.method(
+                  Symbol(methodName),
+                  positionalArgs,
+                  namedArgsSymbol,
+                );
+
+                final boundNoSuchMethod = noSuchMethod.bind(targetValue);
+                try {
+                  return boundNoSuchMethod.call(this, [invocation], {});
+                } on ReturnException catch (returnExc) {
+                  return returnExc.value;
+                }
+              }
+
+              throw RuntimeD4rtException.resolutionFailure(
+                "Instance of '${targetValue.klass.name}' has no method named '$methodName'. Error during extension lookup: ${findError.message}. Original error: (${e.message})",
+                originalException: findError.originalException,
+                originalStackTrace: findError.originalStackTrace,
+              );
+            }
+          } else {
+            // The member exists and its own execution failed — rethrow.
+            rethrow;
+          }
+        }
+        // We check if it's callable later (if direct lookup succeeded)
+      } else if (targetValue is InterpretedEnumValue) {
+        try {
+          // Get should return the BOUND method (or execute getter)
+          // Pass the visitor to potentially execute getters
+          calleeValue = targetValue.get(methodName, this);
+          Logger.debug(
+            "[MethodInvocation] Found enum instance member '$methodName' on $targetValue. Type: ${calleeValue?.runtimeType}",
+          );
+        } on RuntimeD4rtException catch (e) {
+          // Try Extension Method if Direct Fails (similar to InterpretedInstance)
+          if (e is UndefinedMemberD4rtException &&
+              e.memberName == methodName &&
+              identical(e.receiver, targetValue)) {
+            Logger.debug(
+              "[MethodInvocation] Direct enum method '$methodName' failed/not found on $targetValue. Error: ${e.message}. Trying extension method...",
+            );
+            try {
+              final extensionCallable = environment.findExtensionMember(
+                targetValue,
+                methodName,
+              );
+              if (extensionCallable is ExtensionMemberCallable &&
+                  !extensionCallable.isOperator &&
+                  !extensionCallable.isGetter &&
+                  !extensionCallable.isSetter) {
+                Logger.debug(
+                  "[MethodInvocation] Found extension method '$methodName' for enum value. Evaluating args and calling...",
+                );
+                final evaluationResult = _evaluateArgumentsAsync(
+                  node.argumentList,
+                );
+                if (evaluationResult is AsyncSuspensionRequest) {
+                  return evaluationResult; // Propagate suspension
+                }
+                final (positionalArgs, namedArgs) =
+                    evaluationResult as (List<Object?>, Map<String, Object?>);
+                List<RuntimeType>?
+                evaluatedTypeArguments; // Handle type args if needed
+
+                final extensionPositionalArgs = [
+                  targetValue,
+                  ...positionalArgs,
+                ];
+                try {
+                  return extensionCallable.call(
+                    this,
+                    extensionPositionalArgs,
+                    namedArgs,
+                    evaluatedTypeArguments,
+                  );
+                } on ReturnException catch (returnExc) {
+                  return returnExc.value;
+                } catch (execError) {
+                  throw RuntimeD4rtException(
+                    "Error executing extension method '$methodName' on enum value: $execError",
+                  );
+                }
+              } else {
+                if (methodName == 'toString') {
+                  return targetValue.toString();
+                } else if (methodName == 'runtimeType') {
+                  return targetValue.runtimeType;
+                }
+                Logger.debug(
+                  "[MethodInvocation] Extension method '$methodName' for enum value not found or not applicable. Rethrowing original error.",
+                );
+                throw D4rtNoSuchMethodError(
+                  "Enum value '$targetValue' has no method named '$methodName' and no suitable extension method found. Original error: (${e.message})",
+                );
+              }
+            } on RuntimeD4rtException catch (findError) {
+              Logger.debug(
+                "[MethodInvocation] Error during extension lookup for '$methodName' on enum value: ${findError.message}. Rethrowing original error.",
+              );
+              throw RuntimeD4rtException.resolutionFailure(
+                "Enum value '$targetValue' has no method named '$methodName'. Error during extension lookup: ${findError.message}. Original error: (${e.message})",
+                originalException: findError.originalException,
+                originalStackTrace: findError.originalStackTrace,
+              );
+            }
+          } else {
+            rethrow; // Rethrow other errors from get()
+          }
+        }
+      } else if (toBridgedInstance(targetValue).$2) {
+        final bridgedInstance = toBridgedInstance(targetValue).$1!;
+        final bridgedClass = bridgedInstance.bridgedClass;
+        final nativeTarget = bridgedInstance.nativeObject;
+        if (methodName == 'whereType' && nativeTarget is Iterable) {
+          final arguments = _evaluateArgumentsAsync(node.argumentList);
+          if (arguments is AsyncSuspensionRequest) return arguments;
+          final (positional, named) =
+              arguments as (List<Object?>, Map<String, Object?>);
+          final types = node.typeArguments?.arguments;
+          if (positional.isNotEmpty ||
+              named.isNotEmpty ||
+              (types != null && types.length != 1)) {
+            throw RuntimeD4rtException(
+              'Iterable.whereType requires no value arguments and one type argument.',
+            );
+          }
+          final type = types?.single;
+          final lexicalScope = environment;
+          return nativeTarget.where((value) {
+            if (type == null) return true;
+            final previousScope = environment;
+            try {
+              environment = lexicalScope;
+              return _valueHasType(type, value);
+            } finally {
+              environment = previousScope;
+            }
+          });
+        }
+        switch (methodName) {
+          case 'toString':
+            return targetValue.toString();
+          default:
+        }
+        // Use directly methods because we need the BridgedMethodCallable
+        final adapter = bridgedClass.methods[methodName];
+
+        if (adapter != null) {
+          final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+          if (evaluationResult is AsyncSuspensionRequest) {
+            return evaluationResult; // Propagate suspension
+          }
+          final (positionalArgs, namedArgs) =
+              evaluationResult as (List<Object?>, Map<String, Object?>);
+
+          // Plan E: forward script-supplied generic type arguments to the
+          // bridged method adapter so interceptors (e.g. for
+          // `Element.dependOnInheritedWidgetOfExactType<T>`) can act on `T`.
+          List<RuntimeType>? evaluatedTypeArguments;
+          final typeArgsNode = node.typeArguments;
+          if (typeArgsNode != null) {
+            evaluatedTypeArguments = typeArgsNode.arguments
+                .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                .toList();
+          }
+
+          try {
+            // C6b fix: wrap with `D4.withActiveVisitor` so visitor-less
+            // helpers invoked inside the adapter (e.g. `D4.coerceList<T>`
+            // resolving InterpretedInstance values via registered interface
+            // proxies for higher-kinded generics like
+            // `ThemeExtension<ThemeExtension<dynamic>>`) can read
+            // `_activeVisitor`. Mirror of the C4/D5 wrap on static-method
+            // dispatch (line ~3246) — bridged-instance method dispatch had
+            // the same gap. Mirrored in tom_d4rt_ast.
+            return D4.withActiveVisitor(
+              this,
+              () => adapter(
+                this,
+                bridgedInstance.nativeObject,
+                positionalArgs,
+                namedArgs,
+                evaluatedTypeArguments,
+              ),
+            );
+          } on ReturnException catch (e) {
+            // Native calls shouldn't throw ReturnException directly, but handle defensively
+            return e.value;
+          } catch (e, s) {
+            // The historical `findRenderObject` /
+            // `'Cannot get renderObject of inactive element'` catch that
+            // returned `null` instead of rethrowing has been REMOVED.
+            // Discovery sweep across both projects' full test corpora
+            // (9 host files = ~1974 scripts each) with a diagnostic
+            // print added to the catch found ZERO `[A8_CATCH_FIRED]`
+            // hits on either project — no current script in the corpus
+            // hits the inactive-element assertion. The catch was dead
+            // code. If a future script regresses on the same pattern
+            // (script-level `ctx.mounted` guard that races the
+            // active→inactive lifecycle transition during keepalive /
+            // route teardown / parent-data update), it will surface
+            // through the rethrow path below as a real RuntimeD4rtException
+            // — at which point the right fix is either (a) restore this
+            // narrow null-return catch (the documented §U27 workaround,
+            // still semantically correct vs Flutter's `RenderObject?`
+            // signature) or (b) rewrite the script to call
+            // `findRenderObject()` only from guaranteed-active contexts
+            // (LayoutBuilder callback, postFrameCallback, etc).
+            // See `interpreter_unfixable.md` §U27 for the full
+            // architectural framing and the rationale for the original
+            // workaround.
+            // Add the stack trace for debugging
+            Logger.log("Native Error Stack Trace: $s"); // Print stack trace
+            // Catch potential errors from the native code/adapter
+            // SCB28: an unguarded adapter indexed past the end of the
+            // argument list -- report the arity, not the RangeError.
+            final arityError = D4.describeArityError(
+              e,
+              positionalArgs,
+              '${bridgedClass.name}.$methodName',
+            );
+            if (arityError != null) {
+              // SCE109: a RangeError stays a RangeError. Replacing the VALUE is
+              // SCB28's point; replacing the TYPE was not, and it made
+              // `on RangeError` stop catching a script's own out-of-range
+              // read — an error that was not an `Error` at all.
+              throw RangeError(arityError);
+            }
+            throw RuntimeD4rtException(
+              "Native error during bridged method call '$methodName' on ${bridgedClass.name}: $e",
+              originalException: e,
+              originalStackTrace: s,
+            );
+          }
+        } else {
+          // C13 follow-up: before falling back to extensions, try a getter
+          // with the same name. Dart allows `obj.foo()` where `foo` is a
+          // getter returning a callable value (e.g. dart:foundation
+          // Factory<T>.constructor returns ValueGetter<T>); the call-site
+          // expects getter+invoke semantics, not method-not-found.
+          final getterAdapter = bridgedClass.findInstanceGetterAdapter(
+            methodName,
+          );
+          if (getterAdapter != null) {
+            final getterValue = D4.withActiveVisitor<Object?>(
+              this,
+              () => getterAdapter(this, bridgedInstance.nativeObject),
+            );
+            if (getterValue is Callable || getterValue is Function) {
+              final evaluationResult = _evaluateArgumentsAsync(
+                node.argumentList,
+              );
+              if (evaluationResult is AsyncSuspensionRequest) {
+                return evaluationResult;
+              }
+              final (positionalArgs, namedArgs) =
+                  evaluationResult as (List<Object?>, Map<String, Object?>);
+              if (getterValue is Callable) {
+                return getterValue.call(this, positionalArgs, namedArgs);
+              }
+              final symbolNamed = namedArgs.isEmpty
+                  ? const <Symbol, Object?>{}
+                  : namedArgs.map<Symbol, Object?>(
+                      (k, v) => MapEntry(Symbol(k), v),
+                    );
+              try {
+                return Function.apply(
+                  getterValue as Function,
+                  positionalArgs,
+                  symbolNamed,
+                );
+              } on ReturnException catch (e) {
+                return e.value;
+              }
+            }
+            // Getter returned a non-callable — fall through to the
+            // "not a method" error path below for a clear message.
+          }
+          // D2 sync: If the bridged target wraps a [D4InterpretedProxy]
+          // (a native proxy that holds a back-reference to the
+          // originating [InterpretedInstance]), retry the method lookup
+          // on the wrapped instance. This mirrors the existing
+          // PropertyAccess unwrap below (~line 4353) for the
+          // MethodInvocation path. Used when a script-defined State
+          // subclass is reached via `GlobalKey.currentState` (which
+          // returns the native `_InterpretedState` proxy) and the
+          // call-site invokes a user-defined method like `flyOff(dir)`
+          // — without this unwrap, the interpreter only sees the
+          // bridged State methods and throws "no instance method
+          // named X". Generic: applies to every D4InterpretedProxy
+          // (CustomPainter, State, SingleTickerProviderState, …).
+          // Mirrored in tom_d4rt_ast.
+          final nativeTarget = bridgedInstance.nativeObject;
+          if (nativeTarget is D4InterpretedProxy) {
+            final inner = nativeTarget.d4rtInstance;
+            if (inner is InterpretedInstance) {
+              try {
+                final bound = inner.getForInvocation(methodName, visitor: this);
+                if (bound is Callable) {
+                  final evaluationResult = _evaluateArgumentsAsync(
+                    node.argumentList,
+                  );
+                  if (evaluationResult is AsyncSuspensionRequest) {
+                    return evaluationResult;
+                  }
+                  final (positionalArgs, namedArgs) =
+                      evaluationResult as (List<Object?>, Map<String, Object?>);
+                  List<RuntimeType>? evaluatedTypeArguments;
+                  final typeArgsNode = node.typeArguments;
+                  if (typeArgsNode != null) {
+                    evaluatedTypeArguments = typeArgsNode.arguments
+                        .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                        .toList();
+                  }
+                  return bound.call(
+                    this,
+                    positionalArgs,
+                    namedArgs,
+                    evaluatedTypeArguments,
+                  );
+                }
+              } on RuntimeD4rtException {
+                // Method not found on the inner interpreted instance —
+                // fall through to extension lookup / not-found error.
+              }
+            }
+          }
+          // SC6: walk the registered supertype chain before giving up. The
+          // Cluster-12 walk was wired into the three property-access paths but
+          // not into method INVOCATION, so `v.map(...)` on a bridge that
+          // inherits `map` from a registered supertype failed with
+          // "has no instance method named" even though `v.map` as a tear-off
+          // resolved. Generic: applies to every bridge whose hierarchy is
+          // declared via `BridgedClass.registerSupertypes`, not just the
+          // dart:async ones — bridge dispatch is per-bridge, so inherited
+          // members are only reachable through this walk.
+          final supertypeMatch = lookupOnBridgedSupertypes(
+            bridgedInstance,
+            methodName,
+          );
+          if (supertypeMatch.$2 && supertypeMatch.$1 is Callable) {
+            Logger.debug(
+              "[visitMethodInvocation] Resolved '$methodName' via supertype walk on '${bridgedClass.name}'.",
+            );
+            final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+            if (evaluationResult is AsyncSuspensionRequest) {
+              return evaluationResult;
+            }
+            final (positionalArgs, namedArgs) =
+                evaluationResult as (List<Object?>, Map<String, Object?>);
+            List<RuntimeType>? evaluatedTypeArguments;
+            final typeArgsNode = node.typeArguments;
+            if (typeArgsNode != null) {
+              evaluatedTypeArguments = typeArgsNode.arguments
+                  .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                  .toList();
+            }
+            return (supertypeMatch.$1 as Callable).call(
+              this,
+              positionalArgs,
+              namedArgs,
+              evaluatedTypeArguments,
+            );
+          }
+          // No adapter found for this method name, try extension methods
+          Logger.debug(
+            "[visitMethodInvocation] Bridged method '$methodName' not found directly for ${bridgedClass.name}. Trying extensions.",
+          );
+          try {
+            final extensionMethod = environment.findExtensionMember(
+              targetValue,
+              methodName,
+            );
+            if (extensionMethod is ExtensionMemberCallable) {
+              Logger.debug(
+                "[visitMethodInvocation] Found extension method '$methodName' for ${bridgedClass.name}. Calling...",
+              );
+              final evaluationResult = _evaluateArgumentsAsync(
+                node.argumentList,
+              );
+              if (evaluationResult is AsyncSuspensionRequest) {
+                return evaluationResult; // Propagate suspension
+              }
+              final (positionalArgs, namedArgs) =
+                  evaluationResult as (List<Object?>, Map<String, Object?>);
+
+              final extensionArgs = <Object?>[targetValue];
+              extensionArgs.addAll(positionalArgs);
+              return extensionMethod.call(this, extensionArgs, namedArgs);
+            } else {
+              throw D4rtNoSuchMethodError(
+                "Bridged class '${bridgedClass.name}' has no instance "
+                "method named '$methodName'."
+                "${unbridgedMemberSuffix(bridgedClass.name, methodName)}",
+              );
+            }
+          } on RuntimeD4rtException catch (findError) {
+            throw RuntimeD4rtException.resolutionFailure(
+              "Bridged class '${bridgedClass.name}' has no instance method named '$methodName'. Error during extension lookup: ${findError.message}",
+              originalException: findError.originalException,
+              originalStackTrace: findError.originalStackTrace,
+            );
+          }
+        }
+        // Note: This block returns directly or throws, it does not set calleeValue.
+      }
+      // Handle static method call OR NAMED CONSTRUCTOR call
+      else if (targetValue is InterpretedClass) {
+        // Check for NAMED CONSTRUCTOR first
+        final namedConstructor = targetValue.findConstructor(methodName);
+        if (namedConstructor != null) {
+          // It's a named constructor call
+          // G-DOV2-3 FIX: Check abstract AFTER finding constructor, skip if factory
+          if (targetValue.isAbstract && !namedConstructor.isFactory) {
+            throw RuntimeD4rtException(
+              "Cannot instantiate abstract class '${targetValue.name}'.",
+            );
+          }
+
+          final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+          if (evaluationResult is AsyncSuspensionRequest) {
+            return evaluationResult; // Propagate suspension
+          }
+          final (positionalArgs, namedArgs) =
+              evaluationResult as (List<Object?>, Map<String, Object?>);
+
+          try {
+            // Handle factory constructors differently from regular constructors
+            if (namedConstructor.isFactory) {
+              // Factory constructors should create and return their own instance
+              // Do NOT create an instance beforehand
+              Logger.debug(
+                "[MethodInvocation] Calling factory constructor '$methodName' directly",
+              );
+              final result = namedConstructor.call(
+                this,
+                positionalArgs,
+                namedArgs,
+              );
+              return result;
+            } else {
+              // Regular constructor: create instance first, then call constructor
+              // 1. Create and initialize instance fields (using the class's public helper)
+              // Pass null for type arguments as they aren't applicable to named constructor resolution here
+              final instance = targetValue.createAndInitializeInstance(
+                this,
+                null,
+              );
+              // 2. Bind 'this' and call the named constructor logic
+              final boundConstructor = namedConstructor.bind(instance);
+              boundConstructor.call(
+                this,
+                positionalArgs,
+                namedArgs,
+              ); // Pass evaluated args
+              // Constructor call implicitly returns the bound instance.
+              return instance; // Return the created and potentially modified instance
+            }
+          } on ReturnException catch (e) {
+            return e.value;
+          } on RuntimeD4rtException catch (e) {
+            throw RuntimeD4rtException(
+              "Error during named constructor '$methodName' for class '${targetValue.name}': ${e.message}",
+              originalException: e.originalException,
+              originalStackTrace: e.originalStackTrace,
+            );
+          }
+        } else {
+          // Not a named constructor, check for STATIC METHOD
+          final staticMethod = targetValue.findStaticMethod(methodName);
+          if (staticMethod != null) {
+            calleeValue =
+                staticMethod; // It's already the function, no binding needed
+          } else {
+            // Cluster C33: class-as-value (Type literal) semantics. A script
+            // that does `final Type t = SomeClass; t.toString();` expects
+            // `Object.toString()` on the Type instance, which in real Dart
+            // returns the class name. Fall back here before reporting an
+            // undefined-method error.
+            if (methodName == 'toString' &&
+                node.argumentList.arguments.isEmpty) {
+              return targetValue.name;
+            }
+            throw RuntimeD4rtException.resolutionFailure(
+              "Class '${targetValue.name}' has no static method or named constructor named '$methodName'.",
+            );
+          }
+        }
+      } else if (targetValue is InterpretedEnum) {
+        final staticMethod = targetValue.staticMethods[methodName];
+        if (staticMethod != null) {
+          calleeValue = staticMethod; // Static method, no binding needed
+        } else {
+          // Check mixins for static methods (reverse order)
+          bool found = false;
+          for (final mixin in targetValue.mixins.reversed) {
+            final mixinStaticMethod = mixin.findStaticMethod(methodName);
+            if (mixinStaticMethod != null) {
+              calleeValue = mixinStaticMethod;
+              found = true;
+              Logger.debug(
+                "[MethodInvocation] Found static method '$methodName' from mixin '${mixin.name}' for enum '${targetValue.name}'",
+              );
+              break;
+            }
+          }
+
+          if (!found) {
+            // Before throwing, let's check if it's a built-in method call like 'values'
+            // This could potentially be handled by the stdlib call later, but maybe check here?
+            // For now, assume only user-defined static methods are intended.
+            throw RuntimeD4rtException.resolutionFailure(
+              "Enum '${targetValue.name}' has no static method named '$methodName'.",
+            );
+          }
+        }
+      } else if (targetValue is InterpretedExtension) {
+        // Static method call on extension
+        final extension = targetValue;
+        final staticMethod = extension.findStaticMethod(methodName);
+        if (staticMethod != null) {
+          calleeValue = staticMethod;
+          Logger.debug(
+            "[MethodInvocation] Found static method '$methodName' on extension '${extension.name ?? '<unnamed>'}'",
+          );
+        } else {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Extension '${extension.name ?? '<unnamed>'}' has no static method named '$methodName'.",
+          );
+        }
+      } else if (targetValue is BridgedEnumValue) {
+        // This is a method call on a bridged enum value.
+        // It must use the invoke() method of BridgedEnumValue.
+        final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+        if (evaluationResult is AsyncSuspensionRequest) {
+          return evaluationResult; // Propagate suspension
+        }
+        final (positionalArgs, namedArgs) =
+            evaluationResult as (List<Object?>, Map<String, Object?>);
+        try {
+          return targetValue.invoke(
+            this,
+            methodName,
+            positionalArgs,
+            namedArgs,
+          );
+        } on RuntimeD4rtException {
+          // Relaunch the RuntimeErrors directly
+          rethrow;
+        } catch (e, s) {
+          // Catch other potential errors (ex: from the adapter)
+          Logger.error(
+            "[visitMethodInvocation] Native exception during bridged enum method call '$targetValue.$methodName': $e\n$s",
+          );
+          // SCB28: an unguarded adapter indexed past the end of the
+          // argument list -- report the arity, not the RangeError.
+          final arityError = D4.describeArityError(
+            e,
+            positionalArgs,
+            '$targetValue.$methodName',
+          );
+          if (arityError != null) {
+            // SCE109: a RangeError stays a RangeError. Replacing the VALUE is
+            // SCB28's point; replacing the TYPE was not, and it made
+            // `on RangeError` stop catching a script's own out-of-range
+            // read — an error that was not an `Error` at all.
+            throw RangeError(arityError);
+          }
+          throw RuntimeD4rtException(
+            "Native error during bridged enum method call '$methodName' on $targetValue: $e",
+            originalException: e,
+            originalStackTrace: s,
+          );
+        }
+      } else if (targetValue is BridgedEnum) {
+        // Static method call on a bridged enum type, e.g.
+        // `PageFormat.fromString('A4')` (GitHub issue #2). Instance methods go
+        // through the BridgedEnumValue branch above; this branch handles the
+        // enum TYPE as the target.
+        final staticMethodAdapter = targetValue.findStaticMethodAdapter(
+          methodName,
+        );
+        if (staticMethodAdapter == null) {
+          // Cluster-C33 (enum flavour): the enum TYPE reached this branch as a
+          // runtime value — typically via `enumValue.runtimeType`, which yields
+          // the BridgedEnum itself. Object members must then resolve against the
+          // type object rather than a static method. In real Dart
+          // `SomeEnum.toString()` (and `Type.toString()`) returns the type name,
+          // so mirror the InterpretedClass class-as-value fallback above before
+          // reporting an undefined-method error.
+          if (node.argumentList.arguments.isEmpty && methodName == 'toString') {
+            return targetValue.name;
+          }
+          throw RuntimeD4rtException.resolutionFailure(
+            "Undefined static method '$methodName' on bridged enum '${targetValue.name}'.",
+          );
+        }
+        final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+        if (evaluationResult is AsyncSuspensionRequest) {
+          return evaluationResult; // Propagate suspension
+        }
+        final (positionalArgs, namedArgs) =
+            evaluationResult as (List<Object?>, Map<String, Object?>);
+        List<RuntimeType>? evaluatedTypeArguments;
+        final typeArgsNode = node.typeArguments;
+        if (typeArgsNode != null) {
+          evaluatedTypeArguments = typeArgsNode.arguments
+              .map((typeNode) => _resolveTypeAnnotation(typeNode))
+              .toList();
+        }
+        try {
+          return D4.withActiveVisitor(
+            this,
+            () => staticMethodAdapter(
+              this,
+              positionalArgs,
+              namedArgs,
+              evaluatedTypeArguments,
+            ),
+          );
+        } on RuntimeD4rtException {
+          rethrow;
+        } catch (e, s) {
+          Logger.error(
+            "[visitMethodInvocation] Native exception during bridged enum static method '${targetValue.name}.$methodName': $e\n$s",
+          );
+          // SCB28: an unguarded adapter indexed past the end of the
+          // argument list -- report the arity, not the RangeError.
+          final arityError = D4.describeArityError(
+            e,
+            positionalArgs,
+            '${targetValue.name}.$methodName',
+          );
+          if (arityError != null) {
+            // SCE109: a RangeError stays a RangeError. Replacing the VALUE is
+            // SCB28's point; replacing the TYPE was not, and it made
+            // `on RangeError` stop catching a script's own out-of-range
+            // read — an error that was not an `Error` at all.
+            throw RangeError(arityError);
+          }
+          throw RuntimeD4rtException(
+            "Native error during bridged enum static method '$methodName' on '${targetValue.name}': $e",
+            originalException: e,
+            originalStackTrace: s,
+          );
+        }
+      } else if (targetValue is BridgedClass) {
+        // This is a method call on a bridged class (bridged constructor or static method)
+        final methodName = node.methodName.name;
+        // No same-name scavenging here: when two libraries in scope each
+        // declare a class under this name, the bare name never resolves —
+        // Environment.lookup throws AmbiguousBridgedNameException and the
+        // script must write `<package>.Name`. So the bridge we hold is the one
+        // the author actually named, and a missing member is a real error
+        // rather than a hint to try a sibling.
+        final bridgedClass = targetValue;
+        Logger.debug(
+          "[visitMethodInvocation] Target is BridgedClass: '$methodName' on '${bridgedClass.name}'",
+        );
+
+        // 1. Try to find a constructor adapter
+        final constructorAdapter = bridgedClass.findConstructorAdapter(
+          methodName,
+        );
+
+        if (constructorAdapter != null) {
+          Logger.debug(
+            "[visitMethodInvocation] Found Bridged CONSTRUCTOR adapter for '$methodName'",
+          );
+          final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+          if (evaluationResult is AsyncSuspensionRequest) {
+            return evaluationResult; // Propagate suspension
+          }
+          final (positionalArgs, namedArgs) =
+              evaluationResult as (List<Object?>, Map<String, Object?>);
+
+          try {
+            // Wrap with withActiveVisitor so that D4 helper methods can
+            // access the visitor for interface proxy creation (RC-1).
+            final nativeObject = D4.withActiveVisitor(
+              this,
+              () => constructorAdapter(this, positionalArgs, namedArgs),
+            );
+
+            if (nativeObject == null) {
+              throw RuntimeD4rtException(
+                "Bridged constructor adapter for '${bridgedClass.name}.$methodName' returned null unexpectedly.",
+              );
+            }
+
+            // Don't wrap Futures or Streams - they need to be usable directly
+            if (nativeObject is Future || nativeObject is Stream) {
+              Logger.debug(
+                "[visitMethodInvocation]   Returning native ${nativeObject.runtimeType} directly (not wrapping)",
+              );
+              return nativeObject;
+            }
+
+            // SCD98: the bare native, not a wrapper — see the 10-space site
+            // below for the reasoning.
+            final Object bridgedInstance = nativeObject;
+            Logger.debug(
+              "[visitMethodInvocation]   Created BridgedInstance wrapping native: ${nativeObject.runtimeType}",
+            );
+            return bridgedInstance; // Retourner l'instance pontée créée
+          } on RuntimeD4rtException catch (e) {
+            // Relaunch the adapter error
+            throw RuntimeD4rtException(
+              "Error during bridged constructor '$methodName' for class '${bridgedClass.name}': ${e.message}",
+              originalException: e.originalException,
+              originalStackTrace: e.originalStackTrace,
+            );
+          } catch (e, s) {
+            // Catch native errors from the adapter/native constructor
+            Logger.error(
+              "[visitMethodInvocation] Native exception during bridged constructor '${bridgedClass.name}.$methodName': $e\n$s",
+            );
+            // SCB28: an unguarded adapter indexed past the end of the
+            // argument list -- report the arity, not the RangeError.
+            final arityError = D4.describeArityError(
+              e,
+              positionalArgs,
+              '${bridgedClass.name}.$methodName',
+            );
+            if (arityError != null) {
+              // SCE109: a RangeError stays a RangeError. Replacing the VALUE is
+              // SCB28's point; replacing the TYPE was not, and it made
+              // `on RangeError` stop catching a script's own out-of-range
+              // read — an error that was not an `Error` at all.
+              throw RangeError(arityError);
+            }
+            throw RuntimeD4rtException(
+              "Native error during bridged constructor '$methodName' for class '${bridgedClass.name}': $e",
+              originalException: e,
+              originalStackTrace: s,
+            );
+          }
+        } else {
+          final staticMethodAdapter = bridgedClass.findStaticMethodAdapter(
+            methodName,
+          );
+
+          if (staticMethodAdapter != null) {
+            Logger.debug(
+              "[visitMethodInvocation] Found Bridged STATIC METHOD adapter for '$methodName'",
+            );
+            final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+            if (evaluationResult is AsyncSuspensionRequest) {
+              return evaluationResult; // Propagate suspension
+            }
+            final (positionalArgs, namedArgs) =
+                evaluationResult as (List<Object?>, Map<String, Object?>);
+
+            // Evaluate type arguments for generic methods
+            List<RuntimeType>? evaluatedTypeArguments;
+            final typeArgsNode = node.typeArguments;
+            if (typeArgsNode != null) {
+              evaluatedTypeArguments = typeArgsNode.arguments
+                  .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                  .toList();
+            }
+
+            try {
+              // C4/D5 fix: wrap with withActiveVisitor so D4 helpers
+              // (e.g. getRequiredNamedArg → extractBridgedArg) can resolve
+              // the visitor and walk registered interface proxies for
+              // InterpretedInstance arguments. Without this, single-arg
+              // Widget parameters on static bridged methods like
+              // `DefaultTextStyle.merge(child: …)` reject script-defined
+              // StatelessWidget subclasses because the proxy lookup is
+              // skipped (visitor is null).
+              final result = D4.withActiveVisitor(
+                this,
+                () => staticMethodAdapter(
+                  this,
+                  positionalArgs,
+                  namedArgs,
+                  evaluatedTypeArguments,
+                ),
+              );
+
+              return result;
+            } on RuntimeD4rtException catch (e) {
+              throw RuntimeD4rtException(
+                "Error during static bridged method call '$methodName' on ${bridgedClass.name}: ${e.message}",
+                originalException: e.originalException,
+                originalStackTrace: e.originalStackTrace,
+              );
+            } catch (e, s) {
+              Logger.warn(
+                "[visitMethodInvocation] Native exception during static bridged method call '${bridgedClass.name}.$methodName': $e\n$s",
+              );
+              // SCB28: an unguarded adapter indexed past the end of the
+              // argument list -- report the arity, not the RangeError.
+              final arityError = D4.describeArityError(
+                e,
+                positionalArgs,
+                '${bridgedClass.name}.$methodName',
+              );
+              if (arityError != null) {
+                // SCE109: a RangeError stays a RangeError. Replacing the VALUE is
+                // SCB28's point; replacing the TYPE was not, and it made
+                // `on RangeError` stop catching a script's own out-of-range
+                // read — an error that was not an `Error` at all.
+                throw RangeError(arityError);
+              }
+              throw RuntimeD4rtException(
+                "Native error during static bridged method call '$methodName' on ${bridgedClass.name}: $e",
+                originalException: e,
+                originalStackTrace: s,
+              );
+            }
+          } else {
+            // Cluster C32: class-as-value (Type literal) semantics. A script
+            // that does `final Type t = SomeBridgedClass; t.toString();`
+            // expects `Object.toString()` on the Type instance. Real Dart
+            // returns the class name. Fall back here before reporting an
+            // undefined-method error.
+            if (methodName == 'toString' &&
+                node.argumentList.arguments.isEmpty) {
+              return bridgedClass.name;
+            }
+            throw RuntimeD4rtException.resolutionFailure(
+              "Bridged class '${bridgedClass.name}' has no constructor or static method named '$methodName'.",
+            );
+          }
+        }
+      } else if (targetValue is BoundObjectSuper) {
+        // SCF24: `super.toString()` / `super.noSuchMethod(i)` where the
+        // superclass is `Object`.
+        final member = targetValue.instance.objectMember(methodName);
+        if (member is! Callable) {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Method '$methodName' not found in superclass chain of '${targetValue.instance.klass.name}'.",
+          );
+        }
+        calleeValue = member;
+      } else if (targetValue is BoundSuper) {
+        final instance = targetValue.instance;
+        final startClass = targetValue.startLookupClass;
+        InterpretedClass? currentClass = startClass;
+        InterpretedFunction? superMethod;
+
+        // Look for the method in the superclass hierarchy
+        while (currentClass != null) {
+          final method = currentClass.findInstanceMethod(methodName);
+          if (method != null) {
+            superMethod = method;
+            break;
+          }
+          currentClass = currentClass.superclass;
+        }
+
+        // SCF24: a chain that ends at `Object` — its topmost class has no
+        // bridged superclass or mixin — inherits `Object`'s members.
+        var topClass = startClass;
+        while (topClass.superclass != null) {
+          topClass = topClass.superclass!;
+        }
+        final objectMember =
+            superMethod == null &&
+                topClass.bridgedSuperclass == null &&
+                topClass.bridgedMixins.isEmpty
+            ? instance.objectMember(methodName)
+            : null;
+        if (superMethod != null) {
+          // Bind the found super method to the original instance ('this')
+          calleeValue = superMethod.bind(instance);
+        } else if (objectMember is Callable) {
+          calleeValue = objectMember;
+        } else {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Method '$methodName' not found in superclass chain of '${instance.klass.name}'.",
+          );
+        }
+        // Arguments are evaluated below, calleeValue is now the bound super method
+      } else if (targetValue is BoundBridgedSuper) {
+        final instance = targetValue.instance; // L'instance 'this' interprétée
+        final bridgedSuper = targetValue.startLookupClass;
+        // RC-6 / RC-8: Use nativeProxy as fallback when bridgedSuperObject
+        // is null (mirrors tom_d4rt_ast). And when neither is set, treat
+        // the super.<method>() call as a no-op rather than throwing —
+        // typically scripts mixing in `AutomaticKeepAliveClientMixin` etc.
+        // call `super.build(context)` for side-effects the bridge cannot
+        // observe; the script discards the result.
+        final nativeSuperObject =
+            instance.bridgedSuperObject ?? instance.nativeProxy;
+
+        if (nativeSuperObject == null) {
+          Logger.debug(
+            "[visitMethodInvocation] super.$methodName() on bridged super "
+            "'${bridgedSuper.name}' has no native target — treating as no-op.",
+          );
+          return null;
+        }
+
+        // SCF39: `super.toString()` over a native `Object` default names the
+        // native class; Dart's answer names the runtime class.
+        if (methodName == 'toString') {
+          final ownDefault = instance.defaultToStringOver(nativeSuperObject);
+          if (ownDefault != null) return ownDefault;
+        }
+
+        // Find the method adapter in the bridged class
+        final methodAdapter = bridgedSuper.findReachableMethodAdapter(
+          methodName,
+          this,
+        );
+
+        if (methodAdapter != null) {
+          // Evaluate the arguments
+          final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+          if (evaluationResult is AsyncSuspensionRequest) {
+            return evaluationResult; // Propagate suspension
+          }
+          final (positionalArgs, namedArgs) =
+              evaluationResult as (List<Object?>, Map<String, Object?>);
+
+          // Evaluate type arguments for generic methods
+          List<RuntimeType>? evaluatedTypeArguments;
+          final typeArgsNode = node.typeArguments;
+          if (typeArgsNode != null) {
+            evaluatedTypeArguments = typeArgsNode.arguments
+                .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                .toList();
+          }
+
+          // Call the adapter with the native object as target
+          try {
+            return methodAdapter(
+              this,
+              nativeSuperObject,
+              positionalArgs,
+              namedArgs,
+              evaluatedTypeArguments,
+            );
+          } catch (e, s) {
+            Logger.error(
+              "Native exception during super call to bridged method '${bridgedSuper.name}.$methodName': $e\n$s",
+            );
+            // SCB28: an unguarded adapter indexed past the end of the
+            // argument list -- report the arity, not the RangeError.
+            final arityError = D4.describeArityError(
+              e,
+              positionalArgs,
+              '${bridgedSuper.name}.$methodName',
+            );
+            if (arityError != null) {
+              // SCE109: a RangeError stays a RangeError. Replacing the VALUE is
+              // SCB28's point; replacing the TYPE was not, and it made
+              // `on RangeError` stop catching a script's own out-of-range
+              // read — an error that was not an `Error` at all.
+              throw RangeError(arityError);
+            }
+            throw RuntimeD4rtException(
+              "Native error during super call to bridged method '$methodName': $e",
+              originalException: e,
+              originalStackTrace: s,
+            );
+          }
+        } else {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Method '$methodName' not found in bridged superclass '${bridgedSuper.name}'.",
+          );
+        }
+        // This block returns directly or throws an exception
+      }
+      // DFUB4: extension-type instance method dispatch. The `methods` map and
+      // `get()` binding already exist; recognise the instance here so the shared
+      // callable tail invokes the bound method with the evaluated args.
+      else if (targetValue is InterpretedExtensionTypeInstance) {
+        calleeValue = targetValue.get(methodName, this);
+      }
+      // Handle Function.call() - all Dart functions have an implicit 'call' method
+      else if (targetValue is Callable && methodName == 'call') {
+        // Calling .call() on a function is equivalent to invoking the function
+        final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+        if (evaluationResult is AsyncSuspensionRequest) {
+          return evaluationResult; // Propagate suspension
+        }
+        final (positionalArgs, namedArgs) =
+            evaluationResult as (List<Object?>, Map<String, Object?>);
+        List<RuntimeType>? evaluatedTypeArguments;
+        final typeArgsNode = node.typeArguments;
+        if (typeArgsNode != null) {
+          evaluatedTypeArguments = typeArgsNode.arguments
+              .map((typeNode) => _resolveTypeAnnotation(typeNode))
+              .toList();
+        }
+
+        try {
+          return targetValue.call(
+            this,
+            positionalArgs,
+            namedArgs,
+            evaluatedTypeArguments,
+          );
+        } on ReturnException catch (e) {
+          return e.value;
+        }
+      }
+      //
+      else {
+        final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+        if (evaluationResult is AsyncSuspensionRequest) {
+          return evaluationResult; // Propagate suspension
+        }
+        final (positionalArgs, namedArgs) =
+            evaluationResult as (List<Object?>, Map<String, Object?>);
+        List<RuntimeType>? evaluatedTypeArguments;
+        final typeArgsNode = node.typeArguments;
+        if (typeArgsNode != null) {
+          evaluatedTypeArguments = typeArgsNode.arguments
+              .map((typeNode) => _resolveTypeAnnotation(typeNode))
+              .toList();
+        }
+
+        final extensionCallable = environment.findExtensionMember(
+          targetValue,
+          methodName,
+        );
+
+        if (extensionCallable is ExtensionMemberCallable) {
+          Logger.debug(
+            "[MethodInvocation] Found extension method '$methodName'. Calling...",
+          );
+          // Prepend the target instance to the positional arguments for the extension call
+          final extensionPositionalArgs = [targetValue, ...positionalArgs];
+          try {
+            // Call the extension method
+            return extensionCallable.call(
+              this,
+              extensionPositionalArgs,
+              namedArgs,
+              evaluatedTypeArguments,
+            );
+          } on ReturnException catch (e) {
+            return e.value;
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing extension method '$methodName': $e",
+            );
+          }
+        } else {
+          // RC-5b: Enum method fallback for raw native enum values
+          if (targetValue is Enum) {
+            switch (methodName) {
+              case 'toString':
+                return targetValue.toString();
+              case 'noSuchMethod':
+                break;
+            }
+          }
+
+          // GEN-C3b: Universal `Object.toString()` fallback.
+          // Every Dart Object has `toString()`. If a script catches a native
+          // exception (e.g. `RuntimeD4rtException`, `ArgumentError`,
+          // `JsonUnsupportedObjectError`) and calls `.toString()` on it,
+          // dispatch to the native method directly when no bridge or
+          // extension provides one. The method is no-arg and never fails.
+          if (methodName == 'toString' &&
+              positionalArgs.isEmpty &&
+              namedArgs.isEmpty) {
+            return targetValue.toString();
+          }
+
+          // No extension method found either, rethrow the original stdlib error
+          Logger.debug(
+            "[MethodInvocation] Extension method '$methodName' not found. Rethrowing original error.",
+          );
+          throw UndefinedMemberD4rtException(
+            "Undefined property or method '$methodName' on ${targetValue.runtimeType}."
+            '${unbridgedNativeClause(targetValue)}',
+            memberName: methodName,
+            receiver: targetValue,
+          );
+        }
+      }
+    }
+
+    // SCE176: an interpreted instance whose class declares `call` is
+    // callable; resolve it to the bound method so the branch below runs it.
+    calleeValue = interpretedCallMethod(calleeValue) ?? calleeValue;
+
+    // Check if the resolved value is callable
+    if (calleeValue is Callable) {
+      final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+      if (evaluationResult is AsyncSuspensionRequest) {
+        return evaluationResult; // Propagate suspension
+      }
+      final (positionalArgs, namedArgs) =
+          evaluationResult as (List<Object?>, Map<String, Object?>);
+
+      // Evaluate Type Arguments for Method Invocation
+      List<RuntimeType>? evaluatedTypeArguments;
+      final typeArgsNode = node.typeArguments;
+      if (typeArgsNode != null) {
+        evaluatedTypeArguments = typeArgsNode.arguments
+            .map((typeNode) => _resolveTypeAnnotation(typeNode))
+            .toList();
+        Logger.debug(
+          "[MethodInvocation] Evaluated type arguments: $evaluatedTypeArguments",
+        );
+      }
+
+      // Perform the call
+      try {
+        // The call logic now works for functions, bound instance methods,
+        // static methods, and constructors (which are handled by InterpretedClass.call)
+        // Pass the evaluated type arguments
+        return calleeValue.call(
+          this,
+          positionalArgs,
+          namedArgs,
+          evaluatedTypeArguments,
+        );
+      } on ReturnException catch (e) {
+        return e.value;
+      }
+      // Catch other potential runtime errors from the call itself
+    } else if (calleeValue is BridgedClass &&
+        (node.target == null || targetValue is Environment)) {
+      // GEN-101: Call of a bridged default constructor (ex: StringBuffer())
+      // Also handles prefixed imports (ex: ui.PictureRecorder()) where targetValue
+      // is the Environment. Previously the `node.target == null` check excluded
+      // prefixed imports, causing the BridgedClass to be returned instead of an instance.
+      final bridgedClass = calleeValue;
+
+      // RC-2: Evaluate type arguments (e.g., GlobalKey<NavigatorState>())
+      List<RuntimeType>? evaluatedTypeArguments;
+      final typeArgsNode = node.typeArguments;
+      if (typeArgsNode != null) {
+        evaluatedTypeArguments = typeArgsNode.arguments
+            .map((typeNode) => _resolveTypeAnnotation(typeNode))
+            .toList();
+      }
+
+      // RC-2: Check generic constructor registry first.
+      // Fires for both generic calls (GlobalKey<NavigatorState>()) and
+      // non-generic constructor overrides (StrutStyle()).
+      // Returns null to fall through to regular bridge constructor.
+      final genericCtor = D4.findGenericConstructor(bridgedClass.name, '');
+      if (genericCtor != null) {
+        final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+        if (evaluationResult is AsyncSuspensionRequest) {
+          return evaluationResult;
+        }
+        final (positionalArgs, namedArgs) =
+            evaluationResult as (List<Object?>, Map<String, Object?>);
+        try {
+          final nativeObject = D4.withActiveVisitor(
+            this,
+            () => genericCtor(
+              this,
+              positionalArgs,
+              namedArgs,
+              evaluatedTypeArguments,
+            ),
+          );
+          // null means "fall through to regular constructor"
+          if (nativeObject != null) {
+            if (nativeObject is Future || nativeObject is Stream) {
+              return nativeObject;
+            }
+            if (D4.usageLogEnabled) {
+              D4.recordUsageHit(
+                'ctor',
+                bridgedClass.name,
+                evaluatedTypeArguments?.map((t) => t.toString()).join(',') ??
+                    '',
+              );
+            }
+            // SCD98: the bare native, not a wrapper — see the 10-space site
+            // below for the reasoning.
+            final Object bridgedInstance = nativeObject;
+            Logger.debug(
+              "[visitMethodInvocation]   Created via generic constructor factory: ${nativeObject.runtimeType}",
+            );
+            return bridgedInstance;
+          }
+        } on RuntimeD4rtException {
+          rethrow;
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Error in generic constructor factory for '${bridgedClass.name}': $e",
+          );
+        }
+      }
+
+      final constructorAdapter = bridgedClass.findConstructorAdapter(
+        '',
+      ); // Search for the default constructor ''
+
+      if (constructorAdapter != null) {
+        Logger.debug(
+          "[visitMethodInvocation] Calling default bridged constructor for '${bridgedClass.name}'",
+        );
+
+        final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+        if (evaluationResult is AsyncSuspensionRequest) {
+          return evaluationResult; // Propagate suspension
+        }
+        final (positionalArgs, namedArgs) =
+            evaluationResult as (List<Object?>, Map<String, Object?>);
+
+        try {
+          // Wrap with withActiveVisitor so that D4 helper methods can
+          // access the visitor for interface proxy creation (RC-1).
+          final nativeObject = D4.withActiveVisitor(
+            this,
+            () => constructorAdapter(this, positionalArgs, namedArgs),
+          );
+          if (nativeObject == null) {
+            throw RuntimeD4rtException(
+              "Default bridged constructor adapter for '${bridgedClass.name}' returned null.",
+            );
+          }
+
+          // Don't wrap Futures or Streams - they need to be usable directly
+          if (nativeObject is Future || nativeObject is Stream) {
+            Logger.debug(
+              "[visitMethodInvocation]   Returning native ${nativeObject.runtimeType} directly (not wrapping)",
+            );
+            return nativeObject;
+          }
+
+          // SCD98: a bridged constructor yields the BARE NATIVE, as every
+          // other route already did. It was the lone site that wrapped, and the
+          // split was script-visible: `[ctor, method].toSet()` counted one
+          // Duration twice, because a native container comparing a stored
+          // WRAPPER against a bare probe runs `raw == wrapper`, the direction
+          // a native's `==` rejects and nothing in this package can override.
+          // Converging on the native is the direction the codebase had already
+          // been drifting — `visitBinaryExpression` unwraps operands, bridge
+          // calls unwrap arguments, SCC32 normalises hash keys — so this makes
+          // those unwraps unnecessary rather than adding a second convention.
+          final Object bridgedInstance = nativeObject;
+          Logger.debug(
+            "[visitMethodInvocation]   Created BridgedInstance wrapping native: ${nativeObject.runtimeType}",
+          );
+          return bridgedInstance;
+        } on RuntimeD4rtException catch (e) {
+          throw RuntimeD4rtException(
+            "Error during default bridged constructor for '${bridgedClass.name}': ${e.message}",
+            originalException: e.originalException,
+            originalStackTrace: e.originalStackTrace,
+          );
+        } catch (e, s) {
+          Logger.error(
+            "[visitMethodInvocation] Native exception during default bridged constructor '${bridgedClass.name}': $e\n$s",
+          );
+          // SCB28: an unguarded adapter indexed past the end of the
+          // argument list -- report the arity, not the RangeError.
+          final arityError = D4.describeArityError(
+            e,
+            positionalArgs,
+            '${bridgedClass.name}.new',
+          );
+          if (arityError != null) {
+            // SCE109: a RangeError stays a RangeError. Replacing the VALUE is
+            // SCB28's point; replacing the TYPE was not, and it made
+            // `on RangeError` stop catching a script's own out-of-range
+            // read — an error that was not an `Error` at all.
+            throw RangeError(arityError);
+          }
+          throw RuntimeD4rtException(
+            "Native error during default bridged constructor for '${bridgedClass.name}': $e",
+            originalException: e,
+            originalStackTrace: s,
+          );
+        }
+      } else {
+        // If we have a BridgedClass but no default constructor ''
+        throw RuntimeD4rtException(
+          "'${bridgedClass.name}' is not callable (no default constructor bridge found).",
+        );
+      }
+    } else {
+      // DFUB9: invoke a `call` method declared on an extension type instance,
+      // e.g. `calc(5)` where calc's extension type declares `int call(int x)`.
+      // Without this the callee falls through to the `return calleeValue`
+      // no-op below and the call silently yields the instance itself.
+      if (calleeValue is InterpretedExtensionTypeInstance) {
+        final callMethod = calleeValue.extensionType.methods['call'];
+        if (callMethod != null) {
+          Logger.debug(
+            "[MethodInvoke] Found 'call' method on extension type ${calleeValue.extensionType.name}. Invoking...",
+          );
+          final (positionalArgs, namedArgs) = _evaluateArguments(
+            node.argumentList,
+          );
+          List<RuntimeType>? evaluatedTypeArguments;
+          final typeArgsNode = node.typeArguments;
+          if (typeArgsNode != null) {
+            evaluatedTypeArguments = typeArgsNode.arguments
+                .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                .toList();
+          }
+          try {
+            return callMethod
+                .bind(calleeValue)
+                .call(this, positionalArgs, namedArgs, evaluatedTypeArguments);
+          } on ReturnException catch (e) {
+            return e.value;
+          }
+        }
+      }
+
+      // INTER-001 FIX: Check for BridgedInstance with call() method.
+      // A native Function is not routed here (SCF38): it resolves to the
+      // `Function` bridge, whose `call` serves interpreted Callables only,
+      // and GEN-110 below calls it natively with its arguments coerced.
+      final bridgedResult = calleeValue is Function
+          ? (null, false)
+          : toBridgedInstance(calleeValue);
+      if (bridgedResult.$2) {
+        final bridgedInstance = bridgedResult.$1!;
+        final callMethodAdapter = bridgedInstance.bridgedClass
+            .findInstanceMethodAdapter('call');
+        if (callMethodAdapter != null) {
+          Logger.debug(
+            "[MethodInvoke] Found 'call' method on BridgedInstance (${bridgedInstance.bridgedClass.name}). Invoking...",
+          );
+          final (positionalArgs, namedArgs) = _evaluateArguments(
+            node.argumentList,
+          );
+          List<RuntimeType>? evaluatedTypeArguments;
+          final typeArgsNode = node.typeArguments;
+          if (typeArgsNode != null) {
+            evaluatedTypeArguments = typeArgsNode.arguments
+                .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                .toList();
+          }
+          try {
+            return callMethodAdapter(
+              this,
+              bridgedInstance.nativeObject,
+              positionalArgs,
+              namedArgs,
+              evaluatedTypeArguments,
+            );
+          } on ReturnException catch (e) {
+            return e.value;
+          }
+        }
+      }
+
+      // Callee is NOT a standard Callable or a BridgedClass constructor
+      // Try Extension 'call' Method
+      const methodName = 'call';
+      try {
+        final extensionMethod = environment.findExtensionMember(
+          calleeValue,
+          methodName,
+        );
+
+        if (extensionMethod is ExtensionMemberCallable &&
+            !extensionMethod
+                .isOperator && // Ensure it's a regular method named 'call'
+            !extensionMethod.isGetter &&
+            !extensionMethod.isSetter) {
+          Logger.debug(
+            "[MethodInvoke] Found extension method 'call' for non-callable type ${calleeValue?.runtimeType}. Calling...",
+          );
+
+          // Need to re-evaluate args here as they weren't necessarily evaluated
+          // if calleeValue wasn't Callable earlier.
+          final (positionalArgs, namedArgs) = _evaluateArguments(
+            node.argumentList,
+          );
+          List<RuntimeType>? evaluatedTypeArguments;
+          final typeArgsNode = node.typeArguments;
+          if (typeArgsNode != null) {
+            evaluatedTypeArguments = typeArgsNode.arguments
+                .map((typeNode) => _resolveTypeAnnotation(typeNode))
+                .toList();
+          }
+
+          // Prepare arguments for extension method:
+          // First arg is the receiver (the object being called)
+          final extensionPositionalArgs = [calleeValue, ...positionalArgs];
+
+          try {
+            // Call the extension method
+            return extensionMethod.call(
+              this,
+              extensionPositionalArgs,
+              namedArgs,
+              evaluatedTypeArguments,
+            );
+          } on ReturnException catch (e) {
+            return e.value;
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing extension method 'call': $e",
+            );
+          }
+        }
+        Logger.debug(
+          "[MethodInvoke] No suitable extension method 'call' found for non-callable type ${calleeValue?.runtimeType}.",
+        );
+      } on RuntimeD4rtException catch (findError) {
+        Logger.debug(
+          "[MethodInvoke] No extension member 'call' found for non-callable type ${calleeValue?.runtimeType}. Error: ${findError.message}",
+        );
+        // Fall through to the final standard error below.
+      }
+
+      // Original Error: The expression evaluated did not yield a callable function or an object with a callable 'call' extension.
+      String nameForError = "<unknown>";
+      if (node.target == null) {
+        nameForError = node.methodName.name;
+      } else {
+        nameForError = node.toString(); // Approximate representation
+      }
+
+      // GEN-110 — Allow invoking native Dart Function values via
+      // `MethodInvocation` shape (`fn(args)` where `fn` is a local
+      // parameter of a bridged builder, e.g. the `setState` argument
+      // of `StatefulBuilder.builder` or `LayoutBuilder.builder`).
+      // The AST parses these as MethodInvocation (target == null);
+      // visitFunctionExpressionInvocation already handles the
+      // `(expr)(...)` form. Without this branch, calls like
+      // `setState(() { ... })` fell through to the
+      // `if (calleeValue != null) return calleeValue;` no-op below
+      // — the StateSetter was returned unchanged, the user callback
+      // was never invoked, and rebuilds never fired. Each positional
+      // Callable arg is wrapped via `D4.coerceCallableToFunction` so
+      // an interpreted `() => ...` literal satisfies the native
+      // `void Function()` / `ValueChanged<T>` / ... parameter type.
+      if (calleeValue is Function) {
+        final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+        if (evaluationResult is AsyncSuspensionRequest) {
+          return evaluationResult;
+        }
+        final (positionalArgs, namedArgs) =
+            evaluationResult as (List<Object?>, Map<String, Object?>);
+        final wrappedPositional = positionalArgs
+            .map((a) => D4.coerceCallableToFunction(this, a))
+            .toList();
+        final wrappedNamed = namedArgs.map(
+          (k, v) => MapEntry(k, D4.coerceCallableToFunction(this, v)),
+        );
+        final symbolNamed = wrappedNamed.isEmpty
+            ? const <Symbol, Object?>{}
+            : wrappedNamed.map<Symbol, Object?>(
+                (k, v) => MapEntry(Symbol(k), v),
+              );
+        try {
+          return Function.apply(calleeValue, wrappedPositional, symbolNamed);
+        } on ReturnException catch (e) {
+          return e.value;
+        }
+      }
+
+      // SCE176: this used to `return calleeValue` for any non-null value, so
+      // calling a variable that held a non-function yielded the value itself
+      // (`var n = 3; n()` gave 3). It hid DFUB9 and GEN-110 before being
+      // removed; Dart rejects the call, and so does this.
+      throw RuntimeD4rtException(
+        "'$nameForError' (type: ${calleeValue?.runtimeType}) is not callable and has no 'call' extension method."
+        '${unbridgedNativeClause(calleeValue)}',
+      );
+    }
+  }
+
+  // Update PropertyAccess to call getters AND handle 'super'
+  @override
+  Object? visitPropertyAccess(PropertyAccess node) {
+    final target = node.target?.accept<Object?>(this);
+    if (target is AsyncSuspensionRequest) {
+      // Propagate suspension so the state machine resumes this node after resolution
+      return target;
+    }
+
+    final propertyName = node.propertyName.name;
+
+    // Null safety support: if the target is null and the access is null-aware,
+    // return null. `toSource()` is expensive, so only build it on this rare
+    // null-target path rather than on every property access.
+    if (target == null) {
+      if (node.toSource().contains('?.')) {
+        return null;
+      }
+      // C21 — Dart null-shorting: when an inner selector in this chain
+      // uses `?.` (e.g. `a?.b.c` where `a == null`), the outer `.c` must
+      // short-circuit to null instead of throwing.
+      if (_chainHasNullAwareSelector(node.target)) {
+        return null;
+      }
+      // G-DOV-10/11 FIX: Try extension lookup on nullable types before throwing
+      final extensionMember = environment.findExtensionMember(
+        target,
+        propertyName,
+        visitor: this,
+      );
+      if (extensionMember != null) {
+        if (extensionMember is InterpretedFunction &&
+            extensionMember.isGetter) {
+          // Execute extension getter with 'this' bound to null
+          final extensionEnv = Environment(enclosing: environment);
+          extensionEnv.define('this', null);
+          final prevEnv = environment;
+          environment = extensionEnv;
+          try {
+            return extensionMember.call(this, [], {});
+          } finally {
+            environment = prevEnv;
+          }
+        }
+        return extensionMember;
+      }
+      throw RuntimeD4rtException(
+        "Cannot access property '$propertyName' on null. Use '?.' for null-aware access.",
+      );
+    }
+
+    Logger.debug(
+      "[PropertyAccess: ${node.toSource()}] Target type: ${target.runtimeType}, Target value: ${target.toString()}",
+    );
+
+    if (target is InterpretedInstance) {
+      // Standard Instance Access: Try direct first, then extension
+      try {
+        final member = target.get(
+          propertyName,
+          visitor: this,
+        ); // .get() handles inheritance
+        if (member is InterpretedFunction && member.isGetter) {
+          return member.call(
+            this,
+            [],
+            {},
+          ); // .get already returned bound getter
+        } else {
+          return member; // field value or bound method
+        }
+      } on RuntimeD4rtException catch (e) {
+        // Try Extension Lookup Before Error
+        if (e is UndefinedMemberD4rtException &&
+            e.memberName == propertyName &&
+            identical(e.receiver, target)) {
+          Logger.debug(
+            "[PropertyAccess] Direct access failed for '$propertyName'. Trying extension lookup on ${target.runtimeType}.",
+          );
+          try {
+            final extensionMember = environment.findExtensionMember(
+              target,
+              propertyName,
+            );
+
+            if (extensionMember is ExtensionMemberCallable) {
+              if (extensionMember.isGetter) {
+                Logger.debug(
+                  "[PropertyAccess] Found extension getter '$propertyName'. Calling...",
+                );
+                // Getters are called with the instance as the first (and only) positional argument
+                final extensionPositionalArgs = [target];
+                return extensionMember.call(this, extensionPositionalArgs, {});
+              } else if (!extensionMember.isOperator &&
+                  !extensionMember.isSetter) {
+                // Return the extension method itself (it's not bound yet)
+                Logger.debug(
+                  "[PropertyAccess] Found extension method '$propertyName'. Returning callable.",
+                );
+                return extensionMember;
+              }
+            }
+            // No suitable extension found, fall through to rethrow original error
+            Logger.debug(
+              "[PropertyAccess] No suitable extension member found for '$propertyName'.",
+            );
+          } on RuntimeD4rtException catch (findError) {
+            // Error during extension lookup itself
+            Logger.debug(
+              "[PropertyAccess] Error during extension lookup for '$propertyName': ${findError.message}",
+            );
+            // Fall through to rethrow original error
+          }
+        }
+        // Rethrow the original error if the member was not merely absent, or if
+        // extension lookup failed.
+        throw rewrapPreservingMemberSignal(
+          e,
+          "${e.message} (accessing property via PropertyAccess '$propertyName')",
+        );
+      }
+    } else if (target is InterpretedExtensionTypeInstance) {
+      // DFUB4: property access on an extension-type instance (e.g. chained
+      // `Value(5).double().val`). get() resolves the representation field,
+      // calls a getter, or returns a bound method.
+      return target.get(propertyName, this);
+    } else if (target is InterpretedEnumValue) {
+      try {
+        // Get should execute the getter or return the field/bound method
+        // Pass the visitor to potentially execute getters
+        final member = target.get(propertyName, this);
+
+        // Check if the result from get was already the final value (field or executed getter)
+        // or if it's a bound method that shouldn't be called here.
+        if (member is Callable) {
+          // Property access should generally not return a raw callable method.
+          // If get() returned a bound method, it means the propertyName matched a method name,
+          // which is not what property access typically expects.
+          // However, Dart allows accessing methods like properties to get a tear-off.
+          // So, we return the bound method (Callable) here.
+          Logger.debug(
+            "[PropertyAccess] Accessed enum method '$propertyName' on $target as tear-off. Returning bound method.",
+          );
+          return member;
+        } else {
+          // Must be a field value or the result of an executed getter.
+          Logger.debug(
+            "[PropertyAccess] Accessed enum field/getter '$propertyName' on $target. Value: $member",
+          );
+          return member;
+        }
+      } on RuntimeD4rtException catch (e) {
+        // Try Extension Getter if Direct Fails (similar to InterpretedInstance)
+        if (e is UndefinedMemberD4rtException &&
+            e.memberName == propertyName &&
+            identical(e.receiver, target)) {
+          Logger.debug(
+            "[PropertyAccess] Direct access failed for '$propertyName' on enum $target. Trying extension lookup...",
+          );
+          try {
+            final extensionMember = environment.findExtensionMember(
+              target,
+              propertyName,
+            );
+            if (extensionMember is ExtensionMemberCallable) {
+              if (extensionMember.isGetter) {
+                Logger.debug(
+                  "[PropertyAccess] Found extension getter '$propertyName' for enum. Calling...",
+                );
+                final extensionPositionalArgs = [target];
+                return extensionMember.call(this, extensionPositionalArgs, {});
+              } else if (!extensionMember.isOperator &&
+                  !extensionMember.isSetter) {
+                Logger.debug(
+                  "[PropertyAccess] Found extension method '$propertyName' for enum. Returning tear-off.",
+                );
+                return extensionMember;
+              }
+            }
+            Logger.debug(
+              "[PropertyAccess] No suitable extension member found for '$propertyName' on enum.",
+            );
+          } on RuntimeD4rtException catch (findError) {
+            Logger.debug(
+              "[PropertyAccess] Error during extension lookup for '$propertyName' on enum: ${findError.message}",
+            );
+          }
+        }
+        // Rethrow original error or error from extension lookup
+        throw rewrapPreservingMemberSignal(
+          e,
+          "${e.message} (accessing property via PropertyAccess '$propertyName' on enum value '$target')",
+        );
+      }
+    } else if (target is InterpretedEnum) {
+      // Accessing static member on the enum itself
+      InterpretedFunction? staticGetter = target.staticGetters[propertyName];
+      if (staticGetter != null) {
+        // Call the static getter
+        return staticGetter.call(this, [], {});
+      }
+      Object? staticField = target.staticFields[propertyName];
+      if (target.staticFields.containsKey(propertyName)) {
+        // Return static field value (could be null)
+        return staticField;
+      }
+      InterpretedFunction? staticMethod = target.staticMethods[propertyName];
+      if (staticMethod != null) {
+        // Return the static method itself (tear-off)
+        return staticMethod;
+      }
+
+      // Check mixins for static members (reverse order)
+      for (final mixin in target.mixins.reversed) {
+        final mixinStaticGetter = mixin.findStaticGetter(propertyName);
+        if (mixinStaticGetter != null) {
+          Logger.debug(
+            "[PropertyAccess] Found static getter '$propertyName' from mixin '${mixin.name}' for enum '${target.name}'",
+          );
+          return mixinStaticGetter.call(this, [], {});
+        }
+
+        final mixinStaticMethod = mixin.findStaticMethod(propertyName);
+        if (mixinStaticMethod != null) {
+          Logger.debug(
+            "[PropertyAccess] Found static method '$propertyName' from mixin '${mixin.name}' for enum '${target.name}'",
+          );
+          return mixinStaticMethod;
+        }
+
+        // Check static fields - use try/catch since getStaticField throws if not found
+        try {
+          final mixinStaticField = mixin.getStaticField(propertyName);
+          Logger.debug(
+            "[PropertyAccess] Found static field '$propertyName' from mixin '${mixin.name}' for enum '${target.name}'",
+          );
+          return mixinStaticField;
+        } on RuntimeD4rtException {
+          // Continue to next mixin
+        }
+      }
+
+      // Check for built-in 'values'
+      if (propertyName == 'values') {
+        return target.valuesList;
+      }
+
+      // Not found
+      throw RuntimeD4rtException.resolutionFailure(
+        "Undefined static property '$propertyName' on enum '${target.name}'.",
+      );
+    } else if (target is InterpretedClass) {
+      // Static Access (no change)
+      try {
+        // Check static fields first (no inheritance for static fields in Dart)
+        return target.getStaticField(propertyName);
+      } on RuntimeD4rtException catch (_) {
+        // If not a field, check static methods/getters
+        InterpretedFunction? staticMember = target.findStaticGetter(
+          propertyName,
+        );
+        staticMember ??= target.findStaticMethod(propertyName);
+
+        if (staticMember != null) {
+          if (staticMember.isGetter) {
+            return staticMember.call(this, [], {}); // Call static getter
+          } else {
+            // Return static method function itself (not bound)
+            return staticMember;
+          }
+        } else {
+          // Cluster C32/C33: class-as-value (Type literal) semantics. When
+          // a script binds a class identifier to a `Type` variable and
+          // reads `Object` getters off it (`hashCode`, `runtimeType`), the
+          // expected behaviour is `Object.hashCode` / `Object.runtimeType`
+          // on the Type instance, not a static-member lookup on the class.
+          // Fall back to the underlying Dart object's getters before
+          // reporting an undefined-static error.
+          if (propertyName == 'hashCode') {
+            return target.hashCode;
+          }
+          if (propertyName == 'runtimeType') {
+            return target.runtimeType;
+          }
+          throw UndefinedStaticMemberD4rtException(
+            "Undefined static member '$propertyName' on class '${target.name}'.",
+            memberName: propertyName,
+          );
+        }
+      }
+    } else if (target is BoundObjectSuper) {
+      // SCF24: `super.hashCode` / `super.runtimeType`, and a `super.toString`
+      // tear-off, where the superclass is `Object`.
+      final member = target.instance.objectMember(propertyName);
+      if (member == null) {
+        throw UndefinedMemberD4rtException(
+          "Undefined property '$propertyName' on 'super' of "
+          "'${target.instance.klass.name}'.",
+          memberName: propertyName,
+          receiver: target.instance,
+        );
+      }
+      return member;
+    } else if (target is BoundSuper) {
+      // Super Property Access
+      final instance = target.instance;
+      final startClass = target.startLookupClass;
+      InterpretedClass? currentClass =
+          startClass; // Start search from superclass
+
+      while (currentClass != null) {
+        // Check instance field in the bound instance's fields
+        // Use the new public getter on the instance to access the field value
+        try {
+          final fieldValue = instance.getField(propertyName);
+          // Field found on the instance, return its value regardless of where we are in the super hierarchy lookup
+          return fieldValue;
+        } on RuntimeD4rtException {
+          // Field doesn't exist directly on the instance, continue searching for getters/methods
+        }
+
+        // Check instance getter in the current class in hierarchy
+        final getter = currentClass.findInstanceGetter(propertyName);
+        if (getter != null) {
+          // Bind getter to the original instance and call
+          return getter.bind(instance).call(this, [], {});
+        }
+        // Check instance method (less common for property access, but possible)
+        final method = currentClass.findInstanceMethod(propertyName);
+        if (method != null) {
+          // Bind method to the original instance and return the bound method
+          return method.bind(instance);
+        }
+        // Move up the hierarchy
+        currentClass = currentClass.superclass;
+      }
+      // Not found in superclass hierarchy
+      throw UndefinedMemberD4rtException(
+        "Undefined property '$propertyName' accessed via 'super' on instance of '${instance.klass.name}'.",
+        memberName: propertyName,
+        receiver: instance,
+      );
+    } else if (target is BridgedClass) {
+      final bridgedClass = target;
+      Logger.debug(
+        "[PropertyAccess] Static access on BridgedClass: ${bridgedClass.name}.$propertyName",
+      );
+
+      final staticGetter = bridgedClass.findStaticGetterAdapter(propertyName);
+      if (staticGetter != null) {
+        Logger.debug("[PropertyAccess]   Found static getter adapter.");
+        return wrapNativeReturnValue(staticGetter(this));
+      }
+
+      final staticMethod = bridgedClass.findStaticMethodAdapter(propertyName);
+      if (staticMethod != null) {
+        Logger.debug("[PropertyAccess]   Found static method adapter.");
+        throw UnimplementedD4rtException(
+          "Returning bridged static methods as values from PropertyAccess is not yet supported.",
+        );
+        // return BridgedStaticMethodCallable(bridgedClass, staticMethod, propertyName);
+      } else {
+        // Cluster C32: class-as-value (Type literal) semantics. A script
+        // that does `final Type t = SomeBridgedClass; t.hashCode;` expects
+        // `Object.hashCode` on the Type instance, not a static-member
+        // lookup on the bridged class. Fall back to the underlying Dart
+        // object's getters before reporting an undefined-static error.
+        if (propertyName == 'hashCode') {
+          return bridgedClass.hashCode;
+        }
+        if (propertyName == 'runtimeType') {
+          return bridgedClass.runtimeType;
+        }
+        throw UndefinedStaticMemberD4rtException(
+          "Undefined static member '$propertyName' on bridged class '${bridgedClass.name}'.",
+          memberName: propertyName,
+        );
+      }
+    } else if (toBridgedInstance(target).$2) {
+      final bridgedInstance = toBridgedInstance(target).$1!;
+      Logger.debug(
+        "[PropertyAccess] Access on BridgedInstance: ${bridgedInstance.bridgedClass.name}.$propertyName",
+      );
+      // GEN-075 / SCC78: these two universal members answer from the NATIVE
+      // object, never from `target`. When the value arrives already wrapped,
+      // `target` IS the `BridgedInstance`, so `target.runtimeType` reported
+      // `BridgedInstance<Object>` for every bridged value in the interpreter.
+      //
+      // `tom_d4rt_ast` has had the correct form since GEN-075 and this tree did
+      // not, which is a mirror divergence nothing caught — the two
+      // `interpreter_visitor.dart` files disagreed on one line for as long as
+      // both existed. Written identically here so a diff of the mirror shows
+      // nothing.
+      switch (propertyName) {
+        case 'runtimeType':
+          return bridgedInstance.nativeObject.runtimeType;
+        case 'hashCode':
+          return bridgedInstance.nativeObject.hashCode;
+        default:
+      }
+      // Getter first, then method: the same order as `BridgedInstance.get`
+      // (SCE232). It matters only for a name in both maps, which
+      // scd196_member_map_disjointness_test forbids.
+      final getterAdapter = bridgedInstance.bridgedClass
+          .findInstanceGetterAdapter(propertyName);
+      if (getterAdapter != null) {
+        Logger.debug("[PropertyAccess]   Found instance getter adapter.");
+        return getterAdapter(
+          this,
+          bridgedInstance.nativeObject,
+        ); // Call instance getter adapter
+      }
+
+      final methodAdapter = bridgedInstance.bridgedClass
+          .findInstanceMethodAdapter(propertyName);
+      if (methodAdapter != null) {
+        Logger.debug(
+          "[PropertyAccess]   Found instance method adapter. Binding...",
+        );
+        // Return a callable bound to the instance
+        return BridgedMethodCallable(
+          bridgedInstance,
+          methodAdapter,
+          propertyName,
+        );
+      }
+
+      // Cluster-12 (priority 3): Walk the registered supertype chain when
+      // the leaf bridge has no matching getter/method. See
+      // [InterpreterVisitorExtension.lookupOnBridgedSupertypes].
+      final supertypeMatch = lookupOnBridgedSupertypes(
+        bridgedInstance,
+        propertyName,
+      );
+      if (supertypeMatch.$2) {
+        Logger.debug(
+          "[PropertyAccess]   Resolved '$propertyName' via supertype walk on '${bridgedInstance.bridgedClass.name}'.",
+        );
+        return supertypeMatch.$1;
+      }
+
+      // Try extension lookup before throwing error
+      Logger.debug(
+        "[PropertyAccess] Direct access failed for '$propertyName' on BridgedInstance. Trying extension lookup...",
+      );
+      final extensionMember = environment.findExtensionMember(
+        bridgedInstance,
+        propertyName,
+      );
+
+      if (extensionMember is ExtensionMemberCallable) {
+        if (extensionMember.isGetter) {
+          Logger.debug(
+            "[PropertyAccess] Found extension getter '$propertyName' for BridgedInstance. Calling...",
+          );
+          // Getters are called with the native object as the first positional argument
+          final extensionPositionalArgs = [bridgedInstance.nativeObject];
+          return extensionMember.call(this, extensionPositionalArgs, {});
+        } else if (!extensionMember.isOperator && !extensionMember.isSetter) {
+          Logger.debug(
+            "[PropertyAccess] Found extension method '$propertyName' for BridgedInstance. Returning tear-off.",
+          );
+          return extensionMember;
+        }
+      }
+
+      // Fix I: Check if the nativeObject is actually an Enum
+      if (bridgedInstance.nativeObject is Enum) {
+        final enumObj = bridgedInstance.nativeObject as Enum;
+        switch (propertyName) {
+          case 'name':
+            return enumObj.name;
+          case 'index':
+            return enumObj.index;
+          case 'hashCode':
+            return enumObj.hashCode;
+          case 'runtimeType':
+            return enumObj.runtimeType;
+          case 'toString':
+            return NativeFunction(
+              (visitor, args, namedArgs, typeArgs) => enumObj.toString(),
+              arity: 0,
+              name: 'toString',
+            );
+        }
+        // Cluster-26 (Key.label dispatch): if a custom getter was registered
+        // on the BridgedEnumDefinition (e.g. KeyEventType.label), dispatch
+        // through the BridgedEnumValue. The G-DCLI-05 prefix match in
+        // toBridgedClass can otherwise wrap a native enum (KeyEventType)
+        // under an unrelated BridgedClass (Key). Only entered for unknown
+        // properties to keep built-in enum access on the fast path.
+        // Walks the current scope chain (which extends from the per-module
+        // env where ModuleLoader registered the BridgedEnum). The global env
+        // does not hold bridged enums — only classes are pre-populated there
+        // by D4rt._initModule.
+        final bridgedEnumValue =
+            environment.getBridgedEnumValue(enumObj) ??
+            globalEnvironment.getBridgedEnumValue(enumObj);
+        if (bridgedEnumValue != null) {
+          try {
+            return bridgedEnumValue.get(propertyName);
+          } on RuntimeD4rtException {
+            // Fall through to the member-absent error below.
+          }
+        }
+      }
+
+      // D2: If the bridged instance wraps a D4InterpretedProxy (a native
+      // proxy that holds a back-reference to the originating
+      // [InterpretedInstance]), retry the property access on the wrapped
+      // instance. Used for proxies like D4rtCustomPainter that route
+      // bridged-callback dispatch to script-defined fields/getters
+      // (e.g. `progress`) declared on the script's CustomPainter subclass.
+      final native = bridgedInstance.nativeObject;
+      if (native is D4InterpretedProxy) {
+        final inner = native.d4rtInstance;
+        if (inner is InterpretedInstance) {
+          try {
+            return inner.get(propertyName, visitor: this);
+          } catch (_) {
+            // fall through to throw with original context
+          }
+        }
+      }
+
+      // GEN-107 sync: Universal Object properties for non-enum BridgedInstance
+      // (mirrors GEN-075 fix in tom_d4rt_ast visitPropertyAccess).
+      switch (propertyName) {
+        case 'hashCode':
+          return bridgedInstance.nativeObject.hashCode;
+        case 'runtimeType':
+          return bridgedInstance.nativeObject.runtimeType;
+        case 'toString':
+          return NativeFunction(
+            (visitor, args, namedArgs, typeArgs) =>
+                bridgedInstance.nativeObject.toString(),
+            arity: 0,
+            name: 'toString',
+          );
+      }
+
+      throw UndefinedMemberD4rtException(
+        "Undefined property or method '$propertyName' on bridged instance of '${bridgedInstance.bridgedClass.name}'.",
+        memberName: propertyName,
+        receiver: bridgedInstance,
+      );
+    } else if (target is InterpretedRecord) {
+      // Accessing field of a record
+      final record = target;
+      Logger.debug(
+        "[PropertyAccess] Access on InterpretedRecord: .$propertyName",
+      );
+      // Check if it's a positional field access (\$1, \$2, ...)
+      if (propertyName.startsWith('\$') && propertyName.length > 1) {
+        try {
+          final index = int.parse(propertyName.substring(1)) - 1;
+          if (index >= 0 && index < record.positionalFields.length) {
+            return record.positionalFields[index];
+          } else {
+            throw RuntimeD4rtException(
+              "Record positional field index \$$index out of bounds (0..${record.positionalFields.length - 1}).",
+            );
+          }
+        } catch (e) {
+          // Handle parse errors or other issues
+          throw RuntimeD4rtException(
+            "Invalid positional record field accessor '$propertyName'.",
+          );
+        }
+      } else {
+        // Check if it's a named field access
+        if (record.namedFields.containsKey(propertyName)) {
+          return record.namedFields[propertyName];
+        } else {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Record has no field named '$propertyName'. Available fields: ${record.namedFields.keys.join(', ')}",
+          );
+        }
+      }
+    } else if (target is Record) {
+      // E6: native Dart Record (e.g., produced by `Iterable.indexed`).
+      // Route positional access via dynamic dispatch — see
+      // _accessNativeRecordField for the limitations.
+      return _accessNativeRecordField(target, propertyName);
+    } else if (target is BridgedEnumValue) {
+      return target.get(propertyName);
+    } else if (target is BridgedEnum) {
+      Logger.debug(
+        "[PropertyAccess] Accessing value on BridgedEnum: ${target.name}.$propertyName",
+      );
+      final enumValue = target.getValue(propertyName);
+      if (enumValue != null) {
+        return enumValue; // Return the BridgedEnumValue
+      } else {
+        throw RuntimeD4rtException.resolutionFailure(
+          "Undefined enum value '$propertyName' on bridged enum '${target.name}'.",
+        );
+      }
+    } else if (target is BoundBridgedSuper) {
+      final instance = target.instance; // The interpreted 'this' instance
+      final bridgedSuper = target.startLookupClass;
+      final nativeSuperObject =
+          instance.bridgedSuperObject; // Retrieve the native object
+
+      if (nativeSuperObject == null) {
+        throw RuntimeD4rtException(
+          "Internal error: Cannot access super property '$propertyName' on bridged superclass '${bridgedSuper.name}' because the native super object is missing.",
+        );
+      }
+
+      // Try the bridged getter
+      final getterAdapter = bridgedSuper.findReachableGetterAdapter(
+        propertyName,
+        this,
+      );
+      if (getterAdapter != null) {
+        try {
+          return getterAdapter(this, nativeSuperObject);
+        } catch (e, s) {
+          Logger.error(
+            "Native exception during super access to bridged getter '${bridgedSuper.name}.$propertyName': $e\n$s",
+          );
+          throw RuntimeD4rtException(
+            "Native error during super access to bridged getter '$propertyName': $e",
+            originalException: e,
+            originalStackTrace: s,
+          );
+        }
+      }
+
+      // Try the bridged method (for tear-off)
+      final methodAdapter = bridgedSuper.findReachableMethodAdapter(
+        propertyName,
+        this,
+      );
+      if (methodAdapter != null) {
+        // Return a callable bound to the native object
+        return BridgedSuperMethodCallable(
+          nativeSuperObject,
+          methodAdapter,
+          propertyName,
+          bridgedSuper.name,
+        );
+      }
+
+      // Not found
+      throw UndefinedMemberD4rtException(
+        "Undefined property or method '$propertyName' accessed via 'super' on bridged superclass '${bridgedSuper.name}'.",
+        memberName: propertyName,
+        receiver: target,
+      );
+    } else if (target is Callable) {
+      // ENG-006: Handle property access on function objects (InterpretedFunction, NativeFunction, etc.)
+      // Functions support runtimeType, hashCode, toString, and call tear-off.
+      Logger.debug(
+        "[PropertyAccess] Access on Callable: ${target.runtimeType}.$propertyName",
+      );
+      switch (propertyName) {
+        case 'runtimeType':
+          return target.runtimeType;
+        case 'hashCode':
+          return target.hashCode;
+        case 'toString':
+          // Return a bound toString method
+          return NativeFunction(
+            (visitor, args, namedArgs, typeArgs) => target.toString(),
+            arity: 0,
+            name: 'toString',
+          );
+        case 'call':
+          // Tear-off: return the callable itself
+          return target;
+        default:
+          throw UndefinedMemberD4rtException(
+            "Undefined property '$propertyName' on function object (${target.runtimeType}).",
+            memberName: propertyName,
+            receiver: target,
+          );
+      }
+    } else {
+      // Check if target is a native enum that has been bridged
+      final bridgedEnumValue = environment.getBridgedEnumValue(target);
+      if (bridgedEnumValue != null) {
+        Logger.debug(
+          "[PropertyAccess] Found bridged enum value for native enum ${target.runtimeType}",
+        );
+        try {
+          return bridgedEnumValue.get(propertyName);
+        } catch (e) {
+          throw UndefinedMemberD4rtException(
+            "Undefined property '$propertyName' on bridged enum value '${bridgedEnumValue.name}'.",
+            memberName: propertyName,
+            receiver: target,
+          );
+        }
+      }
+
+      // Fix I: Generic Enum property access for raw Enum targets
+      if (target is Enum) {
+        switch (propertyName) {
+          case 'name':
+            return (target).name;
+          case 'index':
+            return (target).index;
+          case 'hashCode':
+            return target.hashCode;
+          case 'runtimeType':
+            return target.runtimeType;
+          case 'toString':
+            return NativeFunction(
+              (visitor, args, namedArgs, typeArgs) => target.toString(),
+              arity: 0,
+              name: 'toString',
+            );
+        }
+      }
+
+      Logger.debug(
+        "[PropertyAccess] Looking for extension getter '$propertyName' for target type ${target.runtimeType}.",
+      );
+      final extensionCallable = environment.findExtensionMember(
+        target,
+        propertyName,
+      );
+
+      if (extensionCallable is ExtensionMemberCallable &&
+          extensionCallable.isGetter) {
+        Logger.debug(
+          "[PropertyAccess] Found extension getter '$propertyName'. Calling...",
+        );
+        // Prepend the target instance to the positional arguments for the extension call
+        final extensionPositionalArgs = [
+          target,
+        ]; // Getters take no explicit args
+        try {
+          // Call the extension getter
+          return extensionCallable.call(this, extensionPositionalArgs, {});
+        } on ReturnException catch (e) {
+          return e.value;
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Error executing extension getter '$propertyName': $e",
+          );
+        }
+      } else {
+        // GEN-C3c: Universal Object-member fallback for arbitrary native
+        // targets. Every Dart Object has `toString`, `hashCode`, and
+        // `runtimeType`; these must always resolve regardless of whether the
+        // runtime type is bridged or not. Mirrors the BridgedInstance branch
+        // at GEN-107 above and the Callable branch at ENG-006. `target` is
+        // non-null here — the early-return at the top of visitPropertyAccess
+        // handles the null-receiver case.
+        switch (propertyName) {
+          case 'hashCode':
+            return target.hashCode;
+          case 'runtimeType':
+            return target.runtimeType;
+          case 'toString':
+            return NativeFunction(
+              (visitor, args, namedArgs, typeArgs) => target.toString(),
+              arity: 0,
+              name: 'toString',
+            );
+        }
+
+        // No extension getter found either, rethrow the original stdlib error
+        Logger.debug(
+          "[PropertyAccess] Extension getter '$propertyName' not found. Rethrowing original error.",
+        );
+        throw UndefinedMemberD4rtException(
+          "Undefined property or method '$propertyName' on ${target.runtimeType}."
+          '${unbridgedNativeClause(target)}',
+          memberName: propertyName,
+          receiver: target,
+        );
+      }
+    }
+  }
+
+  String stringify(Object? value) {
+    if (value == null) return 'null';
+    if (value is bool) return value.toString();
+    // The three interpreted values that can carry a script `toString` override.
+    //
+    // SCE116 added the second and third. Without them an enum value or an
+    // extension-type instance would still render correctly — `toString()` on
+    // those types dispatches too — but through the HOST-facing path, which
+    // degrades instead of throwing. Interpolation inside a script must keep
+    // Dart's semantics, so it calls the strict form here; see
+    // [renderInterpretedToString] for the split and why it exists.
+    final InterpretedFunction? override = switch (value) {
+      InterpretedInstance() => value.klass.findInstanceMethod('toString'),
+      InterpretedEnumValue() => value.parentEnum.findInstanceMethod('toString'),
+      InterpretedExtensionTypeInstance() =>
+        value.extensionType.methods['toString'],
+      _ => null,
+    };
+    if (override != null) {
+      final result = callInterpretedToString(
+        override,
+        value as RuntimeValue,
+        this,
+      );
+      if (result is String) return result;
+      if (result == null) return 'null';
+      return result.toString();
+    }
+    return value.toString();
+  }
+
+  @override
+  Object? visitIfStatement(IfStatement node) {
+    // Evaluate the expression
+    final expressionValue = node.expression.accept<Object?>(this);
+
+    // If the evaluation returns an AsyncSuspensionRequest, return it immediately
+    if (expressionValue is AsyncSuspensionRequest) {
+      Logger.debug(
+        "[IfStatement] Expression suspended (AsyncSuspensionRequest). Propagating.",
+      );
+      return expressionValue;
+    }
+
+    // Check if this is an if-case statement (pattern matching)
+    final caseClause = node.caseClause;
+    if (caseClause != null) {
+      // This is an if-case statement: if (expr case Pattern when guard) { ... }
+      final pattern = caseClause.guardedPattern.pattern;
+      final guard = caseClause.guardedPattern.whenClause?.expression;
+
+      // Create a temporary environment for pattern variable bindings
+      final caseEnvironment = Environment(enclosing: environment);
+
+      try {
+        // Attempt to match the pattern against the expression value
+        _matchAndBind(pattern, expressionValue, caseEnvironment);
+        Logger.debug(
+          "[IfStatement] Pattern ${pattern.runtimeType} matched value ${expressionValue?.runtimeType}",
+        );
+
+        // Pattern matched, now check the guard (if it exists)
+        bool guardPassed = true;
+        if (guard != null) {
+          final previousVisitorEnv = environment;
+          try {
+            environment = caseEnvironment; // Evaluate guard in case scope
+            final guardResult = guard.accept<Object?>(this);
+            if (guardResult is! bool) {
+              throw RuntimeD4rtException(
+                "If-case 'when' clause must evaluate to a boolean.",
+              );
+            }
+            guardPassed = guardResult;
+            Logger.debug("[IfStatement] Guard evaluated to: $guardPassed");
+          } finally {
+            environment = previousVisitorEnv;
+          }
+        }
+
+        // If pattern matched and guard passed, execute thenStatement
+        if (guardPassed) {
+          final previousVisitorEnv = environment;
+          try {
+            environment = caseEnvironment; // Execute body in case scope
+            node.thenStatement.accept<Object?>(this);
+          } finally {
+            environment = previousVisitorEnv;
+          }
+        } else if (node.elseStatement != null) {
+          // Guard failed, execute elseStatement
+          node.elseStatement!.accept<Object?>(this);
+        }
+      } on PatternMatchD4rtException {
+        // Pattern didn't match, execute elseStatement if present
+        Logger.debug(
+          "[IfStatement] Pattern ${pattern.runtimeType} did not match. Executing else if present.",
+        );
+        if (node.elseStatement != null) {
+          node.elseStatement!.accept<Object?>(this);
+        }
+      }
+
+      return null;
+    }
+
+    // Regular boolean condition if statement
+    bool conditionResult;
+    final bridgedInstance = toBridgedInstance(expressionValue);
+    if (expressionValue is bool) {
+      conditionResult = expressionValue;
+    } else if (bridgedInstance.$2 && bridgedInstance.$1?.nativeObject is bool) {
+      conditionResult = bridgedInstance.$1!.nativeObject as bool;
+    } else {
+      throw RuntimeD4rtException(
+        "The condition of an 'if' must be a boolean, but was ${expressionValue?.runtimeType}.",
+      );
+    }
+
+    if (conditionResult) {
+      node.thenStatement.accept<Object?>(this);
+    } else if (node.elseStatement != null) {
+      node.elseStatement!.accept<Object?>(this);
+    }
+
+    return null; // The If instruction normally ends with null
+  }
+
+  @override
+  Object? visitWhileStatement(WhileStatement node) {
+    final labels = _labelsOf(node);
+    while (true) {
+      // Handle condition being BridgedInstance<bool>
+      final conditionValue = node.condition.accept<Object?>(this);
+      bool conditionResult;
+      final bridgedInstance = toBridgedInstance(conditionValue);
+      if (conditionValue is bool) {
+        conditionResult = conditionValue;
+      } else if (bridgedInstance.$2 &&
+          bridgedInstance.$1?.nativeObject is bool) {
+        conditionResult = bridgedInstance.$1!.nativeObject as bool;
+      } else {
+        throw RuntimeD4rtException(
+          "The condition of a 'while' loop must be a boolean, but was ${conditionValue?.runtimeType}.",
+        );
+      }
+
+      if (!conditionResult) {
+        break;
+      }
+
+      try {
+        // Condition is true, execute the body
+        node.body.accept<Object?>(this);
+      } on BreakException catch (e) {
+        Logger.debug(
+          "[While] Caught BreakException (label: ${e.label}) with labels: $labels",
+        );
+        if (e.label == null || labels.contains(e.label)) {
+          // Unlabeled break OR labeled break targeting this loop.
+          Logger.debug("[While] Breaking loop.");
+          break; // Exit the while loop
+        } else {
+          // Labeled break targeting an outer construct.
+          Logger.debug("[While] Rethrowing outer break...");
+          rethrow;
+        }
+      } on ContinueException catch (e) {
+        Logger.debug(
+          "[While] Caught ContinueException (label: ${e.label}) with labels: $labels",
+        );
+        if (e.label == null || labels.contains(e.label)) {
+          // Unlabeled continue OR labeled continue targeting this loop.
+          Logger.debug("[While] Continuing loop.");
+          continue; // Skip to the next iteration
+        } else {
+          // Labeled continue targeting an outer loop.
+          Logger.debug("[While] Rethrowing outer continue...");
+          rethrow;
+        }
+      }
+      // Other exceptions will propagate up
+    }
+    return null;
+  }
+
+  @override
+  Object? visitDoStatement(DoStatement node) {
+    final labels = _labelsOf(node);
+    do {
+      try {
+        // Execute the body first
+        node.body.accept<Object?>(this);
+      } on BreakException catch (e) {
+        Logger.debug(
+          "[DoWhile] Caught BreakException (label: ${e.label}) with labels: $labels",
+        );
+        if (e.label == null || labels.contains(e.label)) {
+          Logger.debug("[DoWhile] Breaking loop.");
+          break; // Exit the do-while loop
+        } else {
+          Logger.debug("[DoWhile] Rethrowing outer break...");
+          rethrow;
+        }
+      } on ContinueException catch (e) {
+        Logger.debug(
+          "[DoWhile] Caught ContinueException (label: ${e.label}) with labels: $labels",
+        );
+        if (e.label == null || labels.contains(e.label)) {
+          Logger.debug("[DoWhile] Continuing loop condition check.");
+          // For do-while, continue still needs to check the condition
+          // So we fall through to the condition check below
+        } else {
+          Logger.debug("[DoWhile] Rethrowing outer continue...");
+          rethrow;
+        }
+      }
+
+      // Then evaluate the condition
+      // Handle condition being BridgedInstance<bool>
+      final conditionValue = node.condition.accept<Object?>(this);
+      Logger.debug("[DoWhile] Condition value: $conditionValue");
+      bool conditionResult;
+      final bridgedInstance = toBridgedInstance(conditionValue);
+      Logger.debug("[DoWhile] Bridged instance: $bridgedInstance");
+      if (conditionValue is bool) {
+        conditionResult = conditionValue;
+      } else if (bridgedInstance.$2 &&
+          bridgedInstance.$1?.nativeObject is bool) {
+        conditionResult = bridgedInstance.$1!.nativeObject as bool;
+      } else {
+        throw RuntimeD4rtException(
+          "The condition of a 'do-while' loop must be a boolean, but was ${conditionValue?.runtimeType}.",
+        );
+      }
+
+      if (!conditionResult) {
+        break;
+      }
+    } while (true);
+
+    return null;
+  }
+
+  @override
+  Object? visitForStatement(ForStatement node) {
+    final labels = _labelsOf(node);
+    final loopParts = node.forLoopParts;
+
+    if (loopParts is ForPartsWithDeclarations) {
+      // Classic for loop: for (var i = 0; ... ; ...)
+      _executeClassicFor(
+        loopParts.variables,
+        loopParts.condition,
+        loopParts.updaters,
+        node.body,
+        labels,
+      );
+    } else if (loopParts is ForPartsWithExpression) {
+      // Classic for loop: for (i = 0; ... ; ...)
+      _executeClassicFor(
+        loopParts.initialization,
+        loopParts.condition,
+        loopParts.updaters,
+        node.body,
+        labels,
+      );
+    } else if (loopParts is ForEachPartsWithDeclaration) {
+      // For-in loop: for (var item in list) or await for (var item in stream)
+      if (node.awaitKeyword != null) {
+        // await for loop - expect Stream
+        return _executeAwaitForIn(
+          loopParts.loopVariable,
+          loopParts.iterable,
+          node.body,
+          labels,
+        );
+      } else {
+        // Regular for-in loop - expect Iterable
+        _executeForIn(
+          loopParts.loopVariable,
+          loopParts.iterable,
+          node.body,
+          labels,
+        );
+      }
+    } else if (loopParts is ForEachPartsWithIdentifier) {
+      // For-in loop: for (item in list) or await for (item in stream)
+      if (node.awaitKeyword != null) {
+        // await for loop - expect Stream
+        return _executeAwaitForIn(
+          loopParts.identifier,
+          loopParts.iterable,
+          node.body,
+          labels,
+        );
+      } else {
+        // Regular for-in loop - expect Iterable
+        _executeForIn(
+          loopParts.identifier,
+          loopParts.iterable,
+          node.body,
+          labels,
+        );
+      }
+    } else if (loopParts is ForEachPartsWithPattern) {
+      // Dart 3 record-pattern for-in:
+      //   for (final (int i, String label) in list.indexed) { ... }
+      _executeForInWithPattern(
+        loopParts.pattern,
+        loopParts.iterable,
+        node.body,
+        labels,
+      );
+    } else {
+      // Should not happen with valid Dart code
+      throw StateD4rtException(
+        'Unknown ForLoopParts type: ${loopParts.runtimeType}',
+      );
+    }
+
+    return null; // For loops don't produce a value
+  }
+
+  // Helper method to execute the logic of a classic for loop.
+  //
+  // T8/F5 — per-classic-for cache of "does the loop body / condition /
+  // updaters contain a FunctionExpression (closure)?", keyed by the body
+  // node's identity. The subtree walk runs once per for-statement, not per
+  // execution, so repeated executions of the same loop (e.g. a for-loop in a
+  // hot function) pay the scan only once.
+  final Expando<bool> _classicForHasClosure = Expando<bool>();
+
+  bool _subtreeContainsClosure(AstNode node) {
+    if (node is FunctionExpression) return true;
+    for (final child in node.childEntities) {
+      if (child is AstNode && _subtreeContainsClosure(child)) return true;
+    }
+    return false;
+  }
+
+  /// True when any closure may capture this classic-for's per-iteration loop
+  /// binding (closure present in the body, condition, or updaters). When
+  /// false, a single reused `Environment` is observably identical to a fresh
+  /// per-iteration one — letting us skip two `Environment` allocations per
+  /// iteration. Result is cached on the `body` node (one per for-statement).
+  bool _classicForCapturesClosure(
+    Expression? condition,
+    List<Expression>? updaters,
+    Statement body,
+  ) {
+    final cached = _classicForHasClosure[body];
+    if (cached != null) return cached;
+    var result = _subtreeContainsClosure(body);
+    if (!result && condition != null) {
+      result = _subtreeContainsClosure(condition);
+    }
+    if (!result && updaters != null) {
+      for (final u in updaters) {
+        if (_subtreeContainsClosure(u)) {
+          result = true;
+          break;
+        }
+      }
+    }
+    _classicForHasClosure[body] = result;
+    return result;
+  }
+
+  /// Evaluate a `for`-loop condition to a `bool`, unwrapping a bridged bool.
+  bool _evalForCondition(Expression condition) {
+    final evalResult = condition.accept<Object?>(this);
+    if (evalResult is bool) return evalResult;
+    final bridgedInstance = toBridgedInstance(evalResult);
+    if (bridgedInstance.$2 && bridgedInstance.$1?.nativeObject is bool) {
+      return bridgedInstance.$1!.nativeObject as bool;
+    }
+    throw RuntimeD4rtException(
+      "The condition of a 'for' loop must be a boolean, but was ${evalResult?.runtimeType}.",
+    );
+  }
+
+  // GEN-111 — per-iteration scope. Each iteration of a classic
+  // `for (var i = 0; …; …)` introduces a fresh binding of every loop
+  // variable (Dart spec). Closures created in the body must capture
+  // that per-iteration binding so calling them later returns the
+  // iteration's value rather than the post-loop one. See the matching
+  // fix in the collection-for branch in `_processCollectionElement`.
+  void _executeClassicFor(
+    AstNode? initialization,
+    Expression? condition,
+    List<Expression>? updaters,
+    Statement body,
+    Set<String> labels,
+  ) {
+    final outerEnv = environment;
+
+    // Collect names of variables declared in `initialization` so we can
+    // re-seed each iteration's fresh env.
+    final loopVarNames = <String>[];
+    if (initialization is VariableDeclarationList) {
+      for (final v in initialization.variables) {
+        loopVarNames.add(v.name.lexeme);
+      }
+    }
+
+    // Resolve initial values once via a scratch env.
+    final scratchEnv = Environment(enclosing: outerEnv);
+    environment = scratchEnv;
+    try {
+      if (initialization != null) {
+        initialization.accept<Object?>(this);
+      }
+    } finally {
+      environment = outerEnv;
+    }
+    final currentValues = <String, Object?>{
+      for (final name in loopVarNames) name: scratchEnv.get(name),
+    };
+
+    // T8/F5 fast path — no closure can capture the loop binding, so reuse a
+    // single environment across all iterations instead of allocating a fresh
+    // `iterEnv` + `updateEnv` per iteration.
+    if (!_classicForCapturesClosure(condition, updaters, body)) {
+      final loopEnv = Environment(enclosing: outerEnv);
+      for (final name in loopVarNames) {
+        loopEnv.define(name, currentValues[name]);
+      }
+      environment = loopEnv;
+      try {
+        while (true) {
+          if (condition != null && !_evalForCondition(condition)) break;
+
+          try {
+            body.accept<Object?>(this);
+          } on BreakException catch (e) {
+            if (e.label == null || labels.contains(e.label)) {
+              break;
+            }
+            rethrow;
+          } on ContinueException catch (e) {
+            if (e.label != null && !labels.contains(e.label)) {
+              rethrow;
+            }
+            // Fall through to updaters.
+          }
+
+          if (updaters != null && updaters.isNotEmpty) {
+            try {
+              for (final updater in updaters) {
+                updater.accept<Object?>(this);
+              }
+            } on BreakException {
+              break;
+            }
+          }
+        }
+      } finally {
+        environment = outerEnv;
+      }
+      return;
+    }
+
+    try {
+      while (true) {
+        // Fresh env per iteration; closures in the body capture this.
+        final iterEnv = Environment(enclosing: outerEnv);
+        for (final name in loopVarNames) {
+          iterEnv.define(name, currentValues[name]);
+        }
+        environment = iterEnv;
+
+        bool conditionResult = true;
+        if (condition != null) {
+          conditionResult = _evalForCondition(condition);
+        }
+        if (!conditionResult) break;
+
+        // 3.b Execute body
+        try {
+          body.accept<Object?>(this);
+        } on BreakException catch (e) {
+          Logger.debug(
+            "[For] Caught BreakException (label: ${e.label}) with labels: $labels",
+          );
+          if (e.label == null || labels.contains(e.label)) {
+            Logger.debug("[For] Breaking loop.");
+            break;
+          } else {
+            Logger.debug("[For] Rethrowing outer break...");
+            rethrow;
+          }
+        } on ContinueException catch (e) {
+          Logger.debug(
+            "[For] Caught ContinueException (label: ${e.label}) with labels: $labels",
+          );
+          if (e.label == null || labels.contains(e.label)) {
+            Logger.debug("[For] Continuing to updaters.");
+            // Fall through to the updater section below.
+          } else {
+            Logger.debug("[For] Rethrowing outer continue...");
+            rethrow;
+          }
+        }
+
+        // Snapshot the iterEnv values (so a body-side mutation like
+        // `i = 10` is respected by the updater).
+        for (final name in loopVarNames) {
+          currentValues[name] = iterEnv.get(name);
+        }
+
+        // 3.c Updaters run in a separate env so iterEnv stays intact
+        // for any closure that captured it.
+        if (updaters != null && updaters.isNotEmpty) {
+          final updateEnv = Environment(enclosing: outerEnv);
+          for (final name in loopVarNames) {
+            updateEnv.define(name, currentValues[name]);
+          }
+          environment = updateEnv;
+          try {
+            for (final updater in updaters) {
+              updater.accept<Object?>(this);
+            }
+          } on BreakException {
+            break;
+          }
+          for (final name in loopVarNames) {
+            currentValues[name] = updateEnv.get(name);
+          }
+        }
+      }
+    } finally {
+      environment = outerEnv;
+    }
+  }
+
+  /// SCD63: the per-element check a typed for-each loop variable needs, or null
+  /// when the loop needs none — resolved ONCE, before iterating.
+  ///
+  /// A typed for-each variable used to bind whatever the iterable produced:
+  /// `for (final int x in [1, 'two', 3])` ran its body with a String in a
+  /// variable its own declaration rules out, and the body then computed a wrong
+  /// value rather than failing — `x + 1` concatenated to `'two1'`. Real Dart
+  /// raises `TypeError` on the offending element, after the earlier iterations
+  /// have run, which is what [ResolvedBinding.bind] reproduces.
+  ///
+  /// The check is a BINDING check, deliberately not this visitor's own
+  /// `_valueHasType`. `is` is a question, and a question must answer "no" to a
+  /// type it cannot resolve; a binding check must wave that same type through,
+  /// and it widens an `int` to a `double` where `is` must not. Using the `is`
+  /// predicate here would reject `for (final double d in [1, 2.5])`, which real
+  /// Dart accepts, and would turn a for-in over a type from an unbridged
+  /// library into a lookup failure.
+  ///
+  /// [InterpretedFunction.resolveForEachBinding] owns the rule; the async state
+  /// machine's and sync generator's own for-each paths share it, because
+  /// whether a given loop runs on this path or on one of theirs depends on
+  /// nothing more visible than whether its enclosing function is `async`.
+  ResolvedBinding? _forEachBinding(AstNode? loopVariable) =>
+      InterpretedFunction.resolveForEachBinding(environment, loopVariable);
+
+  // Helper method to execute the logic of a for-in loop (simplified)
+  void _executeForIn(
+    AstNode loopVariableOrIdentifier,
+    Expression iterableExpression,
+    Statement body,
+    Set<String> labels,
+  ) {
+    final expressionValue = iterableExpression.accept<Object?>(this);
+
+    // Handle iterable being BridgedInstance<Iterable>
+    Object? iterableValue;
+    if (toBridgedInstance(expressionValue).$2) {
+      final bridgedInstance = toBridgedInstance(expressionValue).$1!;
+      if (bridgedInstance.nativeObject is Iterable) {
+        iterableValue = bridgedInstance.nativeObject;
+      } else {
+        throw RuntimeD4rtException(
+          'Value used in for-in loop must be an Iterable, but got BridgedInstance containing ${bridgedInstance.nativeObject.runtimeType}',
+        );
+      }
+    } else if (expressionValue is Iterable) {
+      iterableValue = expressionValue;
+    } else {
+      throw RuntimeD4rtException(
+        'Value used in for-in loop must be an Iterable, but got ${expressionValue?.runtimeType}',
+      );
+    }
+
+    if (iterableValue is Iterable) {
+      // Check the unwrapped iterableValue
+      final loopEnvironment = Environment(enclosing: environment);
+      final previousEnvironment = environment;
+      environment = loopEnvironment;
+
+      try {
+        String variableName;
+        if (loopVariableOrIdentifier is DeclaredIdentifier) {
+          variableName = loopVariableOrIdentifier.name.lexeme;
+          environment.define(variableName, null); // Define before loop
+        } else if (loopVariableOrIdentifier is SimpleIdentifier) {
+          variableName = loopVariableOrIdentifier.name;
+          try {
+            environment.get(variableName); // Check existence
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Variable '$variableName' for for-in loop is not defined.",
+            );
+          }
+        } else {
+          throw StateD4rtException(
+            'Unexpected for-in loop variable type: ${loopVariableOrIdentifier.runtimeType}',
+          );
+        }
+
+        final binding = _forEachBinding(loopVariableOrIdentifier);
+
+        // Iterate over the native list
+        for (final element in iterableValue) {
+          // Assign current element to the loop variable
+          environment.assign(
+            variableName,
+            binding == null ? element : binding.bind(environment, element),
+          );
+
+          // Execute the body
+          try {
+            body.accept<Object?>(this);
+          } on BreakException catch (e) {
+            Logger.debug(
+              "[ForIn] Caught BreakException (label: ${e.label}) with labels: $labels",
+            );
+            if (e.label == null || labels.contains(e.label)) {
+              Logger.debug("[ForIn] Breaking loop.");
+              break; // Exit the for-in loop
+            } else {
+              Logger.debug("[ForIn] Rethrowing outer break...");
+              rethrow;
+            }
+          } on ContinueException catch (e) {
+            Logger.debug(
+              "[ForIn] Caught ContinueException (label: ${e.label}) with labels: $labels",
+            );
+            if (e.label == null || labels.contains(e.label)) {
+              Logger.debug("[ForIn] Continuing loop.");
+              continue; // Go to the next element
+            } else {
+              Logger.debug("[ForIn] Rethrowing outer continue...");
+              rethrow;
+            }
+          }
+        }
+      } finally {
+        // Restore previous environment
+        environment = previousEnvironment;
+      }
+    } else {
+      // Should not happen after the check above
+      throw StateD4rtException(
+        'Internal error: Expected Iterable but got ${iterableValue.runtimeType}',
+      );
+    }
+  }
+
+  // Helper: execute `for (final/var <pattern> in <iterable>) <body>`
+  // The pattern is destructured via _matchAndBind on each iteration, binding
+  // its named captures into a fresh per-iteration environment so break/continue
+  // behave identically to the other for-in variants. Mirrors
+  // tom_d4rt_ast/InterpreterVisitor._executeForInWithPattern.
+  void _executeForInWithPattern(
+    DartPattern pattern,
+    Expression iterableExpression,
+    Statement body,
+    Set<String> labels,
+  ) {
+    final expressionValue = iterableExpression.accept<Object?>(this);
+
+    Iterable<Object?> iterableValue;
+    if (expressionValue is Iterable) {
+      iterableValue = expressionValue;
+    } else if (toBridgedInstance(expressionValue).$2) {
+      final bridgedInstance = toBridgedInstance(expressionValue).$1!;
+      if (bridgedInstance.nativeObject is Iterable) {
+        iterableValue = bridgedInstance.nativeObject as Iterable;
+      } else {
+        throw RuntimeD4rtException(
+          'Value used in for-in loop must be an Iterable, but got BridgedInstance containing ${bridgedInstance.nativeObject.runtimeType}',
+        );
+      }
+    } else {
+      throw RuntimeD4rtException(
+        'Value used in for-in loop must be an Iterable, but got ${expressionValue?.runtimeType}',
+      );
+    }
+
+    final previousEnvironment = environment;
+    try {
+      for (final element in iterableValue) {
+        // Fresh environment per iteration so pattern-declared variables are
+        // scoped to a single trip through the body.
+        final iterationEnv = Environment(enclosing: previousEnvironment);
+        environment = iterationEnv;
+        try {
+          _matchAndBind(pattern, element, iterationEnv);
+          body.accept<Object?>(this);
+        } on BreakException catch (e) {
+          Logger.debug(
+            "[ForInPattern] Caught BreakException (label: ${e.label}) with labels: $labels",
+          );
+          if (e.label == null || labels.contains(e.label)) {
+            break;
+          } else {
+            rethrow;
+          }
+        } on ContinueException catch (e) {
+          Logger.debug(
+            "[ForInPattern] Caught ContinueException (label: ${e.label}) with labels: $labels",
+          );
+          if (e.label == null || labels.contains(e.label)) {
+            continue;
+          } else {
+            rethrow;
+          }
+        }
+      }
+    } finally {
+      environment = previousEnvironment;
+    }
+  }
+
+  // Helper method to execute the logic of an await for-in loop (for streams)
+  Object? _executeAwaitForIn(
+    AstNode loopVariableOrIdentifier,
+    Expression iterableExpression,
+    Statement body,
+    Set<String> labels,
+  ) {
+    final expressionValue = iterableExpression.accept<Object?>(this);
+
+    // Handle stream being BridgedInstance<Stream>
+    Object? streamValue;
+    if (toBridgedInstance(expressionValue).$2) {
+      final bridgedInstance = toBridgedInstance(expressionValue).$1!;
+      if (bridgedInstance.nativeObject is Stream) {
+        streamValue = bridgedInstance.nativeObject;
+      } else {
+        throw RuntimeD4rtException(
+          'Value used in await for-in loop must be a Stream, but got BridgedInstance containing ${bridgedInstance.nativeObject.runtimeType}',
+        );
+      }
+    } else if (expressionValue is Stream) {
+      streamValue = expressionValue;
+    } else {
+      throw RuntimeD4rtException(
+        'Value used in await for-in loop must be a Stream, but got ${expressionValue?.runtimeType}',
+      );
+    }
+
+    if (streamValue is Stream) {
+      // Create a suspension request for converting the stream to a list first
+      if (currentAsyncState == null) {
+        throw RuntimeD4rtException(
+          "await for statement can only be used inside async functions",
+        );
+      }
+
+      // Convert the stream to a list first, then process it as a regular for-in loop
+      return AsyncSuspensionRequest(
+        _convertStreamAndProcessForIn(
+          loopVariableOrIdentifier,
+          streamValue,
+          body,
+          labels,
+        ),
+        currentAsyncState!,
+      );
+    } else {
+      // Should not happen after the check above
+      throw StateD4rtException(
+        'Internal error: Expected Stream but got ${streamValue.runtimeType}',
+      );
+    }
+  }
+
+  // Convert stream to list and then process as regular for-in loop
+  Future<Object?> _convertStreamAndProcessForIn(
+    AstNode loopVariableOrIdentifier,
+    Stream<Object?> stream,
+    Statement body,
+    Set<String> labels,
+  ) async {
+    // Convert stream to list
+    final List<Object?> items = await stream.toList();
+
+    // Now process as a regular for-in loop with the list
+    _executeForInWithItems(loopVariableOrIdentifier, items, body, labels);
+
+    return null; // await for loops don't produce a value
+  }
+
+  // Execute for-in loop with a list of items (reused logic from _executeForIn)
+  void _executeForInWithItems(
+    AstNode loopVariableOrIdentifier,
+    List<Object?> items,
+    Statement body,
+    Set<String> labels,
+  ) {
+    // G-DOV-12 FIX: Create a dedicated loop environment (like _executeForIn does)
+    // to ensure the loop variable is properly scoped and accessible.
+    final loopEnvironment = Environment(enclosing: environment);
+    final previousEnvironment = environment;
+    environment = loopEnvironment;
+    try {
+      String variableName;
+      if (loopVariableOrIdentifier is DeclaredIdentifier) {
+        variableName = loopVariableOrIdentifier.name.lexeme;
+        // Define the loop variable in the loop environment
+        environment.define(variableName, null);
+      } else if (loopVariableOrIdentifier is SimpleIdentifier) {
+        variableName = loopVariableOrIdentifier.name;
+        try {
+          environment.get(variableName); // Check existence in enclosing scope
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Variable '$variableName' for for-in loop is not defined.",
+          );
+        }
+      } else {
+        throw StateD4rtException(
+          'Unexpected for-in loop variable type: ${loopVariableOrIdentifier.runtimeType}',
+        );
+      }
+
+      final binding = _forEachBinding(loopVariableOrIdentifier);
+
+      // Iterate over the items
+      for (final element in items) {
+        // Assign current element to the loop variable
+        environment.assign(
+          variableName,
+          binding == null ? element : binding.bind(environment, element),
+        );
+
+        // Execute the body
+        try {
+          body.accept<Object?>(this);
+        } on BreakException catch (e) {
+          Logger.debug(
+            "[AwaitForIn] Caught BreakException (label: ${e.label}) with labels: $labels",
+          );
+          if (e.label == null || labels.contains(e.label)) {
+            Logger.debug("[AwaitForIn] Breaking loop.");
+            break; // Exit the for-in loop
+          } else {
+            Logger.debug("[AwaitForIn] Rethrowing outer break...");
+            rethrow;
+          }
+        } on ContinueException catch (e) {
+          Logger.debug(
+            "[AwaitForIn] Caught ContinueException (label: ${e.label}) with labels: $labels",
+          );
+          if (e.label == null || labels.contains(e.label)) {
+            Logger.debug("[AwaitForIn] Continuing loop.");
+            continue; // Go to the next element
+          } else {
+            Logger.debug("[AwaitForIn] Rethrowing outer continue...");
+            rethrow;
+          }
+        }
+      }
+    } finally {
+      environment = previousEnvironment;
+    }
+  }
+
+  // Add handler for VariableDeclarationList used in ForPartsWithDeclarations
+  @override
+  Object? visitVariableDeclarationList(VariableDeclarationList node) {
+    // We need to ensure variables are defined in the current environment.
+    // visitVariableDeclaration is NOT automatically called for node.variables
+    // by the generalizing visitor when visiting the list itself.
+    for (final variable in node.variables) {
+      if (variable.name.lexeme == '_') {
+        // Evaluate initializer for potential side effects, but don't define
+        variable.initializer?.accept<Object?>(this);
+      } else {
+        // Check if this is a late variable
+        final isLate = node.lateKeyword != null;
+        final isFinal = node.keyword?.lexeme == 'final';
+        final variableName = variable.name.lexeme;
+
+        // S3c (plan_3 §4.6 / §9.3): a slotted local dual-writes into BOTH the
+        // frame's slot array and the name map [_values]. Resolved reads go
+        // through [Environment.getSlot] (see [visitSimpleIdentifier]) — the hot
+        // path that previously paid the per-level name hash — while name-based
+        // resolution paths the interpreter still uses for the SAME local (the
+        // function-invocation callee lookup `environment.get(name)` for
+        // tear-offs / bridged-static / extension-call values) keep working
+        // against [_values]. Full demotion out of [_values] is deferred until
+        // every name-read site is audited (plan_3 §11). `declSlot` is null for
+        // every non-slotted declaration → plain `define`.
+        final declSlot = declSlots[variable];
+        void def(Object? v) {
+          environment.define(variableName, v);
+          if (declSlot != null) {
+            environment.defineSlot(declSlot, variableName, v);
+          }
+        }
+
+        // SCE103: the fourth and last binding site. `int x = 'two';` bound the
+        // String; so did every later `x = 'two';`, and so did the for-each
+        // IDENTIFIER form `for (x in xs)`, which is an assignment to an
+        // already-declared variable and therefore the same job.
+        //
+        // Resolved ONCE per declaration and handed to the environment, because
+        // an assignment does not carry the annotation — the declaration is the
+        // only place the written type exists. `resolveBinding` returns null for
+        // everything it cannot answer confidently (unannotated, `dynamic`, a
+        // type parameter, an annotation that will not resolve), and a null
+        // binding is never recorded, so an untyped local costs one map probe at
+        // declaration and nothing afterwards.
+        final declaredBinding = InterpretedFunction.resolveBinding(
+          environment,
+          node.type,
+          describedAs: variableName,
+        );
+        // LATE IS OUT OF SCOPE, deliberately. A late declaration stores a
+        // `LateVariable` wrapper rather than the value, so the check here would
+        // reject the wrapper, and the moment the initializer actually runs is
+        // not an assignment this can see. Recording nothing leaves late locals
+        // exactly as permissive as they are today rather than half-checked.
+        if (declaredBinding != null && !isLate) {
+          environment.declareType(variableName, declaredBinding);
+        }
+
+        if (isLate) {
+          // Handle late variable
+          if (variable.initializer != null) {
+            // Late variable with lazy initializer
+            final lateVar = LateVariable(variableName, () {
+              // Create a closure that will evaluate the initializer when accessed
+              return variable.initializer!.accept<Object?>(this);
+            }, isFinal: isFinal);
+            def(lateVar);
+            Logger.debug(
+              "[VariableDeclList] Defined late variable '$variableName' with lazy initializer.",
+            );
+          } else {
+            // Late variable without initializer
+            final lateVar = LateVariable(variableName, null, isFinal: isFinal);
+            def(lateVar);
+            Logger.debug(
+              "[VariableDeclList] Defined late variable '$variableName' without initializer.",
+            );
+          }
+        } else {
+          // Regular (non-late) variable handling
+          Object? initValue;
+          Object? result; // Value returned by accept() (could be suspension)
+
+          if (variable.initializer != null) {
+            result = variable.initializer!.accept<Object?>(this);
+            if (result is AsyncSuspensionRequest) {
+              // Async initializer: Define as null for now, result holds suspension
+              Logger.debug(
+                "[VariableDeclList] Async init for '$variableName'. Defined as null.",
+              );
+              def(null);
+              // Propagate the suspension request.
+              // If there are multiple async inits, the LAST suspension request wins.
+            } else {
+              // Sync initializer: Use the computed value
+              // SCE103: checked HERE rather than inside `def`, because `def` is
+              // also the path for `int x;` and for an async initializer that
+              // has not produced its value yet — both of which define null, and
+              // neither of which is a write real Dart would reject. The
+              // declared type is still recorded for both, so the assignment
+              // that eventually supplies the value is held.
+              initValue = declaredBinding == null
+                  ? result
+                  : declaredBinding.bind(environment, result);
+              if (Logger.isDebug) {
+                Logger.debug(
+                  "[VariableDeclList] Sync init for '$variableName'. Defined as $initValue.",
+                );
+              }
+              def(initValue);
+            }
+          } else {
+            // No initializer: Define as null
+            Logger.debug(
+              "[VariableDeclList] No init for '$variableName'. Defined as null.",
+            );
+            def(null);
+            result = null; // No suspension
+          }
+
+          // If the result of the variable's init was a suspension, we need to return it
+          // to signal the state machine.
+          if (result is AsyncSuspensionRequest) {
+            // If any variable initialization caused suspension, return that suspension immediately.
+            // The state machine needs to handle this before processing subsequent variables.
+            Logger.debug(
+              "[VariableDeclList] Propagating suspension from initializer of '$variableName'.",
+            );
+            return result;
+          }
+        }
+      }
+    }
+    // If no suspension occurred (or only sync initializers for all variables)
+    return null; // Original behavior
+  }
+
+  @override
+  Object? visitBreakStatement(BreakStatement node) {
+    final label = node.label?.name;
+    Logger.debug(
+      "[BreakStatement] BREAKING: About to throw BreakException (label: $label). Current async state: ${currentAsyncState?.hashCode}",
+    );
+    Logger.debug(
+      "[BreakStatement] Stack trace for break: ${StackTrace.current}",
+    );
+    throw BreakException(label);
+  }
+
+  @override
+  Object? visitContinueStatement(ContinueStatement node) {
+    final label = node.label?.name;
+    Logger.debug(
+      "[ContinueStatement] Throwing ContinueException (label: $label)",
+    );
+    throw ContinueException(label);
+  }
+
+  @override
+  Object? visitYieldStatement(YieldStatement node) {
+    final value = node.expression.accept<Object?>(this);
+    Logger.debug(
+      "[YieldStatement] Yielding value: $value (star: ${node.star != null})",
+    );
+
+    // If we're in an async* generator (with real async state), create a suspension
+    if (currentAsyncState?.isGenerator == true) {
+      final controller = currentAsyncState!.generatorStreamController!;
+
+      final gate = currentAsyncState!.generatorGate;
+
+      // SCF4: a subscription cancelled while the body was elsewhere ends it at
+      // this yield, before the value is added.
+      if (gate != null && gate.cancelled) {
+        return AsyncSuspensionRequest(
+          Future<Object?>.error(const GeneratorCancelledSignal()),
+          currentAsyncState!,
+          isYieldSuspension: true,
+        );
+      }
+
+      if (node.star != null) {
+        // yield* - handle asynchronously
+        return AsyncSuspensionRequest(
+          _handleYieldStarAsync(value, controller, gate),
+          currentAsyncState!,
+          isYieldSuspension: true,
+        );
+      } else {
+        controller.add(value);
+        // SCF4: wait for the listener. The suspension used to be on an
+        // already-completed future, so the body ran on regardless of pauses
+        // and of cancellation.
+        return AsyncSuspensionRequest(
+          gate?.afterYield(controller) ?? Future<void>.value(),
+          currentAsyncState!,
+          isYieldSuspension: true,
+        );
+      }
+    }
+
+    // If we're in a sync* generator context, add directly to the values list
+    if (syncGeneratorValues != null) {
+      if (node.star != null) {
+        // yield* - expand iterable
+        if (value is Iterable) {
+          syncGeneratorValues!.addAll(value);
+        } else {
+          throw RuntimeD4rtException(
+            "yield* expression must be an Iterable, got ${value.runtimeType}",
+          );
+        }
+      } else {
+        syncGeneratorValues!.add(value);
+      }
+      return null; // Continue execution
+    }
+
+    // Lim-4/Bug-43 FIX: If we're in a lazy sync* context, throw suspension to pause
+    if (isLazySyncGeneratorContext) {
+      throw SyncGeneratorYieldSuspension(value, isYieldStar: node.star != null);
+    }
+
+    // Fallback for other contexts
+    return YieldValue(value, isYieldStar: node.star != null);
+  }
+
+  // Handle yield* in async generator context asynchronously
+  Future<Object?> _handleYieldStarAsync(
+    Object? value,
+    StreamController<Object?> controller, [
+    AsyncGeneratorGate? gate,
+  ]) async {
+    if (value is Stream) {
+      await for (final item in value) {
+        // SCF4: stop forwarding once the listener has gone; the next yield
+        // ends the body.
+        if (gate?.cancelled ?? false) break;
+        controller.add(item);
+      }
+    } else if (value is Iterable) {
+      for (final item in value) {
+        if (gate?.cancelled ?? false) break;
+        controller.add(item);
+      }
+    } else {
+      controller.addError(
+        RuntimeD4rtException(
+          "yield* expression must be a Stream or Iterable, got ${value.runtimeType}",
+        ),
+      );
+    }
+    return null;
+  }
+
+  @override
+  Object? visitListLiteral(ListLiteral node) {
+    final annotation =
+        node.typeArguments?.arguments.singleOrNull ??
+        _contextualListElementType(node);
+    if (annotation != null) {
+      final (expanded, scope, nullable) = _expandTypeAlias(
+        annotation,
+        environment,
+      );
+      final type = _resolveTypeAnnotationWithEnvironment(expanded, scope);
+      switch (type.name) {
+        case 'int':
+          return nullable
+              ? _evaluateListLiteral<int?>(node)
+              : _evaluateListLiteral<int>(node);
+        case 'double':
+          return nullable
+              ? _evaluateListLiteral<double?>(node)
+              : _evaluateListLiteral<double>(node);
+        case 'String':
+          return nullable
+              ? _evaluateListLiteral<String?>(node)
+              : _evaluateListLiteral<String>(node);
+        case 'bool':
+          return nullable
+              ? _evaluateListLiteral<bool?>(node)
+              : _evaluateListLiteral<bool>(node);
+        case 'num':
+          return nullable
+              ? _evaluateListLiteral<num?>(node)
+              : _evaluateListLiteral<num>(node);
+      }
+    }
+    return _evaluateListLiteral<Object?>(node);
+  }
+
+  TypeAnnotation? _contextualListElementType(ListLiteral node) {
+    AstNode expression = node;
+    while (expression.parent is ParenthesizedExpression) {
+      expression = expression.parent!;
+    }
+    final declaration = expression.parent;
+    if (declaration is! VariableDeclaration ||
+        !identical(declaration.initializer, expression)) {
+      return null;
+    }
+    final declarations = declaration.parent;
+    if (declarations is! VariableDeclarationList) return null;
+    final type = declarations.type;
+    if (type == null) return null;
+    final (expanded, scope, _) = _expandTypeAlias(type, environment);
+    if (expanded is! NamedType ||
+        _resolveTypeAnnotationWithEnvironment(expanded, scope).name != 'List') {
+      return null;
+    }
+    return expanded.typeArguments?.arguments.singleOrNull;
+  }
+
+  Object? _evaluateListLiteral<T>(ListLiteral node) {
+    final list = <T>[];
+    for (final element in node.elements) {
+      // SCE80: an element that suspended abandons the whole literal. The state
+      // machine replays the expression once the future completes, and the list
+      // is rebuilt from the top with the resolved value in place — which is why
+      // the partially-filled `list` here can simply be dropped.
+      final suspension = _processCollectionElement(element, list, isMap: false);
+      if (suspension != null) return suspension;
+    }
+
+    // If this is a const list, return an unmodifiable version
+    if (node.constKeyword != null) {
+      return List<T>.unmodifiable(list);
+    }
+
+    return list;
+  }
+
+  bool _isContextualDoubleLiteral(Expression expression) {
+    if (expression is IntegerLiteral) return true;
+    if (expression is ParenthesizedExpression) {
+      return _isContextualDoubleLiteral(expression.expression);
+    }
+    return expression is PrefixExpression &&
+        expression.operator.type == TokenType.MINUS &&
+        _isContextualDoubleLiteral(expression.operand);
+  }
+
+  @override
+  Object? visitParenthesizedExpression(ParenthesizedExpression node) {
+    return node.expression.accept<Object?>(this);
+  }
+
+  @override
+  Object? visitCascadeExpression(CascadeExpression node) {
+    // SCE81. A section that awaits suspends the cascade, and the state machine
+    // replays the enclosing expression once the future completes. Dart
+    // evaluates the target ONCE and runs the sections in order for their side
+    // effects, so a bare replay would re-evaluate the target and re-run every
+    // earlier section: `sb..write('a')..write(await f())` would write `'a'`
+    // twice.
+    //
+    // So the target is memoised and completed sections are recorded, both
+    // keyed by node on the async state. That is what makes this option (b) —
+    // the target and the completed sections memoised the way `await` results
+    // already are — rather than a refusal.
+    //
+    // Null outside an async function: there is nothing to replay, so the
+    // bookkeeping is skipped entirely and this behaves exactly as before.
+    final asyncState = currentAsyncState;
+
+    // 1. Evaluate the target expression ONCE.
+    final Object? targetValue;
+    if (asyncState != null && asyncState.cascadeTargets.containsKey(node)) {
+      targetValue = asyncState.cascadeTargets[node];
+    } else {
+      final evaluated = node.target.accept<Object?>(this);
+      if (evaluated is AsyncSuspensionRequest) return evaluated;
+      targetValue = evaluated;
+      if (asyncState != null) asyncState.cascadeTargets[node] = targetValue;
+    }
+
+    // 2. Execute each cascade section ON THE ORIGINAL targetValue.
+    for (final section in node.cascadeSections) {
+      // Already run before an earlier suspension: its side effect has
+      // happened, and happening again is the defect this guards.
+      if (asyncState != null &&
+          asyncState.completedCascadeSections.contains(section)) {
+        continue;
+      }
+
+      // We need to manually handle each section type, forcing the target.
+      final Object? outcome;
+      if (section is MethodInvocation) {
+        outcome = _executeCascadeMethodInvocation(targetValue, section);
+      } else if (section is PropertyAccess) {
+        // Evaluate property access for potential side effects (getters), but discard result.
+        outcome = _executeCascadePropertyAccess(targetValue, section);
+      } else if (section is AssignmentExpression) {
+        outcome = _executeCascadeAssignment(targetValue, section);
+      } else if (section is IndexExpression) {
+        // Evaluate index expression for potential side effects (getters?), but discard result.
+        outcome = _executeCascadeIndexAccess(targetValue, section);
+      } else {
+        // Should not happen with valid cascade sections
+        throw UnimplementedD4rtException(
+          'Cascade section type not handled: ${section.runtimeType}',
+        );
+      }
+
+      // A section's VALUE is discarded by design — the cascade evaluates to
+      // its target — but a suspension is not a value.
+      if (outcome is AsyncSuspensionRequest) return outcome;
+      asyncState?.completedCascadeSections.add(section);
+    }
+
+    // 3. The cascade expression evaluates to the original target value.
+    //
+    // The memo is dropped here rather than at statement level, so a cascade
+    // inside a loop starts fresh on the next iteration instead of skipping
+    // every section it ran last time.
+    if (asyncState != null) {
+      asyncState.cascadeTargets.remove(node);
+      for (final section in node.cascadeSections) {
+        asyncState.completedCascadeSections.remove(section);
+      }
+    }
+    return targetValue;
+  }
+
+  /// Runs one `..method(...)` section, or returns the suspension it hit.
+  ///
+  /// SCE81: this returned `void` because a cascade section's VALUE is
+  /// deliberately discarded — the cascade evaluates to its target. But a
+  /// discarded value and an unfinished one are not the same thing, and
+  /// `_evaluateArguments` signals the second by returning the suspension
+  /// sentinel through a `as dynamic`. With nowhere to put it, the record
+  /// destructuring below failed and the script author saw an internal cast
+  /// error naming `AsyncSuspensionRequest` and the argument-record type.
+  Object? _executeCascadeMethodInvocation(
+    Object? targetValue,
+    MethodInvocation node,
+  ) {
+    if (targetValue == null) {
+      // Dart's .. operator throws on null, ?.. does nothing.
+      // Since we can't easily distinguish here, we mimic ?.. and do nothing.
+      Logger.debug(
+        "[Cascade] Target is null, skipping method invocation section.",
+      );
+      return null;
+    }
+
+    final methodName = node.methodName.name;
+    // The suspension-aware variant, as every other call site that can see one
+    // already uses.
+    final evaluated = _evaluateArgumentsAsync(node.argumentList);
+    if (evaluated is AsyncSuspensionRequest) return evaluated;
+    final (positionalArgs, namedArgs) =
+        evaluated as (List<Object?>, Map<String, Object?>);
+    List<RuntimeType>? evaluatedTypeArguments;
+    final typeArgsNode = node.typeArguments;
+    if (typeArgsNode != null) {
+      evaluatedTypeArguments = typeArgsNode.arguments
+          .map((typeNode) => _resolveTypeAnnotation(typeNode))
+          .toList();
+    }
+
+    // Check if the method invocation has its own target (e.g., ..members.add('Alice'))
+    // In this case, node.target is PropertyAccess to 'members'
+    Object? actualTarget = targetValue;
+    if (node.target != null) {
+      // The method has a target (e.g., ..members.add(...)  where members is the target)
+      // We need to evaluate the target, but substitute the cascade target for CascadeExpression references
+      final nodeTarget = node.target!;
+      if (nodeTarget is PropertyAccess) {
+        // This is like ..members.add(...) - first get 'members' from cascade target
+        final propertyName = nodeTarget.propertyName.name;
+        if (targetValue is InterpretedInstance) {
+          actualTarget = targetValue.get(propertyName, visitor: this);
+        } else if (targetValue is Map) {
+          actualTarget = targetValue[propertyName];
+        } else if (toBridgedInstance(targetValue).$2) {
+          final bridgedInstance = toBridgedInstance(targetValue).$1!;
+          final getter = bridgedInstance.bridgedClass.findInstanceGetterAdapter(
+            propertyName,
+          );
+          if (getter != null) {
+            actualTarget = getter(this, bridgedInstance.nativeObject);
+          } else {
+            throw RuntimeD4rtException.resolutionFailure(
+              "Property '$propertyName' not found on ${bridgedInstance.bridgedClass.name} in cascade.",
+            );
+          }
+        } else {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Cannot access property '$propertyName' on ${targetValue.runtimeType} in cascade.",
+          );
+        }
+      } else if (nodeTarget is IndexExpression) {
+        // This is like ..[index].method(...)
+        final indexValue = nodeTarget.index.accept<Object?>(this);
+        if (targetValue is List && indexValue is int) {
+          actualTarget = targetValue[indexValue];
+        } else if (targetValue is Map) {
+          actualTarget = targetValue[indexValue];
+        } else {
+          throw RuntimeD4rtException(
+            "Index access not supported on ${targetValue.runtimeType} in cascade.",
+          );
+        }
+      } else {
+        // For other target types, evaluate normally
+        actualTarget = nodeTarget.accept<Object?>(this);
+      }
+    }
+
+    if (actualTarget == null) {
+      Logger.debug(
+        "[Cascade] Actual target is null after property resolution, skipping.",
+      );
+      return null;
+    }
+
+    // Resolve and call method ON actualTarget (not the original cascade target)
+    if (actualTarget is InterpretedInstance) {
+      final callee = actualTarget.get(methodName); // Gets bound method
+      if (callee is Callable) {
+        callee.call(this, positionalArgs, namedArgs, evaluatedTypeArguments);
+      } else {
+        throw RuntimeD4rtException(
+          "Member '$methodName' on interpreted instance is not callable in cascade.",
+        );
+      }
+    } else if (toBridgedInstance(actualTarget).$2) {
+      // Use bridged method lookup first
+      final bridgedInstance = toBridgedInstance(actualTarget).$1!;
+      final adapter = bridgedInstance.bridgedClass.findInstanceMethodAdapter(
+        methodName,
+      );
+      if (adapter != null) {
+        adapter(
+          this,
+          bridgedInstance.nativeObject,
+          positionalArgs,
+          namedArgs,
+          evaluatedTypeArguments,
+        );
+      } else {
+        throw RuntimeD4rtException.resolutionFailure(
+          "Bridged instance method '$methodName' not found in cascade.",
+        );
+      }
+    } else if (actualTarget is List) {
+      // Handle List methods directly for un-bridged lists (from property access)
+      _invokeListMethod(actualTarget, methodName, positionalArgs, namedArgs);
+    } else if (actualTarget is Map) {
+      // Handle Map methods directly
+      _invokeMapMethod(actualTarget, methodName, positionalArgs, namedArgs);
+    } else if (actualTarget is Set) {
+      // Handle Set methods directly
+      _invokeSetMethod(actualTarget, methodName, positionalArgs, namedArgs);
+    } else if (toBridgedInstance(actualTarget).$2) {
+      final bridgedInstance = toBridgedInstance(actualTarget).$1!;
+      final adapter = bridgedInstance.bridgedClass.findInstanceMethodAdapter(
+        methodName,
+      );
+      if (adapter != null) {
+        adapter(
+          this,
+          bridgedInstance.nativeObject,
+          positionalArgs,
+          namedArgs,
+          evaluatedTypeArguments,
+        );
+      } else {
+        throw RuntimeD4rtException.resolutionFailure(
+          "Bridged instance method '$methodName' not found in cascade.",
+        );
+      }
+    } else {
+      throw RuntimeD4rtException(
+        "Cannot invoke method '$methodName' on ${actualTarget.runtimeType} in cascade.",
+      );
+    }
+    // Ignore the return value of the method call in a cascade
+    return null;
+  }
+
+  /// Helper to invoke List methods directly
+  Object? _invokeListMethod(
+    List list,
+    String methodName,
+    List<Object?> positionalArgs,
+    Map<String, Object?> namedArgs,
+  ) {
+    switch (methodName) {
+      case 'add':
+        list.add(positionalArgs.first);
+        return null;
+      case 'addAll':
+        list.addAll(positionalArgs.first as Iterable);
+        return null;
+      case 'insert':
+        list.insert(positionalArgs[0] as int, positionalArgs[1]);
+        return null;
+      case 'remove':
+        return list.remove(positionalArgs.first);
+      case 'removeAt':
+        return list.removeAt(positionalArgs.first as int);
+      case 'clear':
+        list.clear();
+        return null;
+      case 'removeLast':
+        return list.removeLast();
+      case 'insertAll':
+        list.insertAll(positionalArgs[0] as int, positionalArgs[1] as Iterable);
+        return null;
+      default:
+        throw RuntimeD4rtException(
+          "List method '$methodName' not supported in cascade context.",
+        );
+    }
+  }
+
+  /// Helper to invoke Map methods directly
+  Object? _invokeMapMethod(
+    Map map,
+    String methodName,
+    List<Object?> positionalArgs,
+    Map<String, Object?> namedArgs,
+  ) {
+    switch (methodName) {
+      case 'addAll':
+        map.addAll(positionalArgs.first as Map);
+        return null;
+      case 'remove':
+        return map.remove(positionalArgs.first);
+      case 'clear':
+        map.clear();
+        return null;
+      case 'putIfAbsent':
+        return map.putIfAbsent(positionalArgs[0], () => positionalArgs[1]);
+      default:
+        throw RuntimeD4rtException(
+          "Map method '$methodName' not supported in cascade context.",
+        );
+    }
+  }
+
+  /// Helper to invoke Set methods directly
+  Object? _invokeSetMethod(
+    Set set,
+    String methodName,
+    List<Object?> positionalArgs,
+    Map<String, Object?> namedArgs,
+  ) {
+    switch (methodName) {
+      case 'add':
+        return set.add(positionalArgs.first);
+      case 'addAll':
+        set.addAll(positionalArgs.first as Iterable);
+        return null;
+      case 'remove':
+        return set.remove(positionalArgs.first);
+      case 'clear':
+        set.clear();
+        return null;
+      default:
+        throw RuntimeD4rtException(
+          "Set method '$methodName' not supported in cascade context.",
+        );
+    }
+  }
+
+  Object? _executeCascadePropertyAccess(
+    Object? targetValue,
+    PropertyAccess node,
+  ) {
+    if (targetValue == null) {
+      Logger.debug(
+        "[Cascade] Target is null, skipping property access section.",
+      );
+      return null;
+    }
+
+    final propertyName = node.propertyName.name;
+
+    // Cascade target unwrap.
+    //
+    // When the cascade target is a native proxy registered by
+    // `D4.registerInterfaceProxy` (e.g. `_InterpretedRenderBox` wrapping a
+    // script's subclass of `RenderBox`), member lookup must consult the
+    // embedded `InterpretedInstance` first — that's where the
+    // script-defined getters / setters live. The native proxy itself only
+    // exposes the bridged superclass surface. Without this unwrap, every
+    // `..userGetter` in a cascade on such a target throws
+    // "property '$propertyName' (getter) not found in cascade." even when
+    // the script declares the getter on its `RenderBox` subclass.
+    final interpreted = _cascadeInterpretedTarget(targetValue);
+
+    // Resolve property/getter ON targetValue
+    if (interpreted != null) {
+      final member = interpreted.get(propertyName);
+      if (member is InterpretedFunction && member.isGetter) {
+        return member.call(
+          this,
+          [],
+          {},
+        ); // Call getter, return its value (needed for assignment LHS)
+      } else if (member != null) {
+        return member; // Return field value (needed for assignment LHS)
+      }
+      // Member not found on the InterpretedInstance — fall through to the
+      // bridge path so bridged-superclass getters still resolve when a
+      // script reads `..hashCode` / `..size` / etc. on its subclass.
+    }
+    if (toBridgedInstance(targetValue).$2) {
+      final bridgedInstance = toBridgedInstance(targetValue).$1!;
+      final getter = bridgedInstance.bridgedClass.findInstanceGetterAdapter(
+        propertyName,
+      );
+      if (getter != null) {
+        return getter(this, bridgedInstance.nativeObject);
+      }
+      // If no getter, maybe it's a method to be used in assignment? Unlikely.
+      throw RuntimeD4rtException.resolutionFailure(
+        "Bridged instance property '$propertyName' (getter) not found in cascade.",
+      );
+    } else if (interpreted != null) {
+      // Pure InterpretedInstance miss — preserve the original behaviour of
+      // returning whatever `.get` returned (which is `null` for unknown
+      // properties; matches the legacy `else { return member; }` path).
+      return interpreted.get(propertyName);
+    } else {
+      throw RuntimeD4rtException.resolutionFailure(
+        "property '$propertyName' (getter) not found in cascade.",
+      );
+    }
+  }
+
+  /// If [targetValue] is an [InterpretedInstance] directly, returns it. If it
+  /// is a [D4InterpretedProxy] that wraps one (registered native proxy from
+  /// `D4.registerInterfaceProxy`), returns the wrapped instance. Returns
+  /// `null` otherwise — callers should fall through to the bridge path.
+  ///
+  /// Used by the cascade helpers so that `..userMember = …` / `..userMember`
+  /// in a cascade on a script-subclass of a bridged class (e.g. a script's
+  /// own `RenderBox` subclass, where the cascade target arrives via the
+  /// native `_InterpretedRenderBox` proxy) finds the script-defined
+  /// member on the embedded InterpretedClass.
+  InterpretedInstance? _cascadeInterpretedTarget(Object? targetValue) {
+    if (targetValue is InterpretedInstance) return targetValue;
+    if (targetValue is D4InterpretedProxy) {
+      final inner = targetValue.d4rtInstance;
+      if (inner is InterpretedInstance) return inner;
+    }
+    return null;
+  }
+
+  Object? _executeCascadeIndexAccess(
+    Object? targetValue,
+    IndexExpression node,
+  ) {
+    if (targetValue == null) {
+      Logger.debug("[Cascade] Target is null, skipping index access section.");
+      return null;
+    }
+
+    final indexValue = node.index.accept<Object?>(this);
+    // Perform index access ON targetValue
+    if (targetValue is List) {
+      // SCD93: the SDK decides — see `visitIndexExpression`.
+      return (targetValue as dynamic)[indexValue];
+    } else if (targetValue is Map) {
+      return targetValue[indexValue];
+    } else if (targetValue is String && indexValue is int) {
+      return targetValue[indexValue];
+    } else {
+      throw RuntimeD4rtException(
+        'Unsupported target for index access in cascade: ${targetValue.runtimeType}',
+      );
+    }
+    // Return the accessed value (needed for assignment LHS)
+  }
+
+  /// Runs one `..x = v` section, or returns the suspension it hit.
+  Object? _executeCascadeAssignment(
+    Object? targetValue,
+    AssignmentExpression node,
+  ) {
+    if (targetValue == null) {
+      Logger.debug("[Cascade] Target is null, skipping assignment section.");
+      return null;
+    }
+
+    final rhsValue = node.rightHandSide.accept<Object?>(this);
+    if (rhsValue is AsyncSuspensionRequest) return rhsValue;
+    final operatorType = node.operator.type;
+    final lhs = node.leftHandSide;
+
+    // Cascade target unwrap — see
+    // [_cascadeInterpretedTarget] for the rationale. When the cascade
+    // target is a registered native proxy (e.g. `_InterpretedRenderBox`
+    // wrapping a script's `RenderBox` subclass), the script-defined
+    // setters/getters live on the embedded `InterpretedInstance`, not on
+    // the native proxy's bridged class. Without this unwrap, every
+    // `..userSetter = …` on such a target throws
+    // "No setter '$propertyName' for assignment in cascade."
+    //
+    // Two sources of an InterpretedInstance member surface:
+    //   `interpreted`  — the wrapped instance for member lookup
+    //   `isProxyTarget` — true when the lookup miss should fall through
+    //                     to the bridged superclass; for a genuine
+    //                     `InterpretedInstance` we instead fall back to
+    //                     `.set()` (phantom-field semantics) to preserve
+    //                     the legacy behaviour.
+    final interpreted = _cascadeInterpretedTarget(targetValue);
+    final isProxyTarget =
+        interpreted != null && !identical(interpreted, targetValue);
+
+    if (lhs is SimpleIdentifier) {
+      // Property assignment: targetValue.propertyName op= rhsValue
+      final propertyName = lhs.name;
+      Object? newValue;
+      if (operatorType == TokenType.EQ) {
+        newValue = rhsValue;
+      } else {
+        // Compound assignment
+        Object? currentValue;
+        // Need to get the current value from the target — prefer the
+        // InterpretedInstance side (script-defined fields/getters), fall
+        // back to bridged-getter on miss.
+        var resolvedCurrent = false;
+        if (interpreted != null) {
+          final getter = interpreted.klass.findInstanceGetter(propertyName);
+          if (getter != null) {
+            currentValue = getter.bind(interpreted).call(this, [], {});
+            resolvedCurrent = true;
+          } else if (!isProxyTarget ||
+              interpreted.klass.getInstanceFieldNames().contains(
+                propertyName,
+              )) {
+            // For a genuine InterpretedInstance (or a proxy target whose
+            // interpreted class actually declares the field) mirror the
+            // pre-fix behaviour: read whatever `.get` returns.
+            currentValue = interpreted.get(propertyName);
+            resolvedCurrent = true;
+          }
+        }
+        if (!resolvedCurrent) {
+          if (toBridgedInstance(targetValue).$2) {
+            final bridgedInstance = toBridgedInstance(targetValue).$1!;
+            final getter = bridgedInstance.bridgedClass
+                .findInstanceGetterAdapter(propertyName);
+            if (getter == null) {
+              throw RuntimeD4rtException.resolutionFailure(
+                "No getter '$propertyName' for compound assignment in cascade.",
+              );
+            }
+            currentValue = getter(this, bridgedInstance.nativeObject);
+          } else {
+            throw RuntimeD4rtException(
+              "Cannot get property '$propertyName' for compound assignment on ${targetValue.runtimeType} in cascade.",
+            );
+          }
+        }
+        newValue = computeCompoundValue(currentValue, rhsValue, operatorType);
+      }
+
+      // Set the value on the target — InterpretedInstance side first (so
+      // script-defined setters win on subclasses), then bridge fallback.
+      var assigned = false;
+      if (interpreted != null) {
+        final setter = interpreted.klass.findInstanceSetter(propertyName);
+        if (setter != null) {
+          setter.bind(interpreted).call(this, [newValue], {});
+          assigned = true;
+        } else if (!isProxyTarget ||
+            interpreted.klass.getInstanceFieldNames().contains(propertyName)) {
+          // Legacy behaviour for genuine InterpretedInstance targets:
+          // direct field set even when no setter is declared (matches the
+          // pre-fix code that fell through unconditionally). For proxy-
+          // wrapped targets we skip this so the bridged setter still wins.
+          interpreted.set(propertyName, newValue, this);
+          assigned = true;
+        }
+      }
+      if (!assigned) {
+        if (toBridgedInstance(targetValue).$2) {
+          final bridgedInstance = toBridgedInstance(targetValue).$1!;
+          final setter = bridgedInstance.bridgedClass.findInstanceSetterAdapter(
+            propertyName,
+          );
+          if (setter == null) {
+            throw RuntimeD4rtException.resolutionFailure(
+              "No setter '$propertyName' for assignment in cascade.",
+            );
+          }
+          setter(this, bridgedInstance.nativeObject, newValue);
+        } else if (interpreted != null) {
+          // Proxy-target, no script setter, no bridged setter — final
+          // fallback to phantom-field write so scripts that just stash
+          // a value still work.
+          interpreted.set(propertyName, newValue, this);
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot set property '$propertyName' on ${targetValue.runtimeType} in cascade.",
+          );
+        }
+      }
+    } else if (lhs is IndexExpression) {
+      // Index assignment in cascade. The IndexExpression may target:
+      // 1. The cascade target directly: ..[index] = value (lhs.target is null or CascadeExpression)
+      // 2. A property on the cascade target: ..property[index] = value (lhs.target is PropertyAccess)
+      final indexValue = lhs.index.accept<Object?>(this);
+
+      // Bug-94 FIX: Resolve the actual indexable target. If the IndexExpression
+      // has an explicit target (e.g. PropertyAccess for ..headers['key']),
+      // resolve that property on the cascade target first.
+      Object? indexTarget = targetValue;
+      final lhsTarget = lhs.target;
+      if (lhsTarget != null && lhsTarget is PropertyAccess) {
+        final propName = lhsTarget.propertyName.name;
+        if (targetValue is InterpretedInstance) {
+          indexTarget = targetValue.get(propName);
+        } else if (toBridgedInstance(targetValue).$2) {
+          final bridgedInstance = toBridgedInstance(targetValue).$1!;
+          final getter = bridgedInstance.bridgedClass.findInstanceGetterAdapter(
+            propName,
+          );
+          if (getter != null) {
+            indexTarget = getter(this, bridgedInstance.nativeObject);
+          }
+        }
+      }
+
+      Object? newValue;
+
+      if (operatorType == TokenType.EQ) {
+        newValue = rhsValue;
+      } else {
+        // Compound assignment
+        Object? currentValue;
+        if (indexTarget is List) {
+          // SCD93: the SDK decides — see `visitIndexExpression`.
+          currentValue = (indexTarget as dynamic)[indexValue];
+        } else if (indexTarget is Map) {
+          currentValue = indexTarget[indexValue];
+        } else if (toBridgedInstance(indexTarget).$2) {
+          // C13: bridged operator[] for compound assignment in cascade
+          // (e.g. dart:foundation BitField<T>).
+          final bridgedInstance = toBridgedInstance(indexTarget).$1!;
+          final getAdapter = bridgedInstance.bridgedClass
+              .findInstanceMethodAdapter('[]');
+          if (getAdapter == null) {
+            throw RuntimeD4rtException(
+              "No operator '[]' on ${bridgedInstance.bridgedClass.name} "
+              "for compound index assignment in cascade.",
+            );
+          }
+          currentValue = getAdapter(
+            this,
+            bridgedInstance.nativeObject,
+            [indexValue],
+            {},
+            null,
+          );
+        } else {
+          throw RuntimeD4rtException(
+            "Compound index assignment target must be List or Map in cascade.",
+          );
+        }
+        newValue = computeCompoundValue(currentValue, rhsValue, operatorType);
+      }
+
+      // Set the value
+      if (indexTarget is List) {
+        // SCD93: the SDK decides — see `visitIndexExpression`.
+        (indexTarget as dynamic)[indexValue] = newValue;
+      } else if (indexTarget is Map) {
+        indexTarget[_unwrapHashKey(indexValue)] = newValue;
+      } else if (toBridgedInstance(indexTarget).$2) {
+        // C13: bridged operator[]= in cascade (e.g. dart:foundation
+        // BitField<T> used via `..[key] = value`).
+        final bridgedInstance = toBridgedInstance(indexTarget).$1!;
+        final setAdapter = bridgedInstance.bridgedClass
+            .findInstanceMethodAdapter('[]=');
+        if (setAdapter == null) {
+          throw RuntimeD4rtException(
+            "No operator '[]=' on ${bridgedInstance.bridgedClass.name} "
+            "for index assignment in cascade.",
+          );
+        }
+        setAdapter(
+          this,
+          bridgedInstance.nativeObject,
+          [_bridgeInterpreterValueToNative(indexValue), newValue],
+          {},
+          null,
+        );
+      } else {
+        throw RuntimeD4rtException(
+          "Index assignment target must be List or Map in cascade.",
+        );
+      }
+    } else if (lhs is PropertyAccess) {
+      // Cascade assignment like: target..property = value or target..property += value
+      // Note: targetValue is the original cascade target, NOT lhs.target
+      //
+      // Cascade target unwrap — same unwrap as the
+      // SimpleIdentifier branch above. The Dart analyzer wraps the LHS of
+      // a property-assignment cascade section in a PropertyAccess whose
+      // target is the implicit cascade reference; that's the common shape
+      // for `renderObject..hueShift = …`. See
+      // [_cascadeInterpretedTarget] for the rationale.
+      final interpretedP = _cascadeInterpretedTarget(targetValue);
+      final isProxyTargetP =
+          interpretedP != null && !identical(interpretedP, targetValue);
+      final propertyName = lhs.propertyName.name;
+      Object? newValue;
+
+      if (operatorType == TokenType.EQ) {
+        newValue = rhsValue; // Simple assignment
+      } else {
+        // Compound assignment
+        Object? currentValue;
+        var resolvedCurrent = false;
+        if (interpretedP != null) {
+          final getter = interpretedP.klass.findInstanceGetter(propertyName);
+          if (getter != null) {
+            currentValue = getter.bind(interpretedP).call(this, [], {});
+            resolvedCurrent = true;
+          } else if (!isProxyTargetP ||
+              interpretedP.klass.getInstanceFieldNames().contains(
+                propertyName,
+              )) {
+            currentValue = interpretedP.get(propertyName);
+            resolvedCurrent = true;
+          }
+        }
+        if (!resolvedCurrent) {
+          if (toBridgedInstance(targetValue).$2) {
+            final bridgedInstance = toBridgedInstance(targetValue).$1!;
+            final getter = bridgedInstance.bridgedClass
+                .findInstanceGetterAdapter(propertyName);
+            if (getter == null) {
+              throw RuntimeD4rtException.resolutionFailure(
+                "No getter '$propertyName' for compound assignment in cascade.",
+              );
+            }
+            currentValue = getter(this, bridgedInstance.nativeObject);
+          } else {
+            throw RuntimeD4rtException(
+              "Cannot get property '$propertyName' for compound assignment on ${targetValue.runtimeType} in cascade.",
+            );
+          }
+        }
+        newValue = computeCompoundValue(currentValue, rhsValue, operatorType);
+      }
+
+      // 3. Set the new value on targetValue using propertyName.
+      // InterpretedInstance side first, then bridge fallback.
+      var assigned = false;
+      if (interpretedP != null) {
+        final setter = interpretedP.klass.findInstanceSetter(propertyName);
+        if (setter != null) {
+          setter.bind(interpretedP).call(this, [newValue], {});
+          assigned = true;
+        } else if (!isProxyTargetP ||
+            interpretedP.klass.getInstanceFieldNames().contains(propertyName)) {
+          // Legacy direct-field behaviour for genuine InterpretedInstance.
+          interpretedP.set(propertyName, newValue, this);
+          assigned = true;
+        }
+      }
+      if (!assigned) {
+        if (toBridgedInstance(targetValue).$2) {
+          final bridgedInstance = toBridgedInstance(targetValue).$1!;
+          final setter = bridgedInstance.bridgedClass.findInstanceSetterAdapter(
+            propertyName,
+          );
+          if (setter == null) {
+            throw RuntimeD4rtException.resolutionFailure(
+              "No setter '$propertyName' for assignment in cascade.",
+            );
+          }
+          setter(this, bridgedInstance.nativeObject, newValue);
+        } else if (interpretedP != null) {
+          // Proxy-target with no script setter and no bridged setter —
+          // final phantom-field fallback.
+          interpretedP.set(propertyName, newValue, this);
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot set property '$propertyName' on ${targetValue.runtimeType} in cascade.",
+          );
+        }
+      }
+    } else {
+      throw UnimplementedD4rtException(
+        'Unsupported assignment LHS in cascade: ${lhs.runtimeType}',
+      );
+    }
+    // Assignment in cascade doesn't produce a value to be used further.
+    return null;
+  }
+
+  /// A bridged value used as a hash key is stored as its wrapped native.
+  ///
+  /// SCC32, generalizing RC-7. That rule already existed for
+  /// [BridgedEnumValue] and for exactly this reason; the same argument covers
+  /// every bridged wrapper, so this replaces the enum-only special case rather
+  /// than sitting beside it.
+  ///
+  /// Storing the native is what makes the two lookup spellings agree. d4rt
+  /// reaches a map by two different routes: `m[k]` passes `k` through
+  /// untouched, while `m.containsKey(k)` is a bridge method call whose
+  /// arguments are unwrapped on the way in. So the lookup key arrives as a
+  /// wrapper down one path and as a native down the other, and no equality
+  /// definition on the wrapper can satisfy both — Dart's hash lookup asks
+  /// `lookupKey == storedKey`, and when the lookup key is a bare native its own
+  /// `==` rejects a wrapper, which is not something this code can override.
+  /// Normalizing the *stored* key removes the choice: a native compares equal
+  /// to a native directly, and to a wrapper through
+  /// [BridgedInstance.operator ==].
+  ///
+  /// Only values that are already wrappers are unwrapped. `toBridgedInstance`
+  /// is deliberately not used here — it *wraps* bare natives rather than
+  /// reporting on them, so asking it would allocate a wrapper for every native
+  /// key just to take it apart again.
+  Object? _unwrapHashKey(Object? key) {
+    if (key is BridgedEnumValue) return key.nativeValue;
+    if (key is BridgedInstance) return key.nativeObject;
+    // SCD198: a bare CLASS NAME is a value too, and the same argument covers
+    // it. `<Type, T>{String: v}` stores the `BridgedClass` the name evaluates
+    // to; a lookup by `x.runtimeType` arrives as a native `Type`, and
+    // `Type.==` rejects a `BridgedClass` — the direction no code here can
+    // override. Storing the native `Type` is what makes `m[x.runtimeType]`
+    // and `m[String]` reach the same entry.
+    if (key is BridgedClass) return key.nativeType;
+    return key;
+  }
+
+  /// Adds [element] to [collection], or returns the suspension it hit.
+  ///
+  /// SCE80. This returned `void`, and so had no way to say "the element I was
+  /// evaluating has not finished". `await` inside a collection literal
+  /// therefore STORED the interpreter's own `AsyncSuspensionRequest` sentinel
+  /// as the element: `[await Future.value(1)]` evaluated to a list containing
+  /// one of those, silently, and the damage surfaced wherever the value was
+  /// next used. Only the spread case reported anything, and only because a
+  /// sentinel is not an `Iterable`.
+  ///
+  /// Returning `Object?` lets the suspension propagate the way it does through
+  /// every other visitor — there are about fifty `if (x is
+  /// AsyncSuspensionRequest) return x;` sites — so the state machine suspends,
+  /// and on replay the literal is rebuilt with the resolved value in place.
+  ///
+  /// Null means the element completed. A non-null result is always the
+  /// suspension, and every caller must propagate it.
+  Object? _processCollectionElement(
+    CollectionElement element,
+    Object collection, {
+    required bool isMap,
+  }) {
+    if (element is Expression) {
+      final value = element.accept<Object?>(this);
+      if (value is AsyncSuspensionRequest) return value;
+      if (isMap) {
+        throw RuntimeD4rtException(
+          "Expected a MapLiteralEntry ('key: value') but got an expression in map literal.",
+        );
+      } else if (collection is List) {
+        // A list is not hash-keyed, so its elements keep their representation:
+        // `contains` and `indexOf` reach the wrapper's own `==`, which now
+        // answers correctly on its own.
+        //
+        // A bare CLASS NAME is the exception (SCF40): it is a value, not a
+        // wrapper, and its one representation in any collection is the native
+        // `Type` — otherwise `<Type>{}..addAll([String])` copies a
+        // `BridgedClass` into a hash set, where a `runtimeType` lookup misses.
+        final contextualValue =
+            value is int &&
+                collection is List<double?> &&
+                _isContextualDoubleLiteral(element)
+            ? value.toDouble()
+            : value;
+        collection.add(
+          contextualValue is BridgedClass
+              ? contextualValue.nativeType
+              : contextualValue,
+        );
+      } else if (collection is Set) {
+        // A set element IS a hash key, so it normalizes like a map key.
+        collection.add(_unwrapHashKey(value));
+      }
+    } else if (element is MapLiteralEntry) {
+      if (!isMap) {
+        throw RuntimeD4rtException(
+          "Unexpected MapLiteralEntry ('key: value') in a non-map literal.",
+        );
+      }
+      if (collection is Map) {
+        // The raw key is checked BEFORE `_unwrapHashKey`: that helper
+        // normalises a value for hashing and would happily normalise the
+        // sentinel into a perfectly good map key.
+        final rawKey = element.key.accept<Object?>(this);
+        if (rawKey is AsyncSuspensionRequest) return rawKey;
+        final key = _unwrapHashKey(rawKey);
+        final value = element.value.accept<Object?>(this);
+        if (value is AsyncSuspensionRequest) return value;
+        collection[key] = value;
+      } else {
+        // Should not happen if isMap is true
+        throw StateD4rtException(
+          "Internal error: Expected Map for map literal.",
+        );
+      }
+    } else if (element is SpreadElement) {
+      final expressionValue = element.expression.accept<Object?>(this);
+      if (expressionValue is AsyncSuspensionRequest) return expressionValue;
+      if (element.isNullAware && expressionValue == null) {
+        // Null-aware spread with null value, do nothing
+        return null;
+      }
+      if (isMap) {
+        Map? mapToAdd;
+        final bridgedInstance = toBridgedInstance(expressionValue);
+        if (expressionValue is Map) {
+          mapToAdd = expressionValue;
+        } else if (bridgedInstance.$2 &&
+            bridgedInstance.$1?.nativeObject is Map) {
+          mapToAdd = bridgedInstance.$1!.nativeObject as Map;
+        } else {
+          throw RuntimeD4rtException(
+            'Spread element in a Map literal requires a Map, but got ${expressionValue?.runtimeType}',
+          );
+        }
+        (collection as Map).addAll(mapToAdd);
+      } else {
+        // List or Set Spread Logic...
+        Object? iterableToAdd;
+        if (toBridgedInstance(expressionValue).$2) {
+          final bridgedInstance = toBridgedInstance(expressionValue).$1!;
+          if (bridgedInstance.nativeObject is Iterable) {
+            iterableToAdd = bridgedInstance.nativeObject;
+          } else {
+            // BridgedInstance does not contain an Iterable
+            throw RuntimeD4rtException(
+              'Spread element in a ${collection is List ? 'List' : 'Set'} literal requires an Iterable, but got BridgedInstance containing ${bridgedInstance.nativeObject.runtimeType}',
+            );
+          }
+        } else if (expressionValue is Iterable) {
+          // Original check: If not BridgedInstance, check if it's directly Iterable
+          iterableToAdd = expressionValue;
+        } else {
+          // Neither BridgedInstance with Iterable nor direct Iterable
+          throw RuntimeD4rtException(
+            'Spread element in a ${collection is List ? 'List' : 'Set'} literal requires an Iterable, but got ${expressionValue?.runtimeType}',
+          );
+        }
+
+        // Now use iterableToAdd which is guaranteed to be Iterable
+        // Should always be non-null if no error thrown
+        if (collection is List) {
+          collection.addAll(iterableToAdd as Iterable); // Cast is safe here
+        } else if (collection is Set) {
+          collection.addAll(iterableToAdd as Iterable); // Cast is safe here
+        } else {
+          throw StateD4rtException(
+            "Internal error: Expected List or Set for non-map literal.",
+          );
+        }
+        // else case handled by error throws above
+      }
+    } else if (element is IfElement) {
+      final conditionValue = element.expression.accept<Object?>(this);
+      if (conditionValue is AsyncSuspensionRequest) return conditionValue;
+      bool conditionResult;
+      final bridgedInstance = toBridgedInstance(conditionValue);
+      if (conditionValue is bool) {
+        conditionResult = conditionValue;
+      } else if (bridgedInstance.$2 &&
+          bridgedInstance.$1?.nativeObject is bool) {
+        conditionResult = bridgedInstance.$1!.nativeObject as bool;
+      } else {
+        throw RuntimeD4rtException(
+          'Condition in collection \'if\' must be a boolean, but got ${conditionValue?.runtimeType}',
+        );
+      }
+
+      if (conditionResult) {
+        // Propagated, not swallowed: an `if` element evaluates its branch
+        // exactly once, so replay rebuilds it correctly.
+        return _processCollectionElement(
+          element.thenElement,
+          collection,
+          isMap: isMap,
+        );
+      } else if (element.elseElement != null) {
+        return _processCollectionElement(
+          element.elseElement!,
+          collection,
+          isMap: isMap,
+        );
+      }
+    } else if (element is ForElement) {
+      final loopParts = element.forLoopParts;
+      if (loopParts is ForEachPartsWithDeclaration ||
+          loopParts is ForEachPartsWithIdentifier) {
+        final iterableExpression = loopParts is ForEachPartsWithDeclaration
+            ? loopParts.iterable
+            : (loopParts as ForEachPartsWithIdentifier).iterable;
+        final loopVariableNode = loopParts is ForEachPartsWithDeclaration
+            ? loopParts.loopVariable
+            : (loopParts as ForEachPartsWithIdentifier).identifier;
+
+        final iterableValue = iterableExpression.accept<Object?>(this);
+        if (iterableValue is AsyncSuspensionRequest) return iterableValue;
+
+        // Cluster IT-1: collection-literal `for (final x in expr)` must
+        // accept a `BridgedInstance` whose native value is an `Iterable`.
+        // Native bridge calls (e.g. `data.take(8)`) return `Iterable<T>`
+        // wrapped in `BridgedInstance<Object>` because the script-side
+        // type is not a primitive. Mirror the unwrap that the pattern
+        // variant below already does. Affects scripts like
+        // `painting/axis_test.dart`, `widgets/web_browser_detection_test.dart`,
+        // `widgets/windowing_owner_mac_o_s_test.dart`.
+        Iterable<Object?>? unwrappedIterable;
+        if (iterableValue is Iterable) {
+          unwrappedIterable = iterableValue;
+        } else {
+          final bridged = toBridgedInstance(iterableValue);
+          if (bridged.$2 && bridged.$1?.nativeObject is Iterable) {
+            unwrappedIterable = bridged.$1!.nativeObject as Iterable;
+          }
+        }
+
+        if (unwrappedIterable != null) {
+          final loopEnvironment = Environment(enclosing: environment);
+          final previousEnvironment = environment;
+          environment = loopEnvironment;
+
+          try {
+            String variableName;
+            if (loopVariableNode is DeclaredIdentifier) {
+              variableName = loopVariableNode.name.lexeme;
+              environment.define(variableName, null); // Define before loop
+            } else if (loopVariableNode is SimpleIdentifier) {
+              variableName = loopVariableNode.name;
+            } else {
+              throw StateD4rtException(
+                'Unexpected for-in loop variable type: ${loopVariableNode.runtimeType}',
+              );
+            }
+
+            final binding = _forEachBinding(loopVariableNode);
+            final replay = _CollectionForReplay(this, element);
+            var iteration = 0;
+
+            for (final item in unwrappedIterable) {
+              environment.assign(
+                variableName,
+                binding == null ? item : binding.bind(environment, item),
+              );
+              final bodySuspension = replay.runIteration(
+                iteration++,
+                element.body,
+                collection,
+                isMap: isMap,
+              );
+              if (bodySuspension != null) return bodySuspension;
+            }
+            replay.finish();
+          } finally {
+            environment = previousEnvironment;
+          }
+        } else {
+          throw RuntimeD4rtException(
+            'Value used in collection \'for-in\' must be an Iterable, but got ${iterableValue?.runtimeType}',
+          );
+        }
+      } else if (loopParts is ForEachPartsWithPattern) {
+        // C20b — Dart 3 record-pattern destructuring in collection-literal
+        // for-in:  for (final (IconData icon, String label) in entries) ...
+        // Each iteration creates a fresh scope, binds the pattern, then runs
+        // the body to add the produced element(s) to the collection.
+        final iterableExpression = loopParts.iterable;
+        final pattern = loopParts.pattern;
+        final iterableValue = iterableExpression.accept<Object?>(this);
+        if (iterableValue is AsyncSuspensionRequest) return iterableValue;
+
+        Iterable<Object?> iterable;
+        if (iterableValue is Iterable) {
+          iterable = iterableValue;
+        } else {
+          final bridged = toBridgedInstance(iterableValue);
+          if (bridged.$2 && bridged.$1?.nativeObject is Iterable) {
+            iterable = bridged.$1!.nativeObject as Iterable;
+          } else {
+            throw RuntimeD4rtException(
+              'Value used in collection \'for-in\' must be an Iterable, but got ${iterableValue?.runtimeType}',
+            );
+          }
+        }
+
+        final previousEnvironment = environment;
+        final replay = _CollectionForReplay(this, element);
+        var iteration = 0;
+        try {
+          for (final item in iterable) {
+            // Fresh per-iteration env so pattern-declared variables are
+            // scoped to a single trip through the body.
+            final iterationEnv = Environment(enclosing: previousEnvironment);
+            environment = iterationEnv;
+            _matchAndBind(pattern, item, iterationEnv);
+            final bodySuspension = replay.runIteration(
+              iteration++,
+              element.body,
+              collection,
+              isMap: isMap,
+            );
+            if (bodySuspension != null) return bodySuspension;
+          }
+          replay.finish();
+        } finally {
+          environment = previousEnvironment;
+        }
+      } else if (loopParts is ForPartsWithDeclarations ||
+          loopParts is ForPartsWithExpression) {
+        AstNode? initialization;
+        Expression? condition;
+        List<Expression>? updaters;
+        if (loopParts is ForPartsWithDeclarations) {
+          initialization = loopParts.variables;
+          condition = loopParts.condition;
+          updaters = loopParts.updaters;
+        } else if (loopParts is ForPartsWithExpression) {
+          initialization = loopParts.initialization;
+          condition = loopParts.condition;
+          updaters = loopParts.updaters;
+        }
+        // GEN-111 — per-iteration scope for classic for-loops in
+        // collection literals. Dart's spec requires each iteration to
+        // introduce a *fresh* binding of each loop variable; closures
+        // created in the body must capture that per-iteration binding.
+        // The previous implementation reused a single `loopEnvironment`
+        // across iterations and mutated it via the updater, so any
+        // closure captured in the body resolved the loop variable
+        // through the shared env and read the post-loop value (`i = N`
+        // for `for (var i = 0; i < N; i++)`).
+        //
+        // Strategy:
+        //   1. Resolve the initial value(s) of the loop variable(s)
+        //      once via a scratch env.
+        //   2. On each iteration, build a fresh `iterEnv` seeded with
+        //      the current loop-variable values. Closures created in
+        //      the body capture this iteration's env.
+        //   3. After the body, snapshot the loop-variable values from
+        //      `iterEnv` (so a body-side mutation like `i = 10` is
+        //      respected), then run the updater in a *separate*
+        //      `updateEnv`. The updater never touches `iterEnv`, so
+        //      the previous iteration's closures continue to see
+        //      their per-iteration value.
+        //
+        // Affects scripts that build widget lists like
+        //   `[for (var i = 0; i < n; i++) Button(onPressed: () => f(i))]`
+        // — every onPressed used to receive the same final `i = n`.
+        final outerEnv = environment;
+        final loopVarNames = <String>[];
+        if (initialization is VariableDeclarationList) {
+          for (final v in initialization.variables) {
+            loopVarNames.add(v.name.lexeme);
+          }
+        }
+        // Resolve initial values into a scratch env.
+        final scratchEnv = Environment(enclosing: outerEnv);
+        environment = scratchEnv;
+        try {
+          if (initialization != null) {
+            initialization.accept<Object?>(this);
+          }
+        } finally {
+          environment = outerEnv;
+        }
+        final currentValues = <String, Object?>{
+          for (final name in loopVarNames) name: scratchEnv.get(name),
+        };
+        final replay = _CollectionForReplay(this, element);
+        var iteration = 0;
+        try {
+          while (true) {
+            final iterEnv = Environment(enclosing: outerEnv);
+            for (final name in loopVarNames) {
+              iterEnv.define(name, currentValues[name]);
+            }
+            environment = iterEnv;
+
+            bool conditionResult = true;
+            if (condition != null) {
+              final evalResult = condition.accept<Object?>(this);
+              if (evalResult is AsyncSuspensionRequest) {
+                return evalResult;
+              }
+              final bridgedInstance = toBridgedInstance(evalResult);
+              if (evalResult is bool) {
+                conditionResult = evalResult;
+              } else if (bridgedInstance.$2 &&
+                  bridgedInstance.$1?.nativeObject is bool) {
+                conditionResult = bridgedInstance.$1!.nativeObject as bool;
+              } else {
+                throw RuntimeD4rtException(
+                  "The condition of a 'for' loop must be a boolean, but was ${evalResult?.runtimeType}.",
+                );
+              }
+            }
+            if (!conditionResult) break;
+
+            final bodySuspension = replay.runIteration(
+              iteration++,
+              element.body,
+              collection,
+              isMap: isMap,
+            );
+            if (bodySuspension != null) return bodySuspension;
+
+            // Snapshot the body's view of the loop vars (in case the body
+            // mutated them) — these are the inputs to the updater.
+            for (final name in loopVarNames) {
+              currentValues[name] = iterEnv.get(name);
+            }
+
+            // Run the updater in a fresh env so iterEnv stays untouched
+            // for any closure that captured it during the body.
+            if (updaters != null && updaters.isNotEmpty) {
+              final updateEnv = Environment(enclosing: outerEnv);
+              for (final name in loopVarNames) {
+                updateEnv.define(name, currentValues[name]);
+              }
+              environment = updateEnv;
+              for (final updater in updaters) {
+                updater.accept<Object?>(this);
+              }
+              for (final name in loopVarNames) {
+                currentValues[name] = updateEnv.get(name);
+              }
+            }
+          }
+          replay.finish();
+        } finally {
+          environment = outerEnv;
+        }
+      } else {
+        throw UnimplementedD4rtException(
+          'Unsupported for-loop type in collection literal: ${loopParts.runtimeType}',
+        );
+      }
+    } else if (element is NullAwareElement) {
+      // Use element.expression as per analyzer AST definition
+      final value = element.value.accept<Object?>(this);
+      if (value is AsyncSuspensionRequest) return value;
+      if (value != null) {
+        if (collection is List) {
+          collection.add(value);
+        } else if (collection is Set) {
+          collection.add(_unwrapHashKey(value));
+        } else {
+          // Should not happen if isMap is false
+          throw StateD4rtException(
+            "Internal error: Expected List or Set for NullAwareElement.",
+          );
+        }
+      }
+      // If value is null, do nothing.
+    } else {
+      throw UnimplementedD4rtException(
+        'Collection element type not yet supported: ${element.runtimeType}',
+      );
+    }
+    return null;
+  }
+
+  @override
+  Object? visitFunctionDeclaration(FunctionDeclaration node) {
+    // Create a function object that captures the current environment (closure)
+    // Use the .declaration constructor
+    final returnType = node.returnType;
+    bool isAsync = node.functionExpression.body.isAsynchronous;
+    bool isNullable = false;
+    if (returnType is NamedType) {
+      isNullable = returnType.toSource().contains('?');
+    }
+
+    // Handle type parameters for generic functions
+    Environment? tempEnvironment;
+    final typeParameters = node.functionExpression.typeParameters;
+
+    if (typeParameters != null) {
+      Logger.debug(
+        "[InterpreterVisitor.visitFunctionDeclaration] Function '${node.name.lexeme}' has ${typeParameters.typeParameters.length} type parameters",
+      );
+
+      // Create a temporary environment for type resolution
+      tempEnvironment = Environment(enclosing: environment);
+
+      // Create temporary type parameter placeholders
+      for (final typeParam in typeParameters.typeParameters) {
+        final paramName = typeParam.name.lexeme;
+
+        // Create a simple TypeParameter placeholder in the temp environment
+        final typeParamPlaceholder = TypeParameter(paramName);
+        tempEnvironment.define(paramName, typeParamPlaceholder);
+
+        Logger.debug(
+          "[InterpreterVisitor.visitFunctionDeclaration]   Defined type parameter '$paramName' in temp environment",
+        );
+      }
+    }
+
+    // Use the temp environment (if any) for type resolution, otherwise use the normal environment
+    final resolveEnvironment = tempEnvironment ?? environment;
+
+    final declaredReturnType = tempEnvironment != null
+        ? _resolveTypeAnnotationWithEnvironment(
+            node.returnType,
+            resolveEnvironment,
+            isAsync: isAsync,
+          )
+        : _resolveTypeAnnotation(node.returnType, isAsync: isAsync);
+
+    final function = InterpretedFunction.declaration(
+      node,
+      environment,
+      declaredReturnType,
+      isNullable,
+    );
+    // Define the function in the current environment. SCF25: a setter under
+    // its setter name, `v=`.
+    environment.define(
+      node.isSetter
+          ? Environment.setterKey(node.name.lexeme)
+          : node.name.lexeme,
+      function,
+    );
+    return null; // Declaration itself doesn't return a value
+  }
+
+  // Handle function expressions (anonymous functions)
+  @override
+  Object? visitFunctionExpression(FunctionExpression node) {
+    // Create a function object capturing the current environment (closure)
+    // Use the .expression constructor since it might be anonymous
+    final function = InterpretedFunction.expression(node, environment);
+    // Return the function object itself as the value of the expression
+    return function;
+  }
+
+  @override
+  Object? visitReturnStatement(ReturnStatement node) {
+    // Walk up the AST to find the enclosing function
+    // Bug-73, Bug-74 FIX: A FunctionDeclaration contains a FunctionExpression as its child,
+    // so we need to find the FunctionDeclaration (which has the name) rather than stopping
+    // at the inner FunctionExpression.
+    AstNode? eDecl = node;
+    while (eDecl != null) {
+      if (eDecl is FunctionDeclaration) {
+        // Named function - prefer this over FunctionExpression
+        break;
+      }
+      if (eDecl is FunctionExpression) {
+        // Check if parent is a FunctionDeclaration - if so, use that instead
+        if (eDecl.parent is FunctionDeclaration) {
+          eDecl = eDecl.parent;
+          break;
+        }
+        // Otherwise it's a true anonymous function (lambda, callback)
+        break;
+      }
+      eDecl = eDecl.parent;
+    }
+
+    Object? returnValue;
+    if (node.expression != null) {
+      returnValue = node.expression!.accept<Object?>(this);
+      if (returnValue is AsyncSuspensionRequest) {
+        return returnValue;
+      }
+    } else {
+      returnValue = null;
+    }
+
+    if (eDecl != null &&
+        (eDecl is FunctionDeclaration || eDecl is FunctionExpression)) {
+      bool isNullable = false;
+      String functionName = '<anonymous>';
+      RuntimeType? declaredType;
+      RuntimeType? valueRuntimeType;
+
+      try {
+        InterpretedFunction? currentCallable;
+
+        if (eDecl is FunctionDeclaration) {
+          functionName = eDecl.name.lexeme;
+          // Use the visitor's currentFunction directly (set by
+          // InterpretedFunction.call) rather than looking the name up in the
+          // environment on every return. A function declaration is a final
+          // binding, so `environment.get(name)` always resolves to the same
+          // InterpretedFunction that is currently executing — the per-return
+          // lookup was redundant. This also mirrors tom_d4rt_ast's visitor and
+          // sidesteps the old Cluster C29 shadowing hazard (a same-named local
+          // of a different type can no longer be mistaken for the function).
+          currentCallable = currentFunction;
+        } else if (eDecl is FunctionExpression) {
+          // For anonymous functions (closures), use currentFunction from visitor
+          currentCallable = currentFunction;
+        }
+
+        if (currentCallable is InterpretedFunction) {
+          declaredType = currentCallable.declaredReturnType;
+          isNullable = currentCallable.isNullable;
+
+          // Special handling for async* generators: return without value should be allowed
+          if (currentCallable.isAsyncGenerator && returnValue == null) {
+            throw ReturnException(returnValue); // Exit generator cleanly
+          }
+        }
+        valueRuntimeType = environment.getRuntimeType(returnValue);
+
+        // Debug diagnostics: building these details (type-name lookups,
+        // hashCodes, and an extra `isSubtypeOf` evaluation) is pure logging
+        // work that otherwise runs on every return. Guard it so nothing is
+        // interpolated or computed when debug logging is off.
+        if (Logger.isDebug) {
+          String declaredTypeDetails = "N/A";
+          if (declaredType != null) {
+            declaredTypeDetails =
+                "Name: ${declaredType.name}, Hash: ${declaredType.hashCode}";
+            if (declaredType is BridgedClass) {
+              declaredTypeDetails +=
+                  ", NativeType: ${declaredType.nativeType}, NativeHash: ${declaredType.nativeType.hashCode}";
+            }
+          }
+
+          String valueRuntimeTypeDetails = "N/A";
+          if (valueRuntimeType != null) {
+            valueRuntimeTypeDetails =
+                "Name: ${valueRuntimeType.name}, Hash: ${valueRuntimeType.hashCode}";
+            if (valueRuntimeType is BridgedClass) {
+              valueRuntimeTypeDetails +=
+                  ", NativeType: ${valueRuntimeType.nativeType}, NativeHash: ${valueRuntimeType.nativeType.hashCode}";
+            }
+          }
+
+          Logger.debug("[visitReturnStatement] Function: '$functionName'");
+          Logger.debug(
+            "[visitReturnStatement]   Declared Type: $declaredTypeDetails",
+          );
+          Logger.debug(
+            "[visitReturnStatement]   Value Runtime Type: $valueRuntimeTypeDetails",
+          );
+          Logger.debug(
+            "[visitReturnStatement]   Return Value: $returnValue (Type: ${returnValue?.runtimeType})",
+          );
+          Logger.debug(
+            "[visitReturnStatement]   Is Declared Type Nullable: $isNullable",
+          );
+
+          if (declaredType != null && valueRuntimeType != null) {
+            Logger.debug(
+              "[visitReturnStatement]   valueRuntimeType.isSubtypeOf(declaredType) = ${valueRuntimeType.isSubtypeOf(declaredType)}",
+            );
+          }
+        }
+
+        // Cluster RETURNTYPE / I-MISC-212: Returning `null` from a function
+        // with a non-nullable declared return type must throw, even when
+        // the legacy `Null.isSubtypeOf(T)` rule would let the value pass.
+        // Mirrors the equivalent check in
+        // tom_d4rt_ast/lib/src/runtime/interpreter_visitor.dart.
+        if (returnValue == null &&
+            declaredType != null &&
+            !isNullable &&
+            declaredType.name != 'void' &&
+            declaredType.name != 'dynamic') {
+          throw RuntimeD4rtException(
+            "A value of type 'Null' can't be returned from the function '$functionName' because it has a return type of '${declaredType.name}'.",
+          );
+        }
+
+        if (valueRuntimeType != null) {
+          if (declaredType != null) {
+            // SCD90 — `void` is a top type for ASSIGNABILITY, and
+            // `isSubtypeOf` now says so. Returning a value from a `void`
+            // function is a different rule: Dart rejects it at the declaration,
+            // not because the value fails to inhabit the type. So the check
+            // names `void` here rather than asking the predicate, exactly as it
+            // already named `dynamic`. Without this, making the predicate
+            // correct silently deleted I-MISC-209 — the block was only ever
+            // entered because `int <: void` used to answer false.
+            final returnsValueFromVoid =
+                declaredType.name == "void" && returnValue != null;
+            if (declaredType.name != "dynamic" &&
+                (returnsValueFromVoid ||
+                    !valueRuntimeType.isSubtypeOf(
+                      declaredType,
+                      value: returnValue,
+                    ))) {
+              bool showError = true;
+              if (isNullable && returnValue == null) {
+                showError = false;
+              }
+              if (declaredType.name == "void" && returnValue == null) {
+                showError = false;
+              }
+              if (declaredType.name == "Object" && returnValue != null) {
+                showError = false;
+              }
+              // Bug-73 FIX: In async functions, returning a Future<T> when declared type is T is allowed
+              // Dart automatically awaits the inner Future. Check if:
+              // 1. The function is async (currentCallable.isAsync)
+              // 2. The return value is a Future
+              // 3. The declared type matches the Future's inner type (or is void)
+              if (currentCallable != null &&
+                  currentCallable.isAsync &&
+                  returnValue is Future) {
+                // Allow returning Future from async function - Dart awaits it
+                showError = false;
+              }
+
+              // Bug-93 FIX: Dart implicitly promotes int to double when the
+              // declared return type is double and the value is an int.
+              if (declaredType.name == 'double' && returnValue is int) {
+                showError = false;
+                returnValue = returnValue.toDouble();
+              }
+
+              if (showError) {
+                final declaredTypeName = isNullable
+                    ? '${declaredType.name}?'
+                    : declaredType.name;
+                throw RuntimeD4rtException(
+                  "A value of type '${valueRuntimeType.name}' can't be returned from the function '$functionName' because it has a return type of '$declaredTypeName'.",
+                );
+              }
+            }
+          }
+        }
+
+        // DFUB6: applied generic return validation. The base subtype check
+        // above treats `Box<String>` / `List<String>` as their raw base type,
+        // so a generic/collection value with mismatched type arguments slips
+        // through. Enforce the arguments element-wise here.
+        //
+        // Skip async/generator functions: their declared return type is a
+        // `Future<T>` / `Stream<T>` / `Iterable<T>` wrapper, but the value in a
+        // `return` statement is the *inner* `T` (Dart wraps it automatically).
+        // Comparing the inner value's applied type against the wrapper's
+        // arguments would spuriously reject e.g. `Future<List<String>> f()
+        // async => [1,2,3]`, so leave the wrapper case to the base check.
+        final skipAppliedGenericReturn =
+            currentCallable is InterpretedFunction &&
+            (currentCallable.isAsync ||
+                currentCallable.isGenerator ||
+                currentCallable.isAsyncGenerator);
+        if (!skipAppliedGenericReturn) {
+          _checkAppliedGenericReturn(
+            returnValue,
+            eDecl,
+            functionName,
+            isNullable,
+          );
+        }
+      } catch (e) {
+        // Log before rethrow for more context in case of unexpected error here
+        Logger.error(
+          "[visitReturnStatement] Error during type check for function '$functionName': $e",
+        );
+        if (e is Error) {
+          Logger.error("Stack trace: ${e.stackTrace}");
+        }
+        rethrow;
+      }
+    }
+
+    // For non-suspended results, throw the exception to unwind the stack.
+    throw ReturnException(returnValue);
+  }
+
+  @override
+  Object? visitConditionalExpression(ConditionalExpression node) {
+    final conditionValue = node.condition.accept<Object?>(this);
+    bool conditionResult;
+    final bridgedInstance = toBridgedInstance(conditionValue);
+    if (conditionValue is bool) {
+      conditionResult = conditionValue;
+    } else if (bridgedInstance.$2 && bridgedInstance.$1?.nativeObject is bool) {
+      conditionResult = bridgedInstance.$1!.nativeObject as bool;
+    } else {
+      throw RuntimeD4rtException(
+        "The condition of a conditional expression must be a boolean, but was ${conditionValue?.runtimeType}.",
+      );
+    }
+
+    if (conditionResult) {
+      return node.thenExpression.accept<Object?>(this);
+    } else {
+      return node.elseExpression.accept<Object?>(this);
+    }
+  }
+
+  @override
+  Object? visitPrefixExpression(PrefixExpression node) {
+    final operatorType = node.operator.type;
+    final operandNode = node.operand;
+    // Indexed updates evaluate receiver and index in their read/write branch.
+    // Reading the full operand here would repeat both side effects below.
+    final isIndexedUpdate =
+        operandNode is IndexExpression &&
+        (operatorType == TokenType.PLUS_PLUS ||
+            operatorType == TokenType.MINUS_MINUS);
+    final operandValue = isIndexedUpdate
+        ? null
+        : operandNode.accept<Object?>(this);
+    // SCF29: an awaited operand (`!await f()`, `-await g()`) suspends. Hand
+    // the suspension up to the machine instead of applying the operator to
+    // the interpreter's own request object, which is what `!` used to try.
+    if (operandValue is AsyncSuspensionRequest) return operandValue;
+    final bridgedInstance = toBridgedInstance(operandValue);
+    final operand = bridgedInstance.$2
+        ? bridgedInstance.$1!.nativeObject
+        : operandValue;
+
+    switch (operatorType) {
+      case TokenType.BANG: // Logical NOT
+        // Use unwrapped operand for check
+        if (operand is bool) {
+          return !operand;
+        } else {
+          // Error uses original value type
+          throw RuntimeD4rtException(
+            "Operand for '!' must be a boolean, but was ${operandValue?.runtimeType}.",
+          );
+        }
+
+      case TokenType.MINUS: // Unary minus (negation)
+        // Use unwrapped operand for check
+        if (operand is num) {
+          return -operand;
+        } else if (operand is BigInt) {
+          return -operand;
+        } else if (operandValue is InterpretedInstance) {
+          // Check for class operator - method
+          final operatorMethod = operandValue.findOperator('-');
+          if (operatorMethod != null) {
+            Logger.debug(
+              "[PrefixExpr] Found class operator '-' on ${operandValue.klass.name}. Calling...",
+            );
+            try {
+              return operatorMethod.bind(operandValue).call(this, [], {});
+            } on ReturnException catch (e) {
+              return e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing class operator '-': $e",
+              );
+            }
+          }
+          // No class operator found, try extensions
+        } else if (operandValue is InterpretedExtensionTypeInstance) {
+          // DFUB9: unary operator `-` declared on an extension type.
+          final operatorMethod = operandValue.extensionType.methods['-'];
+          if (operatorMethod != null) {
+            Logger.debug(
+              "[PrefixExpr] Found extension-type operator '-' on ${operandValue.extensionType.name}. Calling...",
+            );
+            try {
+              return operatorMethod.bind(operandValue).call(this, [], {});
+            } on ReturnException catch (e) {
+              return e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing extension-type operator '-': $e",
+              );
+            }
+          }
+        }
+
+        // Check for bridged operator methods (unary -)
+        if (toBridgedInstance(operandValue).$2) {
+          final bridgedInstance = toBridgedInstance(operandValue).$1!;
+          final bridgedClass = bridgedInstance.bridgedClass;
+          final methodAdapter = bridgedClass.findInstanceMethodAdapter('-');
+          if (methodAdapter != null) {
+            Logger.debug(
+              "[PrefixExpr] Found bridged unary operator '-' for ${bridgedClass.name}. Calling adapter...",
+            );
+            try {
+              // Unary operator - call with empty positional args
+              return methodAdapter(
+                this,
+                bridgedInstance.nativeObject,
+                [],
+                {},
+                null,
+              );
+            } catch (e, s) {
+              Logger.error(
+                "[PrefixExpr] Native exception during bridged unary operator '-' on ${bridgedClass.name}: $e\\n$s",
+              );
+              throw RuntimeD4rtException(
+                "Native error during bridged unary operator '-' on ${bridgedClass.name}: $e",
+                originalException: e,
+                originalStackTrace: s,
+              );
+            }
+          }
+        }
+
+        const operatorName = '-';
+        try {
+          final extensionOperator = environment.findExtensionMember(
+            operandValue,
+            operatorName,
+          );
+          if (extensionOperator is ExtensionMemberCallable &&
+              extensionOperator.isOperator) {
+            Logger.debug(
+              "[PrefixExpr] Found extension operator '-' for type ${operandValue?.runtimeType}. Calling...",
+            );
+            // Args: receiver (operandValue)
+            try {
+              return extensionOperator.call(this, [operandValue], {});
+            } on ReturnException catch (e) {
+              return e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing extension operator '-': $e",
+              );
+            }
+          }
+        } on RuntimeD4rtException catch (findError) {
+          Logger.debug(
+            "[PrefixExpr] Extension operator '-' not found for type ${operandValue?.runtimeType}. Error: ${findError.message}",
+          );
+          // Fall through
+        }
+        // SCD93: a `NoSuchMethodError`, as real Dart raises — `-'x'` is
+        // `NoSuchMethodError: Class 'String' has no instance method 'unary-'`.
+        // Not delegated: this site is the last resort AFTER extension-operator
+        // lookup, and `-(operandValue as dynamic)` here would re-raise from the
+        // host with d4rt's extension diagnostic thrown away. No native non-num
+        // type declares `unary-`, so NoSuchMethodError is what the SDK raises
+        // for every operand that reaches this line.
+        throw D4rtNoSuchMethodError(
+          "Operand for unary '-' must be a number or have an operator defined, but was ${operandValue?.runtimeType}.",
+        );
+
+      case TokenType.TILDE: // Bitwise NOT (~)
+        if (operand is int) {
+          return ~operand;
+        } else if (operand is BigInt) {
+          // BigInt does not have a standard unary ~ operator in Dart
+          // We rely solely on extensions for BigInt bitwise NOT
+        } else if (operandValue is InterpretedInstance) {
+          // Check for class operator ~ method
+          final operatorMethod = operandValue.findOperator('~');
+          if (operatorMethod != null) {
+            Logger.debug(
+              "[PrefixExpr] Found class operator '~' on ${operandValue.klass.name}. Calling...",
+            );
+            try {
+              return operatorMethod.bind(operandValue).call(this, [], {});
+            } on ReturnException catch (e) {
+              return e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing class operator '~': $e",
+              );
+            }
+          }
+          // No class operator found, try extensions
+        } else if (operandValue is InterpretedExtensionTypeInstance) {
+          // DFUB9: unary operator `~` declared on an extension type.
+          final operatorMethod = operandValue.extensionType.methods['~'];
+          if (operatorMethod != null) {
+            Logger.debug(
+              "[PrefixExpr] Found extension-type operator '~' on ${operandValue.extensionType.name}. Calling...",
+            );
+            try {
+              return operatorMethod.bind(operandValue).call(this, [], {});
+            } on ReturnException catch (e) {
+              return e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing extension-type operator '~': $e",
+              );
+            }
+          }
+        }
+
+        // Bridged enum unary operator `~` (e.g. `~WidgetState.disabled`, where
+        // WidgetState is bridged as an enum with a `~` operator adapter).
+        if (operandValue is BridgedEnumValue && operandValue.hasMethod('~')) {
+          return operandValue.invoke(this, '~', const [], const {});
+        }
+
+        // Check for bridged operator methods (unary ~)
+        if (toBridgedInstance(operandValue).$2) {
+          final bridgedInstance = toBridgedInstance(operandValue).$1!;
+          final bridgedClass = bridgedInstance.bridgedClass;
+          final methodAdapter = bridgedClass.findInstanceMethodAdapter('~');
+          if (methodAdapter != null) {
+            Logger.debug(
+              "[PrefixExpr] Found bridged unary operator '~' for ${bridgedClass.name}. Calling adapter...",
+            );
+            try {
+              // Unary operator - call with empty positional args
+              return methodAdapter(
+                this,
+                bridgedInstance.nativeObject,
+                [],
+                {},
+                null,
+              );
+            } catch (e, s) {
+              Logger.error(
+                "[PrefixExpr] Native exception during bridged unary operator '~' on ${bridgedClass.name}: $e\\n$s",
+              );
+              throw RuntimeD4rtException(
+                "Native error during bridged unary operator '~' on ${bridgedClass.name}: $e",
+                originalException: e,
+                originalStackTrace: s,
+              );
+            }
+          }
+        }
+
+        // Try Extension Operator '~' (for non-int or BigInt)
+        const operatorNameTilde = '~';
+        try {
+          final extensionOperator = environment.findExtensionMember(
+            operandValue,
+            operatorNameTilde,
+          );
+          if (extensionOperator is ExtensionMemberCallable &&
+              extensionOperator.isOperator) {
+            Logger.debug(
+              "[PrefixExpr] Found extension operator '~' for type ${operandValue?.runtimeType}. Calling...",
+            );
+            // Args: receiver (operandValue)
+            try {
+              return extensionOperator.call(this, [operandValue], {});
+            } on ReturnException catch (e) {
+              return e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing extension operator '~': $e",
+              );
+            }
+          }
+        } on RuntimeD4rtException catch (findError) {
+          Logger.debug(
+            "[PrefixExpr] Extension operator '~' not found for type ${operandValue?.runtimeType}. Error: ${findError.message}",
+          );
+          // Fall through
+        }
+        // SCD93: a `NoSuchMethodError`, as real Dart raises — `~1.5` is
+        // `NoSuchMethodError: Class 'double' has no instance method '~'`. Only
+        // `int` and `BigInt` declare `~`, and both are handled above, so every
+        // operand reaching this line is one the SDK has no method for.
+        throw D4rtNoSuchMethodError(
+          "Operand for unary '~' must be an int or have an operator defined, but was ${operandValue?.runtimeType}.",
+        );
+
+      case TokenType.PLUS_PLUS: // Prefix increment (++x)
+      case TokenType.MINUS_MINUS: // Prefix decrement (--x)
+        // The operand was read above, except indexed updates whose branch
+        // owns receiver/index evaluation. Never evaluate side effects twice.
+        final assignOperand = operand;
+
+        // Check if AST node is assignable (SimpleIdentifier or PropertyAccess for now)
+        if (operandNode is SimpleIdentifier) {
+          final variableName = operandNode.name;
+          // We need the current value (already got it as assignOperand)
+          final currentValue = assignOperand;
+
+          // SCF25: `++v` / `--v` on a bare name bound to a setter goes through
+          // it; `currentValue` was read through the getter.
+          final prefixSetter = _bareSetterFor(variableName);
+          if (prefixSetter != null && currentValue is num) {
+            final newValue = operatorType == TokenType.PLUS_PLUS
+                ? currentValue + 1
+                : currentValue - 1;
+            prefixSetter.call(this, [newValue], {});
+            return newValue;
+          }
+
+          if (currentValue is num) {
+            final newValue = operatorType == TokenType.PLUS_PLUS
+                ? currentValue + 1
+                : currentValue - 1;
+            // Assign the new value back to the variable
+            _assignBareStepValue(variableName, newValue);
+            // Return the *new* value
+            return newValue;
+          } else if (operandValue is InterpretedInstance) {
+            // Dart defines each step through + 1 or - 1.
+            final operatorName = operatorType == TokenType.PLUS_PLUS
+                ? '+'
+                : '-';
+            final operatorMethod = operandValue.findOperator(operatorName);
+            if (operatorMethod != null) {
+              try {
+                const operand = 1;
+                final newValue = operatorMethod.bind(operandValue).call(this, [
+                  operand,
+                ], {});
+                // Assign the new value back to the variable
+                _assignBareStepValue(variableName, newValue);
+                // Return the *new* value
+                return newValue;
+              } on ReturnException catch (e) {
+                final newValue = e.value;
+                // Assign the new value back to the variable
+                _assignBareStepValue(variableName, newValue);
+                // Return the *new* value
+                return newValue;
+              } catch (e) {
+                throw RuntimeD4rtException(
+                  "Error executing custom operator '$operatorName' for prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+                );
+              }
+            } else {
+              throw RuntimeD4rtException(
+                "Cannot increment/decrement object of type '${operandValue.klass.name}': No operator '$operatorName' found.",
+              );
+            }
+          } else {
+            // Requires finding operator +/-, then assigning back.
+            // Complex, skip for now.
+            // Error uses original value type
+            // SCD93: a `TypeError`. `x++` is `x = x + 1`, so real Dart's
+            // error is whatever the operand's own `+` raises, and that splits:
+            // a type that DECLARES `+` with a different parameter raises
+            // TypeError (`'x'++`, `[1]++`), one that declares none raises
+            // NoSuchMethodError (`true++`). d4rt raises TypeError for both.
+            //
+            // The split is not reproduced on purpose. Tabulating which native
+            // types declare `+` would be a second implementation of exactly the
+            // rule this sweep removed elsewhere, and the alternative —
+            // performing `operandValue + 1` to learn which error it is — can
+            // run a bridged receiver's own operator for its side effects. The
+            // approximation is pinned rather than left to be rediscovered.
+            throw D4rtTypeError(
+              "Operand for prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}' must be a number, but was ${operandValue?.runtimeType}. Extension support TBD.",
+            );
+          }
+        } else if (operandNode is PropertyAccess) {
+          // Handle property access like obj.field++
+          final targetValue = operandNode.target?.accept<Object?>(this);
+          final propertyName = operandNode.propertyName.name;
+
+          if (targetValue is InterpretedInstance) {
+            // Get current value via getter or field
+            final currentValue = targetValue.get(propertyName);
+
+            // Calculate new value
+            Object? newValue;
+            if (currentValue is num) {
+              newValue = operatorType == TokenType.PLUS_PLUS
+                  ? currentValue + 1
+                  : currentValue - 1;
+            } else if (currentValue is InterpretedInstance) {
+              // Use custom + operator with literal 1
+              final operatorMethod = currentValue.findOperator('+');
+              if (operatorMethod != null) {
+                try {
+                  // For ++x, we create a literal 1 and call x + 1
+                  operatorType == TokenType.PLUS_PLUS ? 1 : -1;
+                  // Note: For --, we could either call x + (-1) or x - 1
+                  // Let's use + with -1 for consistency
+                  newValue = operatorMethod.bind(currentValue).call(this, [
+                    operand,
+                  ], {});
+                } on ReturnException catch (e) {
+                  newValue = e.value;
+                } catch (e) {
+                  throw RuntimeD4rtException(
+                    "Error executing custom operator '+' for prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+                  );
+                }
+              } else {
+                throw RuntimeD4rtException(
+                  "Cannot increment/decrement object of type '${currentValue.klass.name}': No operator '+' found.",
+                );
+              }
+            } else {
+              throw RuntimeD4rtException(
+                "Cannot increment/decrement property '$propertyName' of type '${currentValue?.runtimeType}': Expected number or object with '+' operator.",
+              );
+            }
+
+            // Set new value via setter or field
+            final setter = targetValue.klass.findInstanceSetter(propertyName);
+            if (setter != null) {
+              setter.bind(targetValue).call(this, [newValue], {});
+            } else {
+              targetValue.set(propertyName, newValue, this);
+            }
+
+            // Return the *new* value for prefix operators
+            return newValue;
+          } else {
+            // SCF37: a bridged receiver, as the compound path handles it.
+            final stepped = _stepBridgedProperty(
+              targetValue,
+              propertyName,
+              operatorType,
+            );
+            if (stepped != null) return stepped.$2;
+            throw RuntimeD4rtException(
+              "Cannot increment/decrement property on non-instance object of type '${targetValue?.runtimeType}'.",
+            );
+          }
+        } else if (operandNode is PrefixedIdentifier) {
+          // Handle prefixed identifier like obj.field++ (parsed as PrefixedIdentifier)
+          final targetValue = operandNode.prefix.accept<Object?>(this);
+          final propertyName = operandNode.identifier.name;
+
+          if (targetValue is InterpretedInstance) {
+            // Get current value via getter or field
+            final currentValue = targetValue.get(propertyName);
+
+            // Calculate new value
+            Object? newValue;
+            if (currentValue is num) {
+              newValue = operatorType == TokenType.PLUS_PLUS
+                  ? currentValue + 1
+                  : currentValue - 1;
+            } else if (currentValue is InterpretedInstance) {
+              // Use custom + operator with literal 1
+              final operatorMethod = currentValue.findOperator('+');
+              if (operatorMethod != null) {
+                try {
+                  // For ++x, we create a literal 1 and call x + 1
+                  operatorType == TokenType.PLUS_PLUS ? 1 : -1;
+                  // Note: For --, we could either call x + (-1) or x - 1
+                  // Let's use + with -1 for consistency
+                  newValue = operatorMethod.bind(currentValue).call(this, [
+                    operand,
+                  ], {});
+                } on ReturnException catch (e) {
+                  newValue = e.value;
+                } catch (e) {
+                  throw RuntimeD4rtException(
+                    "Error executing custom operator '+' for prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+                  );
+                }
+              } else {
+                throw RuntimeD4rtException(
+                  "Cannot increment/decrement object of type '${currentValue.klass.name}': No operator '+' found.",
+                );
+              }
+            } else {
+              throw RuntimeD4rtException(
+                "Cannot increment/decrement property '$propertyName' of type '${currentValue?.runtimeType}': Expected number or object with '+' operator.",
+              );
+            }
+
+            // Set new value via setter or field
+            final setter = targetValue.klass.findInstanceSetter(propertyName);
+            if (setter != null) {
+              setter.bind(targetValue).call(this, [newValue], {});
+            } else {
+              targetValue.set(propertyName, newValue, this);
+            }
+
+            // Return the *new* value for prefix operators
+            return newValue;
+          } else if (targetValue is InterpretedExtension) {
+            // Handle static field/getter increment/decrement on extension (prefix)
+            final extension = targetValue;
+
+            // Get current value via static getter or field
+            Object? currentValue;
+            final staticGetter = extension.findStaticGetter(propertyName);
+            if (staticGetter != null) {
+              currentValue = staticGetter.call(this, [], {});
+            } else if (extension.staticFields.containsKey(propertyName)) {
+              currentValue = extension.getStaticField(propertyName);
+            } else {
+              throw RuntimeD4rtException.resolutionFailure(
+                "Extension '${extension.name}' has no static field or getter named '$propertyName'.",
+              );
+            }
+
+            // Calculate new value
+            Object? newValue;
+            if (currentValue is num) {
+              newValue = operatorType == TokenType.PLUS_PLUS
+                  ? currentValue + 1
+                  : currentValue - 1;
+            } else {
+              throw RuntimeD4rtException(
+                "Cannot increment/decrement static property '$propertyName' of type '${currentValue?.runtimeType}': Expected number.",
+              );
+            }
+
+            // Set new value via static setter or field
+            final staticSetter = extension.findStaticSetter(propertyName);
+            if (staticSetter != null) {
+              staticSetter.call(this, [newValue], {});
+            } else if (extension.staticFields.containsKey(propertyName)) {
+              extension.setStaticField(propertyName, newValue);
+            } else {
+              throw RuntimeD4rtException.resolutionFailure(
+                "Extension '${extension.name}' has no static setter or field named '$propertyName'.",
+              );
+            }
+
+            // Return the *new* value for prefix operators
+            return newValue;
+          } else {
+            // SCF37: a bridged receiver, as the compound path handles it.
+            final stepped = _stepBridgedProperty(
+              targetValue,
+              propertyName,
+              operatorType,
+            );
+            if (stepped != null) return stepped.$2;
+            throw RuntimeD4rtException(
+              "Cannot increment/decrement property on non-instance object of type '${targetValue?.runtimeType}'.",
+            );
+          }
+        } else if (operandNode is IndexExpression) {
+          // Handle index access like ++array[i]
+          final evaluatedTarget = operandNode.target?.accept<Object?>(this);
+          final targetValue = _nativeIndexedCollection(evaluatedTarget);
+          final indexValue = operandNode.index.accept<Object?>(this);
+
+          // Get current value via [] operator or direct access
+          Object? currentValue;
+          if (targetValue is List) {
+            final index = indexValue as int;
+            currentValue = targetValue[index];
+          } else if (targetValue is Map) {
+            currentValue = targetValue[indexValue];
+          } else if (targetValue is InterpretedInstance) {
+            // Use class operator [] if available
+            final operatorMethod = targetValue.findOperator('[]');
+            if (operatorMethod != null) {
+              try {
+                currentValue = operatorMethod.bind(targetValue).call(this, [
+                  indexValue,
+                ], {});
+              } on ReturnException catch (e) {
+                currentValue = e.value;
+              } catch (e) {
+                throw RuntimeD4rtException(
+                  "Error executing class operator '[]' for prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+                );
+              }
+            } else {
+              throw RuntimeD4rtException(
+                "Cannot read index for prefix increment/decrement on ${targetValue.klass.name}: No operator '[]' found.",
+              );
+            }
+          } else {
+            throw RuntimeD4rtException(
+              "Cannot apply prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}' to index of type '${targetValue?.runtimeType}'.",
+            );
+          }
+
+          // Calculate new value
+          Object? newValue;
+          if (currentValue is num) {
+            newValue = operatorType == TokenType.PLUS_PLUS
+                ? currentValue + 1
+                : currentValue - 1;
+          } else if (currentValue is InterpretedInstance) {
+            // Use custom + operator with literal 1
+            final operatorMethod = currentValue.findOperator('+');
+            if (operatorMethod != null) {
+              try {
+                final operand = _createIncrementOperand(
+                  currentValue,
+                  operatorType == TokenType.PLUS_PLUS,
+                );
+                newValue = operatorMethod.bind(currentValue).call(this, [
+                  operand,
+                ], {});
+              } on ReturnException catch (e) {
+                newValue = e.value;
+              } catch (e) {
+                throw RuntimeD4rtException(
+                  "Error executing custom operator '+' for prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+                );
+              }
+            } else {
+              throw RuntimeD4rtException(
+                "Cannot increment/decrement object at index of type '${currentValue.klass.name}': No operator '+' found.",
+              );
+            }
+          } else {
+            throw RuntimeD4rtException(
+              "Cannot increment/decrement value at index of type '${currentValue?.runtimeType}': Expected number or object with '+' operator.",
+            );
+          }
+
+          // Set new value via []= operator or direct access
+          if (targetValue is List) {
+            final index = indexValue as int;
+            targetValue[index] = newValue;
+          } else if (targetValue is Map) {
+            targetValue[_unwrapHashKey(indexValue)] = newValue;
+          } else if (targetValue is InterpretedInstance) {
+            // Use class operator []= if available
+            final operatorMethod = targetValue.findOperator('[]=');
+            if (operatorMethod != null) {
+              try {
+                operatorMethod.bind(targetValue).call(this, [
+                  indexValue,
+                  newValue,
+                ], {});
+              } on ReturnException catch (_) {
+                // []= should not return a value, but assignment expression returns assigned value
+              } catch (e) {
+                throw RuntimeD4rtException(
+                  "Error executing class operator '[]=' for prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+                );
+              }
+            } else {
+              throw RuntimeD4rtException(
+                "Cannot write index for prefix increment/decrement on ${targetValue.klass.name}: No operator '[]=' found.",
+              );
+            }
+          }
+
+          // Return the *new* value for prefix operators
+          return newValue;
+        } else {
+          Logger.debug("Operand type: ${operandNode.runtimeType}");
+          throw RuntimeD4rtException(
+            "Operand for prefix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}' must be an assignable variable, property, or index.",
+          );
+        }
+      default:
+        // Check for class operators first for any other unary operators
+        final String operatorLexeme = node.operator.lexeme;
+        if (operandValue is InterpretedInstance) {
+          final operatorMethod = operandValue.findOperator(operatorLexeme);
+          if (operatorMethod != null) {
+            Logger.debug(
+              "[PrefixExpr] Found class operator '$operatorLexeme' on ${operandValue.klass.name}. Calling...",
+            );
+            try {
+              return operatorMethod.bind(operandValue).call(this, [], {});
+            } on ReturnException catch (e) {
+              return e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing class operator '$operatorLexeme': $e",
+              );
+            }
+          }
+        }
+
+        // Check for extension operators if no class operator found
+        try {
+          final extensionOperator = environment.findExtensionMember(
+            operandValue,
+            operatorLexeme,
+          );
+          if (extensionOperator is ExtensionMemberCallable &&
+              extensionOperator.isOperator) {
+            Logger.debug(
+              "[PrefixExpr] Found generic extension operator '$operatorLexeme' for type ${operandValue?.runtimeType}. Calling...",
+            );
+            try {
+              return extensionOperator.call(this, [operandValue], {});
+            } on ReturnException catch (e) {
+              return e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing extension operator '$operatorLexeme': $e",
+              );
+            }
+          }
+        } on RuntimeD4rtException {
+          // Fall through if no generic extension op found
+        }
+        throw UnimplementedD4rtException(
+          'Unary prefix operator not handled: ${node.operator.lexeme} ($operatorType)',
+        );
+    }
+  }
+
+  @override
+  Object? visitPostfixExpression(PostfixExpression node) {
+    final operatorType = node.operator.type;
+
+    // Support for the non-null assertion operator (!)
+    if (operatorType == TokenType.BANG) {
+      final operandValue = node.operand.accept<Object?>(this);
+      if (operandValue == null) {
+        // Real Dart raises TypeError here, the same type a failing cast raises.
+        throw D4rtTypeError(
+          "Null check operator used on a null value at ${node.toString()}",
+        );
+      }
+      return operandValue;
+    }
+
+    // Check if operand is assignable (SimpleIdentifier or PropertyAccess)
+    if (node.operand is SimpleIdentifier) {
+      final variableName = (node.operand as SimpleIdentifier).name;
+
+      // SCF25: `v++` / `v--` on a bare name bound to a setter reads through the
+      // getter and writes through the setter.
+      final postfixSetter = _bareSetterFor(variableName);
+      if (postfixSetter != null) {
+        final original = (node.operand as SimpleIdentifier).accept<Object?>(
+          this,
+        );
+        if (original is num) {
+          postfixSetter.call(this, [
+            operatorType == TokenType.PLUS_PLUS ? original + 1 : original - 1,
+          ], {});
+          return original;
+        }
+      }
+      Object? operandValue;
+      InterpretedInstance? thisInstance;
+
+      // Try lexical scope first, then implicit 'this'
+      try {
+        operandValue = environment.get(variableName); // Try lexical scope
+      } on RuntimeD4rtException {
+        // Not found lexically, try implicit 'this'
+        try {
+          final potentialThis = environment.get('this');
+          if (potentialThis is InterpretedInstance) {
+            thisInstance = potentialThis;
+            operandValue = thisInstance.get(variableName); // Get from instance
+          } else {
+            throw undefinedNameError(variableName);
+          }
+        } on LateInitializationError {
+          // Plan H: surface unwrapped — matches native Dart behaviour.
+          rethrow;
+        } on RuntimeD4rtException {
+          throw undefinedNameError(variableName);
+        }
+      }
+      final bridgedInstance = toBridgedInstance(operandValue);
+      final currentValue = bridgedInstance.$2
+          ? bridgedInstance.$1!.nativeObject
+          : operandValue;
+
+      if (currentValue is num) {
+        final newValue = operatorType == TokenType.PLUS_PLUS
+            ? currentValue + 1
+            : currentValue - 1;
+
+        _assignBareStepValue(variableName, newValue);
+
+        return operandValue; // Return the original value
+      } else if (operandValue is InterpretedInstance) {
+        // Dart defines each step through + 1 or - 1.
+        final operatorName = operatorType == TokenType.PLUS_PLUS ? '+' : '-';
+        final operatorMethod = operandValue.findOperator(operatorName);
+        if (operatorMethod != null) {
+          try {
+            const operand = 1;
+            Object? newValue = operatorMethod.bind(operandValue).call(this, [
+              operand,
+            ], {});
+
+            _assignBareStepValue(variableName, newValue);
+
+            return operandValue; // Return the original value for postfix
+          } on ReturnException catch (e) {
+            final newValue = e.value;
+
+            _assignBareStepValue(variableName, newValue);
+
+            return operandValue; // Return the original value for postfix
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing custom operator '$operatorName' for postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+            );
+          }
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot increment/decrement object of type '${operandValue.klass.name}': No operator '$operatorName' found.",
+          );
+        }
+      } else {
+        // SCD93: a `TypeError` — see the prefix site for why the SDK's
+        // TypeError/NoSuchMethodError split is approximated rather than
+        // tabulated.
+        throw D4rtTypeError(
+          "Operand for postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}' must be a number, but was ${operandValue?.runtimeType}.",
+        );
+      }
+    } else if (node.operand is PropertyAccess) {
+      // Handle property access like obj.field++
+      final propertyAccess = node.operand as PropertyAccess;
+      final targetValue = propertyAccess.target?.accept<Object?>(this);
+      final propertyName = propertyAccess.propertyName.name;
+
+      if (targetValue is InterpretedInstance) {
+        // Get current value via getter or field
+        final currentValue = targetValue.get(propertyName);
+        final originalValue = currentValue; // Save for return
+
+        // Calculate new value
+        Object? newValue;
+        if (currentValue is num) {
+          newValue = operatorType == TokenType.PLUS_PLUS
+              ? currentValue + 1
+              : currentValue - 1;
+        } else if (currentValue is InterpretedInstance) {
+          // Use custom + operator with literal 1
+          final operatorMethod = currentValue.findOperator('+');
+          if (operatorMethod != null) {
+            try {
+              // For x++, we create a literal 1 and call x + 1
+              final operand = _createIncrementOperand(
+                currentValue,
+                operatorType == TokenType.PLUS_PLUS,
+              );
+              newValue = operatorMethod.bind(currentValue).call(this, [
+                operand,
+              ], {});
+            } on ReturnException catch (e) {
+              newValue = e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing custom operator '+' for postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+              );
+            }
+          } else {
+            throw RuntimeD4rtException(
+              "Cannot increment/decrement object of type '${currentValue.klass.name}': No operator '+' found.",
+            );
+          }
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot increment/decrement property '$propertyName' of type '${currentValue?.runtimeType}': Expected number or object with '+' operator.",
+          );
+        }
+
+        // Set new value via setter or field
+        final setter = targetValue.klass.findInstanceSetter(propertyName);
+        if (setter != null) {
+          setter.bind(targetValue).call(this, [newValue], {});
+        } else {
+          targetValue.set(propertyName, newValue, this);
+        }
+
+        // Return the *original* value for postfix operators
+        return originalValue;
+      } else {
+        // SCF37: a bridged receiver, as the compound path handles it.
+        final stepped = _stepBridgedProperty(
+          targetValue,
+          propertyName,
+          operatorType,
+        );
+        if (stepped != null) return stepped.$1;
+        throw RuntimeD4rtException(
+          "Cannot increment/decrement property on non-instance object of type '${targetValue?.runtimeType}'.",
+        );
+      }
+    } else if (node.operand is PrefixedIdentifier) {
+      // Handle prefixed identifier like obj.field++ (parsed as PrefixedIdentifier)
+      final prefixedIdentifier = node.operand as PrefixedIdentifier;
+      final targetValue = prefixedIdentifier.prefix.accept<Object?>(this);
+      final propertyName = prefixedIdentifier.identifier.name;
+
+      if (targetValue is InterpretedInstance) {
+        // Get current value via getter or field
+        final currentValue = targetValue.get(propertyName);
+        final originalValue = currentValue; // Save for return
+
+        // Calculate new value
+        Object? newValue;
+        if (currentValue is num) {
+          newValue = operatorType == TokenType.PLUS_PLUS
+              ? currentValue + 1
+              : currentValue - 1;
+        } else if (currentValue is InterpretedInstance) {
+          // Use custom + operator with literal 1
+          final operatorMethod = currentValue.findOperator('+');
+          if (operatorMethod != null) {
+            try {
+              // For x++, we create a literal 1 and call x + 1
+              final operand = _createIncrementOperand(
+                currentValue,
+                operatorType == TokenType.PLUS_PLUS,
+              );
+              newValue = operatorMethod.bind(currentValue).call(this, [
+                operand,
+              ], {});
+            } on ReturnException catch (e) {
+              newValue = e.value;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error executing custom operator '+' for postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+              );
+            }
+          } else {
+            throw RuntimeD4rtException(
+              "Cannot increment/decrement object of type '${currentValue.klass.name}': No operator '+' found.",
+            );
+          }
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot increment/decrement property '$propertyName' of type '${currentValue?.runtimeType}': Expected number or object with '+' operator.",
+          );
+        }
+
+        // Set new value via setter or field
+        final setter = targetValue.klass.findInstanceSetter(propertyName);
+        if (setter != null) {
+          setter.bind(targetValue).call(this, [newValue], {});
+        } else {
+          targetValue.set(propertyName, newValue, this);
+        }
+
+        // Return the *original* value for postfix operators
+        return originalValue;
+      } else if (targetValue is InterpretedExtension) {
+        // Handle static field/getter increment/decrement on extension
+        final extension = targetValue;
+
+        // Get current value via static getter or field
+        Object? currentValue;
+        final staticGetter = extension.findStaticGetter(propertyName);
+        if (staticGetter != null) {
+          currentValue = staticGetter.call(this, [], {});
+        } else if (extension.staticFields.containsKey(propertyName)) {
+          currentValue = extension.getStaticField(propertyName);
+        } else {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Extension '${extension.name}' has no static field or getter named '$propertyName'.",
+          );
+        }
+
+        final originalValue = currentValue; // Save for return
+
+        // Calculate new value
+        Object? newValue;
+        if (currentValue is num) {
+          newValue = operatorType == TokenType.PLUS_PLUS
+              ? currentValue + 1
+              : currentValue - 1;
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot increment/decrement static property '$propertyName' of type '${currentValue?.runtimeType}': Expected number.",
+          );
+        }
+
+        // Set new value via static setter or field
+        final staticSetter = extension.findStaticSetter(propertyName);
+        if (staticSetter != null) {
+          staticSetter.call(this, [newValue], {});
+        } else if (extension.staticFields.containsKey(propertyName)) {
+          extension.setStaticField(propertyName, newValue);
+        } else {
+          throw RuntimeD4rtException.resolutionFailure(
+            "Extension '${extension.name}' has no static setter or field named '$propertyName'.",
+          );
+        }
+
+        // Return the *original* value for postfix operators
+        return originalValue;
+      } else {
+        // SCF37: a bridged receiver, as the compound path handles it.
+        final stepped = _stepBridgedProperty(
+          targetValue,
+          propertyName,
+          operatorType,
+        );
+        if (stepped != null) return stepped.$1;
+        throw RuntimeD4rtException(
+          "Cannot increment/decrement property on non-instance object of type '${targetValue?.runtimeType}'.",
+        );
+      }
+    } else if (node.operand is IndexExpression) {
+      // Handle index access like array[i]++
+      final indexExpression = node.operand as IndexExpression;
+      final evaluatedTarget = indexExpression.target?.accept<Object?>(this);
+      final targetValue = _nativeIndexedCollection(evaluatedTarget);
+      final indexValue = indexExpression.index.accept<Object?>(this);
+
+      // Get current value via [] operator or direct access
+      Object? currentValue;
+      if (targetValue is List) {
+        final index = indexValue as int;
+        currentValue = targetValue[index];
+      } else if (targetValue is Map) {
+        currentValue = targetValue[indexValue];
+      } else if (targetValue is InterpretedInstance) {
+        // Use class operator [] if available
+        final operatorMethod = targetValue.findOperator('[]');
+        if (operatorMethod != null) {
+          try {
+            currentValue = operatorMethod.bind(targetValue).call(this, [
+              indexValue,
+            ], {});
+          } on ReturnException catch (e) {
+            currentValue = e.value;
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing class operator '[]' for postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+            );
+          }
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot read index for postfix increment/decrement on ${targetValue.klass.name}: No operator '[]' found.",
+          );
+        }
+      } else {
+        throw RuntimeD4rtException(
+          "Cannot apply postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}' to index of type '${targetValue?.runtimeType}'.",
+        );
+      }
+
+      final originalValue = currentValue; // Save for return
+
+      // Calculate new value
+      Object? newValue;
+      if (currentValue is num) {
+        newValue = operatorType == TokenType.PLUS_PLUS
+            ? currentValue + 1
+            : currentValue - 1;
+      } else if (currentValue is InterpretedInstance) {
+        // Use custom + operator with literal 1
+        final operatorMethod = currentValue.findOperator('+');
+        if (operatorMethod != null) {
+          try {
+            final operand = _createIncrementOperand(
+              currentValue,
+              operatorType == TokenType.PLUS_PLUS,
+            );
+            newValue = operatorMethod.bind(currentValue).call(this, [
+              operand,
+            ], {});
+          } on ReturnException catch (e) {
+            newValue = e.value;
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing custom operator '+' for postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+            );
+          }
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot increment/decrement object at index of type '${currentValue.klass.name}': No operator '+' found.",
+          );
+        }
+      } else {
+        throw RuntimeD4rtException(
+          "Cannot increment/decrement value at index of type '${currentValue?.runtimeType}': Expected number or object with '+' operator.",
+        );
+      }
+
+      // Set new value via []= operator or direct access
+      if (targetValue is List) {
+        final index = indexValue as int;
+        targetValue[index] = newValue;
+      } else if (targetValue is Map) {
+        targetValue[_unwrapHashKey(indexValue)] = newValue;
+      } else if (targetValue is InterpretedInstance) {
+        // Use class operator []= if available
+        final operatorMethod = targetValue.findOperator('[]=');
+        if (operatorMethod != null) {
+          try {
+            operatorMethod.bind(targetValue).call(this, [
+              indexValue,
+              newValue,
+            ], {});
+          } on ReturnException catch (_) {
+            // []= should not return a value, but assignment expression returns assigned value
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing class operator '[]=' for postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}': $e",
+            );
+          }
+        } else {
+          throw RuntimeD4rtException(
+            "Cannot write index for postfix increment/decrement on ${targetValue.klass.name}: No operator '[]=' found.",
+          );
+        }
+      }
+
+      // Return the *original* value for postfix operators
+      return originalValue;
+    } else {
+      throw RuntimeD4rtException(
+        "Operand for postfix '${operatorType == TokenType.PLUS_PLUS ? '++' : '--'}' must be an assignable variable or property.",
+      );
+    }
+  }
+
+  // Handle String Interpolation: "Value is ${expr}"
+  @override
+  Object? visitStringInterpolation(StringInterpolation node) {
+    final buffer = StringBuffer();
+    for (final element in node.elements) {
+      if (element is InterpolationString) {
+        buffer.write(element.value);
+      } else if (element is InterpolationExpression) {
+        final value = element.expression.accept<Object?>(this);
+        // If the value is an async suspension, propagate it upward
+        if (value is AsyncSuspensionRequest) {
+          return value;
+        }
+        buffer.write(stringify(value)); // Use stringify helper
+      } else {
+        // Should not happen based on AST structure
+        throw StateD4rtException(
+          'Unknown interpolation element: ${element.runtimeType}',
+        );
+      }
+    }
+    return buffer.toString();
+  }
+
+  @override
+  Object? visitSuperExpression(SuperExpression node) {
+    if (currentFunction == null || currentFunction?.ownerType == null) {
+      // Use ownerType
+      throw RuntimeD4rtException(
+        "'super' can only be used within an instance method.",
+      );
+    }
+    final ownerType = currentFunction!.ownerType!; // Use ownerType
+    // Need to ensure ownerType is actually a class for super access
+    if (ownerType is! InterpretedClass) {
+      throw RuntimeD4rtException(
+        "'super' used outside of a class context (found ${ownerType.runtimeType}).",
+      );
+    }
+    final definingClass =
+        ownerType; // Can safely use ownerType as InterpretedClass now
+
+    InterpretedClass? standardSuperclass = definingClass.superclass;
+    BridgedClass? bridgedSuperclass = definingClass.bridgedSuperclass;
+
+    // Step 3 (testlog 20260518-1449): when the class has neither a standard
+    // nor a bridged superclass but DOES apply bridged mixins (e.g.
+    // `class _Node with DiagnosticableTreeMixin`), Dart's mixin desugaring
+    // produces an implicit super of `(Object with M1 with M2 ...)`. Treat
+    // the most-derived bridged mixin (last in the `with` clause) as the
+    // bridged superclass for super-call resolution so that scripts can
+    // invoke the mixin's default implementation via `super.foo(...)`.
+    if (standardSuperclass == null &&
+        bridgedSuperclass == null &&
+        definingClass.bridgedMixins.isNotEmpty) {
+      bridgedSuperclass = definingClass.bridgedMixins.last;
+    }
+
+    if (standardSuperclass == null && bridgedSuperclass == null) {
+      // SCF24: the superclass is `Object`, which is a real superclass — a
+      // class declaring no `extends` still has `super.toString()` and
+      // `super.noSuchMethod(i)`, and an override commonly calls them.
+      final thisInstance = environment.get('this');
+      if (thisInstance is InterpretedInstance) {
+        return BoundObjectSuper(thisInstance);
+      }
+      throw RuntimeD4rtException(
+        "Class '${definingClass.name}' does not have a standard or bridged superclass, cannot use 'super'.",
+      );
+    }
+
+    // Get the current 'this' instance
+    try {
+      final thisInstance = environment.get('this');
+      if (thisInstance is InterpretedInstance) {
+        // Pass the correct superclass type to BoundSuper
+        if (standardSuperclass != null) {
+          return BoundSuper(thisInstance, standardSuperclass);
+        } else {
+          // bridgedSuperclass cannot be null here due to the check above
+          return BoundBridgedSuper(thisInstance, bridgedSuperclass!);
+        }
+      } else {
+        // Should not happen if currentFunction is set correctly
+        throw RuntimeD4rtException(
+          "Cannot find 'this' instance when using 'super'.",
+        );
+      }
+    } on RuntimeD4rtException {
+      throw RuntimeD4rtException(
+        "Cannot find 'this' instance when using 'super'.",
+      );
+    }
+  }
+
+  @override
+  Object? visitLabeledStatement(LabeledStatement node) {
+    final labelNames = node.labels.map((l) => l.label.name).toSet();
+    // A statement written `a: b: ...` may arrive as nested labelled
+    // statements; the statement they wrap answers to every one of them.
+    if (identical(node, _labelledStatement)) {
+      labelNames.addAll(_labelledStatementLabels);
+    }
+    final previousStatement = _labelledStatement;
+    final previousLabels = _labelledStatementLabels;
+    _labelledStatement = node.statement;
+    _labelledStatementLabels = labelNames;
+    Logger.debug("[LabeledStatement] Entering with labels: $labelNames");
+
+    try {
+      return node.statement.accept<Object?>(this);
+    } on BreakException catch (e) {
+      if (e.label != null && labelNames.contains(e.label)) {
+        // A labelled break naming this statement leaves it — the only way to
+        // leave a labelled block, and harmless for a loop, which consumed its
+        // own labelled break already.
+        Logger.debug(
+          "[LabeledStatement] Consuming labeled break: '${e.label}'.",
+        );
+        return null;
+      }
+      rethrow;
+    }
+    // A labelled continue is caught by the loop the label is written on.
+    finally {
+      Logger.debug("[LabeledStatement] Exiting labels: $labelNames");
+      _labelledStatement = previousStatement;
+      _labelledStatementLabels = previousLabels;
+    }
+  }
+
+  @override
+  Object? visitClassDeclaration(ClassDeclaration node) {
+    final className = node.name.lexeme;
+    Logger.debug(
+      "[Visitor.visitClassDeclaration] START for '$className' in env: ${environment.hashCode}",
+    );
+
+    // Retrieve the placeholder class object created in Pass 1
+    Object? placeholder = environment.get(className);
+    if (placeholder == null || placeholder is! InterpretedClass) {
+      // This should not happen if Pass 1 worked correctly
+      throw StateD4rtException(
+        "Placeholder for class '$className' not found or invalid during Pass 2.",
+      );
+    }
+    final klass = placeholder;
+    // SCD72: record the visitor so `InterpretedInstance.toString()` can reach a
+    // script's own `toString` override after the interpreter has unwound — which
+    // is exactly when a host reads it (measured: `D4.activeVisitor` is null
+    // inside an `onUncaughtError` hook). Once per class, not per instance.
+    klass.declaringVisitor = this;
+    // SCE130: pass 1 resolved this class's type-parameter bounds before any
+    // import or type alias existed, and left behind whatever it could not
+    // resolve. Repair it now, before any member is populated.
+    klass.resolveDeferredTypeParameterBounds(node.typeParameters, environment);
+    Logger.debug(
+      "[Visitor.visitClassDeclaration] Retrieved placeholder for '$className' (hash: ${klass.hashCode})",
+    );
+
+    // Resolve and populate relationships ON THE EXISTING klass object
+    // Superclass lookup
+    // InterpretedClass? superclass; // Keep this commented or remove
+    if (node.extendsClause != null) {
+      final superclassName = node.extendsClause!.superclass.name.lexeme;
+      Logger.debug(
+        "[Visitor.visitClassDeclaration]   Trying to get superclass '$superclassName' from env: ${environment.hashCode}",
+      );
+      Object? potentialSuperclass;
+      try {
+        potentialSuperclass = environment.get(superclassName);
+      } on RuntimeD4rtException {
+        throw RuntimeD4rtException(
+          "Superclass '$superclassName' not found for class '$className'. Ensure it's defined.",
+        );
+      }
+
+      if (potentialSuperclass is InterpretedClass) {
+        // Standard Dart Superclass
+        final superclass = potentialSuperclass;
+
+        // Add checks for final and interface modifiers
+        // Note: sealed and interface classes CAN be extended within the same library/file,
+        // and in D4rt all interpreted code is considered the same library
+        //
+        // For 'final' classes:
+        // - A 'final' class cannot be extended outside its library
+        // - An 'abstract final' class CAN be extended within the same library (needs implementation)
+        // - Since all D4rt code is considered the same library, we only block non-abstract final classes
+        if (superclass.isFinal && !superclass.isAbstract) {
+          throw RuntimeD4rtException(
+            "Class '$className' cannot extend final class '$superclassName'.",
+          );
+        }
+        // Interface classes can be extended within the same library, so we allow it in D4rt
+        // sealed classes are also allowed to be extended - they restrict external libraries only
+
+        // Set the superclass and clear bridged superclass
+        klass.superclass = superclass;
+        klass.bridgedSuperclass = null;
+        Logger.debug(
+          "[Visitor.visitClassDeclaration] Set standard superclass '$superclassName' for '$className'",
+        );
+      } else if (potentialSuperclass is BridgedClass) {
+        final bridgedSuperclass = potentialSuperclass;
+        // No modifier checks needed for bridged classes (yet?)
+
+        // Set the bridged superclass and clear standard superclass
+        klass.bridgedSuperclass = bridgedSuperclass;
+        klass.superclass = null;
+
+        // Capture the reified type arguments from the extends clause so
+        // proxy factories can pick the right typed variant (e.g.
+        // `extends CustomClipper<RRect>` → pick the RRect proxy, not the
+        // default Path one). See [InterpretedClass.bridgedSuperTypeArgNames].
+        final superTypeArgs =
+            node.extendsClause!.superclass.typeArguments?.arguments;
+        if (superTypeArgs != null && superTypeArgs.isNotEmpty) {
+          klass.bridgedSuperTypeArgNames = superTypeArgs
+              .map((arg) => arg is NamedType ? (arg.name.lexeme) : '')
+              .toList();
+        }
+
+        Logger.debug(
+          "[Visitor.visitClassDeclaration] Set BRIDGED superclass '$superclassName' for '$className' (typeArgs=${klass.bridgedSuperTypeArgNames})",
+        );
+      } else {
+        throw RuntimeD4rtException(
+          "Superclass '$superclassName' for class '$className' resolved to ${potentialSuperclass?.runtimeType}, which is not a class or bridged class.",
+        );
+      }
+    }
+
+    // Interface lookup
+    if (node.implementsClause != null) {
+      Logger.debug(
+        "[Visitor.visitClassDeclaration] Processing 'implements' clause for '$className' in env: ${environment.hashCode}",
+      );
+      for (final interfaceType in node.implementsClause!.interfaces) {
+        final interfaceName = interfaceType.name.lexeme;
+        Logger.debug(
+          "[Visitor.visitClassDeclaration]   Trying to get interface '$interfaceName' from env: ${environment.hashCode}",
+        );
+        try {
+          final potentialInterface = environment.get(interfaceName);
+          if (potentialInterface is InterpretedClass) {
+            // Add checks for base modifier only
+            // Note: sealed classes CAN be implemented within the same library/file
+            if (potentialInterface.isBase) {
+              throw RuntimeD4rtException(
+                "Class '$className' cannot implement base class '$interfaceName' outside of its library.",
+              );
+            }
+            // sealed classes are allowed to be implemented - they restrict external libraries only
+
+            // Add to the interfaces list of the existing klass object
+            klass.interfaces.add(potentialInterface);
+            Logger.debug(
+              "[Visitor.visitClassDeclaration] Added interface '$interfaceName' for '$className'",
+            );
+          } else if (potentialInterface is BridgedClass) {
+            // Support for bridged interfaces like Comparable, Exception
+            klass.bridgedInterfaces.add(potentialInterface);
+            Logger.debug(
+              "[Visitor.visitClassDeclaration] Added bridged interface '$interfaceName' for '$className'",
+            );
+          } else {
+            throw RuntimeD4rtException(
+              "Class '$className' cannot implement non-class '$interfaceName' (${potentialInterface?.runtimeType}).",
+            );
+          }
+        } on RuntimeD4rtException {
+          throw RuntimeD4rtException(
+            "Interface '$interfaceName' not found for class '$className'. Ensure it's defined.",
+          );
+        }
+      }
+    }
+
+    // Mixin application lookup
+    if (node.withClause != null) {
+      Logger.debug(
+        "[Visitor.visitClassDeclaration] Processing 'with' clause for '$className' in env: ${environment.hashCode}",
+      );
+      for (final mixinType in node.withClause!.mixinTypes) {
+        final mixinName = mixinType.name.lexeme;
+        Logger.debug(
+          "[Visitor.visitClassDeclaration]   Trying to get mixin '$mixinName' from env: ${environment.hashCode}",
+        );
+
+        Object? mixin;
+        try {
+          mixin = environment.get(mixinName);
+        } on RuntimeD4rtException {
+          throw RuntimeD4rtException(
+            "Mixin '$mixinName' not found during lookup for class '$className'. Ensure it's defined (as a mixin or class mixin).",
+          );
+        }
+
+        if (mixin is InterpretedClass) {
+          if (!mixin.isMixin) {
+            throw RuntimeD4rtException(
+              "Class '$mixinName' cannot be used as a mixin because it's not declared with 'mixin' or 'class mixin'.",
+            );
+          }
+
+          // Add checks for base modifier only
+          // Note: sealed classes CAN be mixed in within the same library/file
+          if (mixin.isBase) {
+            throw RuntimeD4rtException(
+              "Class '$className' cannot mix in base class '$mixinName' outside of its library.",
+            );
+          }
+          // sealed classes are allowed to be mixed in - they restrict external libraries only
+
+          // Add to the mixins list of the existing klass object
+          klass.mixins.add(mixin);
+          Logger.debug(
+            "[Visitor.visitClassDeclaration] Applied interpreted mixin '$mixinName' to '$className'",
+          );
+        } else if (mixin is BridgedClass) {
+          // Support for bridged classes as mixins
+          if (!mixin.canBeUsedAsMixin) {
+            throw RuntimeD4rtException(
+              "Bridged class '$mixinName' cannot be used as a mixin. Set canBeUsedAsMixin=true when registering the bridge.",
+            );
+          }
+
+          // Add to the bridged mixins list
+          klass.bridgedMixins.add(mixin);
+          Logger.debug(
+            "[Visitor.visitClassDeclaration] Applied bridged mixin '$mixinName' to '$className'",
+          );
+        } else {
+          throw RuntimeD4rtException(
+            "Identifier '$mixinName' resolved to ${mixin?.runtimeType}, which is not a class/mixin, for class '$className'.",
+          );
+        }
+      }
+    }
+
+    // Populate members ON THE EXISTING klass object
+    final staticInitEnv = environment; // Statics use the class definition env
+    final originalVisitorEnv = environment; // Backup visitor env
+
+    Logger.debug(
+      "[Visitor.visitClassDeclaration] Processing members for '$className' (hash: ${klass.hashCode})",
+    );
+
+    for (final member in node.members) {
+      if (member is MethodDeclaration) {
+        final methodName = member.name.lexeme;
+        // Pass the ALREADY RETRIEVED klass object
+        final function = InterpretedFunction.method(
+          member,
+          staticInitEnv,
+          klass,
+        );
+
+        if (member.isStatic) {
+          if (member.isGetter) {
+            klass.staticGetters[methodName] = function;
+          } else if (member.isSetter) {
+            klass.staticSetters[methodName] = function;
+          } else {
+            klass.staticMethods[methodName] = function;
+          }
+        } else if (!member.isAbstract) {
+          if (member.isGetter) {
+            klass.getters[methodName] = function;
+          } else if (member.isSetter) {
+            klass.setters[methodName] = function;
+          } else if (member.isOperator) {
+            // Add operator methods to the operators map
+            klass.operators[methodName] = function;
+          } else {
+            klass.methods[methodName] = function;
+          }
+        } else {
+          // Abstract
+          if (!klass.isAbstract) {
+            throw RuntimeD4rtException(
+              "Abstract methods can only be declared in abstract classes. Method '${klass.name}.$methodName'.",
+            );
+          }
+          if (member.body is! EmptyFunctionBody) {
+            throw RuntimeD4rtException(
+              "Abstract methods cannot have a body. Method '${klass.name}.$methodName'.",
+            );
+          }
+          if (member.isGetter) {
+            klass.getters[methodName] = function;
+          } else if (member.isSetter) {
+            klass.setters[methodName] = function;
+          } else if (member.isOperator) {
+            // Add abstract operator methods to the operators map
+            klass.operators[methodName] = function;
+          } else {
+            klass.methods[methodName] = function;
+          }
+        }
+      } else if (member is ConstructorDeclaration) {
+        final function = InterpretedFunction.constructor(
+          member,
+          staticInitEnv,
+          klass,
+        );
+        final constructorName = member.name?.lexeme ?? '';
+        klass.constructors[constructorName] = function;
+      } else if (member is FieldDeclaration) {
+        // Defer static field processing - collect them for later
+        if (!member.isStatic) {
+          klass.fieldDeclarations.add(member);
+        }
+      } else {
+        throw StateD4rtException('Unknown member type: ${member.runtimeType}');
+      }
+    }
+
+    // TWO-PASS STATIC FIELD PROCESSING to handle sibling references (Bug-23)
+    // Pass 1: Register all static field names in the class environment with null values
+    final staticFieldDecls = <VariableDeclaration>[];
+    final staticFieldMeta =
+        <String, (bool isLate, bool isFinal, Expression? initializer)>{};
+    for (final member in node.members) {
+      if (member is FieldDeclaration && member.isStatic) {
+        final isLate = member.fields.lateKeyword != null;
+        final isFinal = member.fields.keyword?.lexeme == 'final';
+        for (final variable in member.fields.variables) {
+          final fieldName = variable.name.lexeme;
+          staticFieldDecls.add(variable);
+          staticFieldMeta[fieldName] = (isLate, isFinal, variable.initializer);
+          // Pre-register all static fields so they can reference each other
+          klass.staticFields[fieldName] = null;
+        }
+      }
+    }
+
+    // Pass 2: Evaluate all static field initializers (now all fields are known)
+    // Create a child environment that can shadow with evaluated field values.
+    //
+    // Bug-43 / forward-class-reference FIX: evaluating `static const`
+    // initializers can require other classes (and their constructors) that
+    // appear later in source order. We support deferring this whole block
+    // to after every class has been visited.
+    final staticFieldEvalEnv = Environment(enclosing: staticInitEnv);
+
+    void evaluateStaticFields() {
+      final savedEnvOnEntry = environment;
+      try {
+        environment = staticFieldEvalEnv;
+        for (final variable in staticFieldDecls) {
+          final fieldName = variable.name.lexeme;
+          final (isLate, isFinal, initializer) = staticFieldMeta[fieldName]!;
+
+          if (isLate) {
+            // Handle late static field
+            if (initializer != null) {
+              // Late static field with lazy initializer
+              final lateVar = LateVariable(fieldName, () {
+                // Closure evaluates the initializer on first access.
+                final savedEnv = environment;
+                try {
+                  environment = staticFieldEvalEnv;
+                  return initializer.accept<Object?>(this);
+                } finally {
+                  environment = savedEnv;
+                }
+              }, isFinal: isFinal);
+              klass.staticFields[fieldName] = lateVar;
+              // Also define in eval environment for sibling access
+              staticFieldEvalEnv.define(fieldName, lateVar);
+              Logger.debug(
+                "[ClassDecl] Defined late static field '$fieldName' with lazy initializer for class '${klass.name}'.",
+              );
+            } else {
+              // Late static field without initializer
+              final lateVar = LateVariable(fieldName, null, isFinal: isFinal);
+              klass.staticFields[fieldName] = lateVar;
+              staticFieldEvalEnv.define(fieldName, lateVar);
+              Logger.debug(
+                "[ClassDecl] Defined late static field '$fieldName' without initializer for class '${klass.name}'.",
+              );
+            }
+          } else {
+            // Regular static field handling
+            Object? value;
+            if (initializer != null) {
+              value = initializer.accept<Object?>(this);
+            }
+            klass.staticFields[fieldName] = value;
+            // Define the evaluated value in the environment so subsequent fields can access it
+            staticFieldEvalEnv.define(fieldName, value);
+          }
+        }
+      } finally {
+        environment = savedEnvOnEntry;
+      }
+    }
+
+    if (deferStaticFieldInits) {
+      Logger.debug(
+        "[ClassDecl] Deferring static-field initialization for class '${klass.name}' until all classes are declared.",
+      );
+      _pendingStaticInitializers.add(evaluateStaticFields);
+      // Leave environment where the caller expects it (originalVisitorEnv).
+      environment = originalVisitorEnv;
+    } else {
+      try {
+        evaluateStaticFields();
+      } finally {
+        environment = originalVisitorEnv;
+      }
+    }
+
+    Logger.debug(
+      "[Visitor.visitClassDeclaration] Finished processing members for '$className'",
+    );
+
+    // Final Checks (run on the populated klass object)
+    // Check for unimplemented abstract members
+    if (!klass.isAbstract) {
+      final inheritedAbstract = klass.getAbstractInheritedMembers();
+      // G-DOV-6/7 FIX: Use getAllConcreteMembers() to walk the full superclass chain
+      // (not just this class + mixins), so grandparent concrete implementations are found.
+      final concreteMembers = klass.getAllConcreteMembers();
+      final fieldNames = klass
+          .getInstanceFieldNames(); // Fields also satisfy abstract getters
+      for (final abstractName in inheritedAbstract.keys) {
+        // Check if the abstract member is satisfied by a concrete method/getter/setter OR a field
+        if (!concreteMembers.containsKey(abstractName) &&
+            !fieldNames.contains(abstractName)) {
+          final abstractMember = inheritedAbstract[abstractName]!;
+          String memberType = "method";
+          if (abstractMember.isGetter) memberType = "getter";
+          if (abstractMember.isSetter) memberType = "setter";
+          throw RuntimeD4rtException(
+            "Missing concrete implementation for inherited abstract $memberType '$abstractName' in class '${klass.name}'.",
+          );
+        }
+      }
+    }
+
+    // Check for unimplemented interface members
+    if (!klass.isAbstract) {
+      final requiredInterfaceMembers = klass.getAllInterfaceMembers();
+      final availableConcreteMembers = klass.getAllConcreteMembers();
+      for (final requiredName in requiredInterfaceMembers.keys) {
+        if (!availableConcreteMembers.containsKey(requiredName)) {
+          final memberType = requiredInterfaceMembers[requiredName]!;
+          throw RuntimeD4rtException(
+            "Missing concrete implementation for interface $memberType '$requiredName' in class '${klass.name}'.",
+          );
+        }
+      }
+    }
+    // Perf T6: all function tables are fully populated; compact them into
+    // their read-only form. staticFields is excluded (deferred init).
+    klass.freezeMemberTables();
+
+    Logger.debug("[Visitor.visitClassDeclaration] END for '$className'");
+    // No need to define/assign klass in the environment here, it was done in Pass 1.
+    return null; // Class declaration statement doesn't return a value
+  }
+
+  @override
+  Object? visitAssertStatement(AssertStatement node) {
+    // Assertions are always enabled in this interpreter for now.
+    final conditionValue = node.condition.accept<Object?>(this);
+
+    final bridgedInstance = toBridgedInstance(conditionValue);
+    bool conditionResult;
+    if (conditionValue is bool) {
+      conditionResult = conditionValue;
+    } else if (bridgedInstance.$2 && bridgedInstance.$1?.nativeObject is bool) {
+      conditionResult = bridgedInstance.$1!.nativeObject as bool;
+    } else {
+      throw RuntimeD4rtException(
+        "Assertion condition must be a boolean, but was ${conditionValue?.runtimeType}.",
+      );
+    }
+
+    if (!conditionResult) {
+      // Condition is false, evaluate the message and throw. The SDK's own
+      // AssertionError is used rather than a d4rt one, because it is the rare
+      // case where the SDK constructor DOES take the message — so `e.message`
+      // returns the script's raw message object, as it would natively, instead
+      // of a string we pre-formatted.
+      Object? assertionMessage;
+      if (node.message != null) {
+        assertionMessage = node.message!.accept<Object?>(this);
+      }
+      throw AssertionError(assertionMessage);
+    }
+
+    return null; // Assert statements don't produce a value.
+  }
+
+  // Visit Mixin Declaration (Adjusted for Two-Pass)
+  @override
+  Object? visitMixinDeclaration(MixinDeclaration node) {
+    final mixinName = node.name.lexeme;
+    Logger.debug(
+      "[Visitor.visitMixinDeclaration] START for '$mixinName' in env: ${environment.hashCode}",
+    );
+
+    // Retrieve the placeholder mixin object created in Pass 1
+    Object? placeholder = environment.get(mixinName);
+    if (placeholder == null ||
+        placeholder is! InterpretedClass ||
+        !placeholder.isMixin) {
+      throw StateD4rtException(
+        "Placeholder for mixin '$mixinName' not found or invalid during Pass 2.",
+      );
+    }
+    final mixinClass = placeholder;
+    // SCD72 — see the note in `visitClassDeclaration`. A mixin can carry the
+    // `toString` an instance ends up dispatching, so it needs the same wiring.
+    mixinClass.declaringVisitor = this;
+    Logger.debug(
+      "[Visitor.visitMixinDeclaration] Retrieved placeholder for mixin '$mixinName' (hash: ${mixinClass.hashCode})",
+    );
+
+    // Resolve 'on' clause constraints ON THE EXISTING mixinClass object
+    if (node.onClause != null) {
+      mixinClass.onClauseTypes.clear(); // Clear existing before populating
+      for (final typeNode in node.onClause!.superclassConstraints) {
+        final typeName = typeNode.name.lexeme;
+        try {
+          final potentialType = environment.get(typeName);
+          if (potentialType is InterpretedClass ||
+              potentialType is BridgedClass) {
+            // RC-7: Accept both InterpretedClass and BridgedClass for
+            // mixin 'on' clause constraints. Bridged classes (e.g., State)
+            // are valid superclass constraints.
+            mixinClass.onClauseTypes.add(potentialType as RuntimeType);
+            Logger.debug(
+              "[Visitor.visitMixinDeclaration] Added 'on' constraint '$typeName' for '$mixinName'",
+            );
+          } else {
+            throw RuntimeD4rtException(
+              "Type '$typeName' in 'on' clause of mixin '$mixinName' is not a class (${potentialType?.runtimeType}).",
+            );
+          }
+        } on RuntimeD4rtException {
+          throw RuntimeD4rtException(
+            "Type '$typeName' in 'on' clause of mixin '$mixinName' not found. Ensure it's defined.",
+          );
+        }
+      }
+    }
+
+    // Cluster-18: Resolve 'implements' clause for mixins. Without this, an
+    // interpreted mixin like
+    //   mixin _TickerProviderShim on State<T> implements TickerProvider { ... }
+    // never records TickerProvider as a bridged interface, so callers using
+    // `vsync: this` (where `this` is a State that mixes in this shim) cannot
+    // satisfy a TickerProvider parameter through interface-proxy resolution.
+    if (node.implementsClause != null) {
+      Logger.debug(
+        "[Visitor.visitMixinDeclaration] Processing 'implements' clause for '$mixinName' in env: ${environment.hashCode}",
+      );
+      for (final interfaceType in node.implementsClause!.interfaces) {
+        final interfaceName = interfaceType.name.lexeme;
+        try {
+          final potentialInterface = environment.get(interfaceName);
+          if (potentialInterface is InterpretedClass) {
+            if (potentialInterface.isBase) {
+              throw RuntimeD4rtException(
+                "Mixin '$mixinName' cannot implement base class '$interfaceName' outside of its library.",
+              );
+            }
+            mixinClass.interfaces.add(potentialInterface);
+            Logger.debug(
+              "[Visitor.visitMixinDeclaration] Added interface '$interfaceName' for '$mixinName'",
+            );
+          } else if (potentialInterface is BridgedClass) {
+            mixinClass.bridgedInterfaces.add(potentialInterface);
+            Logger.debug(
+              "[Visitor.visitMixinDeclaration] Added bridged interface '$interfaceName' for '$mixinName'",
+            );
+          } else {
+            throw RuntimeD4rtException(
+              "Mixin '$mixinName' cannot implement non-class '$interfaceName' (${potentialInterface?.runtimeType}).",
+            );
+          }
+        } on RuntimeD4rtException {
+          throw RuntimeD4rtException(
+            "Interface '$interfaceName' not found for mixin '$mixinName'. Ensure it's defined.",
+          );
+        }
+      }
+    }
+
+    // Populate members ON THE EXISTING mixinClass object
+    final declarationEnv =
+        environment; // Members use the mixin's declaration env
+    final originalVisitorEnv = environment;
+
+    Logger.debug(
+      "[Visitor.visitMixinDeclaration] Processing members for mixin '$mixinName' (hash: ${mixinClass.hashCode})",
+    );
+
+    try {
+      environment = declarationEnv;
+      for (final member in node.members) {
+        if (member is MethodDeclaration) {
+          final methodName = member.name.lexeme;
+          // Methods capture the GLOBAL environment via the mixinClass
+          final function = InterpretedFunction.method(
+            member,
+            globalEnvironment,
+            mixinClass,
+          );
+          if (member.isStatic) {
+            // Static members belong to the mixin definition itself
+            if (member.isGetter) {
+              mixinClass.staticGetters[methodName] = function;
+            } else if (member.isSetter) {
+              mixinClass.staticSetters[methodName] = function;
+            } else {
+              mixinClass.staticMethods[methodName] = function;
+            }
+          } else {
+            if (member.isGetter) {
+              mixinClass.getters[methodName] = function;
+            } else if (member.isSetter) {
+              mixinClass.setters[methodName] = function;
+            } else if (member.isOperator) {
+              // Add operator methods to the operators map for mixins
+              mixinClass.operators[methodName] = function;
+            } else {
+              mixinClass.methods[methodName] = function;
+            }
+          }
+        } else if (member is FieldDeclaration) {
+          if (member.isStatic) {
+            for (final variable in member.fields.variables) {
+              mixinClass.staticFields[variable.name.lexeme] = variable
+                  .initializer
+                  ?.accept<Object?>(this);
+            }
+          } else {
+            mixinClass.fieldDeclarations.add(member);
+          }
+        } else if (member is ConstructorDeclaration) {
+          throw RuntimeD4rtException(
+            "Mixins cannot declare constructors ('$mixinName').",
+          );
+        }
+      }
+    } finally {
+      environment = originalVisitorEnv;
+    }
+
+    // Perf T6: compact the mixin's function tables now that wiring is done.
+    mixinClass.freezeMemberTables();
+
+    Logger.debug("[Visitor.visitMixinDeclaration] END for '$mixinName'");
+    return null; // Mixin declaration doesn't return a value
+  }
+
+  @override
+  Object? visitEnumDeclaration(EnumDeclaration node) {
+    final enumName = node.name.lexeme;
+    Logger.debug(
+      "[Visitor.visitEnumDeclaration] START (Pass 2) for '$enumName'",
+    );
+
+    // Retrieve the enum placeholder object created in Pass 1
+    final enumObj = environment.get(enumName);
+    if (enumObj == null || enumObj is! InterpretedEnum) {
+      throw StateD4rtException(
+        "Enum placeholder object for '$enumName' not found or invalid during Pass 2.",
+      );
+    }
+
+    // SCE116: same wiring `visitClassDeclaration` does, for the same reason —
+    // `InterpretedEnumValue.toString()` needs a visitor to dispatch to a
+    // script's override, and a host reads it after the interpreter has unwound.
+    // Once per enum, not per value.
+    enumObj.declaringVisitor = this;
+
+    // Process Mixin Application (similar to class mixin handling)
+    if (node.withClause != null) {
+      Logger.debug(
+        "[Visitor.visitEnumDeclaration] Processing 'with' clause for '$enumName'",
+      );
+      for (final mixinType in node.withClause!.mixinTypes) {
+        final mixinName = mixinType.name.lexeme;
+        Logger.debug(
+          "[Visitor.visitEnumDeclaration]   Trying to get mixin '$mixinName'",
+        );
+
+        Object? mixin;
+        try {
+          mixin = environment.get(mixinName);
+        } on RuntimeD4rtException {
+          throw RuntimeD4rtException(
+            "Mixin '$mixinName' not found during lookup for enum '$enumName'. Ensure it's defined (as a mixin or class mixin).",
+          );
+        }
+
+        if (mixin is InterpretedClass) {
+          if (!mixin.isMixin) {
+            throw RuntimeD4rtException(
+              "Class '$mixinName' cannot be used as a mixin because it's not declared with 'mixin' or 'class mixin'.",
+            );
+          }
+
+          // Add to the mixins list of the enum object
+          enumObj.mixins.add(mixin);
+          Logger.debug(
+            "[Visitor.visitEnumDeclaration] Applied interpreted mixin '$mixinName' to '$enumName'",
+          );
+        } else if (mixin is BridgedClass) {
+          // Support for bridged classes as mixins
+          if (!mixin.canBeUsedAsMixin) {
+            throw RuntimeD4rtException(
+              "Bridged class '$mixinName' cannot be used as a mixin. Set canBeUsedAsMixin=true when registering the bridge.",
+            );
+          }
+
+          // Add to the bridged mixins list
+          enumObj.bridgedMixins.add(mixin);
+          Logger.debug(
+            "[Visitor.visitEnumDeclaration] Applied bridged mixin '$mixinName' to '$enumName'",
+          );
+        } else {
+          throw RuntimeD4rtException(
+            "Identifier '$mixinName' resolved to ${mixin?.runtimeType}, which is not a class/mixin, for enum '$enumName'.",
+          );
+        }
+      }
+    }
+
+    // Process Members (Static and Instance)
+    // Members defined in the enum body (methods, getters, fields, constructors)
+    final originalVisitorEnv = environment; // Save original environment
+    try {
+      // Members are defined in the enum's declaration scope
+      environment = enumObj.declarationEnvironment;
+      for (final member in node.members) {
+        if (member is MethodDeclaration) {
+          final methodName = member.name.lexeme;
+          // Methods capture the enum's declaration environment implicitly
+          final function = InterpretedFunction.method(
+            member,
+            environment,
+            enumObj,
+          );
+
+          if (member.isStatic) {
+            if (member.isGetter) {
+              enumObj.staticGetters[methodName] = function;
+            } else if (member.isSetter) {
+              enumObj.staticSetters[methodName] = function;
+            } else {
+              enumObj.staticMethods[methodName] = function;
+            }
+            Logger.debug(
+              "[Visitor.visitEnumDeclaration]   Processed static method/getter/setter: $methodName",
+            );
+          } else {
+            if (member.isAbstract) {
+              throw RuntimeD4rtException(
+                "Enums cannot have abstract members ('$enumName.$methodName').",
+              );
+            }
+            if (member.isGetter) {
+              enumObj.getters[methodName] = function;
+            } else if (member.isSetter) {
+              enumObj.setters[methodName] = function;
+            } else {
+              enumObj.methods[methodName] = function;
+            }
+            Logger.debug(
+              "[Visitor.visitEnumDeclaration]   Processed instance method/getter/setter: $methodName",
+            );
+          }
+        } else if (member is ConstructorDeclaration) {
+          if (member.factoryKeyword != null) {
+            throw UnimplementedD4rtException(
+              "Factory constructors in enums are not yet supported.",
+            );
+          }
+          if (member.redirectedConstructor != null) {
+            throw UnimplementedD4rtException(
+              "Redirecting constructors in enums are not yet supported.",
+            );
+          }
+          // Check if it's the default unnamed constructor or a named one
+          final constructorName = member.name?.lexeme ?? '';
+          // Constructors also capture the enum's declaration environment
+          final function = InterpretedFunction.constructor(
+            member,
+            environment,
+            enumObj,
+          );
+
+          enumObj.constructors[constructorName] = function;
+          Logger.debug(
+            "[Visitor.visitEnumDeclaration]   Processed constructor: ${constructorName.isEmpty ? enumName : '$enumName.$constructorName'}",
+          );
+        } else if (member is FieldDeclaration) {
+          // Store field declarations for instance initialization
+          // Only non-static fields are relevant for enum value instances
+          if (!member.isStatic) {
+            enumObj.fieldDeclarations.add(member);
+            for (final variable in member.fields.variables) {
+              Logger.debug(
+                "[Visitor.visitEnumDeclaration]   Stored instance field declaration: ${variable.name.lexeme}",
+              );
+            }
+          } else {
+            // Evaluate static fields immediately
+            for (final variable in member.fields.variables) {
+              final fieldName = variable.name.lexeme;
+              Object? value;
+              if (variable.initializer != null) {
+                value = variable.initializer!.accept<Object?>(this);
+              }
+              enumObj.staticFields[fieldName] = value;
+              Logger.debug(
+                "[Visitor.visitEnumDeclaration]   Evaluated static field: $fieldName = $value",
+              );
+            }
+          }
+        } else {
+          Logger.warn(
+            "[Visitor.visitEnumDeclaration]   Ignoring unknown member type: ${member.runtimeType}",
+          );
+        }
+      }
+    } finally {
+      environment = originalVisitorEnv; // Restore environment
+    }
+
+    // Perf T6: function tables are populated; freeze before value
+    // instantiation (which only reads constructors).
+    enumObj.freezeMemberTables();
+
+    // Instantiate Enum Values
+    Logger.debug(
+      "[Visitor.visitEnumDeclaration]   Instantiating enum values...",
+    );
+    for (int i = 0; i < node.constants.length; i++) {
+      final constantDecl = node.constants[i];
+      final valueName = constantDecl.name.lexeme;
+
+      if (enumObj.values.containsKey(valueName)) {
+        Logger.warn(
+          "[Visitor.visitEnumDeclaration] Enum value '$enumName.$valueName' already exists (should not happen).",
+        );
+        continue;
+      }
+
+      // Create the runtime value instance (without initialized fields yet)
+      final enumValueInstance = InterpretedEnumValue(enumObj, valueName, i);
+
+      // Initialize Instance Fields using Constructor
+      final constructorInvocation = constantDecl.arguments;
+      final constructorName =
+          constructorInvocation?.constructorSelector?.name.name ?? '';
+      final constructorFunc = enumObj.constructors[constructorName];
+
+      if (constructorFunc == null && constructorInvocation != null) {
+        throw RuntimeD4rtException(
+          "Enum '$enumName' does not have a constructor named '$constructorName' required by constant '$valueName'.",
+        );
+      }
+      if (constructorFunc == null &&
+          enumObj.constructors.isNotEmpty &&
+          enumObj.constructors.containsKey('')) {
+        throw RuntimeD4rtException(
+          "Enum '$enumName' has a default constructor but constant '$valueName' doesn't call it implicitly (requires explicit `()` if args are needed or constructor exists).",
+        );
+      }
+      // If there are NO constructors defined at all, and no args are passed, it's okay.
+      if (constructorFunc != null && constructorInvocation != null) {
+        Logger.debug(
+          "[Visitor.visitEnumDeclaration]     Calling constructor '${constructorName.isEmpty ? enumName : '$enumName.$constructorName'}' for value '$valueName'",
+        );
+        // Evaluate arguments for the constructor call
+        final (positionalArgs, namedArgs) = _evaluateArguments(
+          constructorInvocation.argumentList,
+        );
+
+        // Call the constructor function, binding `this` to the enumValueInstance.
+        // The constructor's call method needs to handle field initialization.
+        try {
+          // Use the _prepareExecutionEnvironment helper? Or call directly?
+          // Need to ensure constructor initializers (: this.field = arg) run.
+          // Let's assume constructorFunc.call handles this when isInitializer is true.
+          final boundConstructor = constructorFunc.bind(enumValueInstance);
+          boundConstructor.call(this, positionalArgs, namedArgs);
+          Logger.debug(
+            "[Visitor.visitEnumDeclaration]     Constructor call finished for '$valueName'. Fields: $enumValueInstance",
+          ); // Log instance directly for now
+        } on RuntimeD4rtException catch (e) {
+          throw RuntimeD4rtException(
+            "Error executing constructor for enum value '$enumName.$valueName': ${e.message}",
+            originalException: e.originalException,
+            originalStackTrace: e.originalStackTrace,
+          );
+        } catch (e) {
+          throw RuntimeD4rtException(
+            "Unexpected error executing constructor for enum value '$enumName.$valueName': $e",
+          );
+        }
+      } else if (constructorFunc == null &&
+          constructorInvocation == null &&
+          enumObj.constructors.isNotEmpty) {
+        // Has constructors, but none called and no default exists implicitly.
+        throw RuntimeD4rtException(
+          "Enum constant '$enumName.$valueName' must call a constructor if the enum defines any.",
+        );
+      } else {
+        Logger.debug(
+          "[Visitor.visitEnumDeclaration]     No constructor called for '$valueName' (enum has no explicit constructors or constant has no args).",
+        );
+        // Initialize fields from declarations if no constructor called?
+        // This might mirror class field initialization before constructor body.
+        final fieldInitEnv = Environment(
+          enclosing: enumObj.declarationEnvironment,
+        );
+        fieldInitEnv.define('this', enumValueInstance);
+        final originalVisitorEnvForFields = environment;
+        try {
+          environment = fieldInitEnv;
+          for (final fieldDecl in enumObj.fieldDeclarations) {
+            for (final variable in fieldDecl.fields.variables) {
+              if (variable.initializer != null) {
+                final fieldName = variable.name.lexeme;
+                final value = variable.initializer!.accept<Object?>(this);
+                enumValueInstance.setField(fieldName, value);
+                Logger.debug(
+                  "[Visitor.visitEnumDeclaration]     Initialized instance field '$fieldName'=$value for '$valueName' (default init).",
+                );
+              }
+            }
+          }
+        } finally {
+          environment = originalVisitorEnvForFields;
+        }
+      }
+
+      // Store the fully initialized instance in the enum object's map
+      enumObj.values[valueName] = enumValueInstance;
+      Logger.debug(
+        "[Visitor.visitEnumDeclaration]   Created and initialized instance for '$enumName.$valueName' with index $i",
+      );
+    }
+
+    // Pre-cache the values list
+    try {
+      enumObj.valuesList; // Access the getter to trigger cache creation
+      Logger.debug(
+        "[Visitor.visitEnumDeclaration]   Cached 'values' list for '$enumName'.",
+      );
+    } catch (e) {
+      // Log error if caching fails (shouldn't happen ideally)
+      Logger.error(
+        "[Visitor.visitEnumDeclaration] Failed to cache 'values' for '$enumName': $e",
+      );
+    }
+
+    Logger.debug("[Visitor.visitEnumDeclaration] END (Pass 2) for '$enumName'");
+    return null; // Declaration doesn't return a value
+  }
+
+  // Named constructors wrap native collections, while literals are direct
+  // values. Both must use the same indexed read/write semantics and native
+  // type, bounds and immutability checks.
+  Object? _nativeIndexedCollection(Object? target) {
+    if (target is BridgedInstance &&
+        (target.nativeObject is List || target.nativeObject is Map)) {
+      return target.nativeObject;
+    }
+    return target;
+  }
+
+  // Helper function to compute compound assignment values
+  /// `obj.p++` / `++obj.p` (and `--`) on a BRIDGED receiver, or null when
+  /// [target] is not one (SCF37).
+  ///
+  /// Reads through the getter adapter and writes through the setter adapter,
+  /// as `obj.p += 1` does, with the step computed by [computeCompoundValue].
+  /// Both adapters come from the reachable walk (SCF19), so a property the
+  /// bridged class inherits steps too. Returns `(old, new)`: postfix yields
+  /// the first, prefix the second.
+  (Object?, Object?)? _stepBridgedProperty(
+    Object? target,
+    String propertyName,
+    TokenType operatorType,
+  ) {
+    final (bridged, isBridged) = toBridgedInstance(target);
+    if (!isBridged) return null;
+    final bridgedClass = bridged!.bridgedClass;
+    final getter = bridgedClass.findReachableGetterAdapter(propertyName, this);
+    final setter = bridgedClass.findReachableSetterAdapter(propertyName, this);
+    if (getter == null || setter == null) {
+      throw RuntimeD4rtException(
+        "Cannot increment/decrement '${bridgedClass.name}.$propertyName': "
+        "the bridge has ${getter == null ? 'no getter' : 'no setter'} for it.",
+      );
+    }
+    final oldValue = getter(this, bridged.nativeObject);
+    final newValue = computeCompoundValue(
+      oldValue,
+      1,
+      operatorType == TokenType.PLUS_PLUS
+          ? TokenType.PLUS_EQ
+          : TokenType.MINUS_EQ,
+    );
+    D4.withActiveVisitor<void>(
+      this,
+      () => setter(this, bridged.nativeObject, newValue),
+    );
+    return (oldValue, newValue);
+  }
+
+  Object? computeCompoundValue(
+    Object? currentValue,
+    Object? rhsValue,
+    TokenType operatorType,
+  ) {
+    // Unwrap BridgedInstance if necessary
+    final bridgedInstance = toBridgedInstance(currentValue);
+    final left = bridgedInstance.$2
+        ? bridgedInstance.$1!.nativeObject
+        : currentValue;
+    final right = rhsValue;
+
+    if (operatorType == TokenType.PLUS_EQ) {
+      // Use unwrapped left/right for calculation
+      if (left is num && right is num) {
+        return left + right;
+      } else if (left is String && right != null) {
+        return left + stringify(right);
+      } else if (left is List && right is List) {
+        // For List += List, create a new list with both elements
+        // This is how Dart's List + operator works
+        return [...left, ...right];
+      }
+      // Fall through to extension check if standard types don't match
+    } else if (operatorType == TokenType.MINUS_EQ) {
+      // Use unwrapped left/right for calculation
+      if (left is num && right is num) {
+        return left - right;
+      }
+      // Fall through
+    } else if (operatorType == TokenType.STAR_EQ) {
+      // Use unwrapped left/right for calculation
+      if (left is num && right is num) {
+        return left * right;
+      }
+      // Fall through
+      // SCC30: these three carried their own copy of the zero-divisor guards,
+      // which is how `x /= 0` came to throw while `x / 0` twenty lines away
+      // returned Infinity — one operator disagreeing with itself depending on
+      // which form was written. They now delegate to the SDK operators like
+      // their binary counterparts, and for the same reason: the SDK's outcome
+      // is the one a script expects and the only one it can catch.
+    } else if (operatorType == TokenType.SLASH_EQ) {
+      // Use unwrapped left/right for calculation
+      if (left is num && right is num) {
+        return left.toDouble() / right.toDouble();
+      }
+      // Fall through
+    } else if (operatorType == TokenType.TILDE_SLASH_EQ) {
+      // Use unwrapped left/right for calculation
+      if (left is num && right is num) {
+        return left ~/ right;
+      }
+      // Fall through
+    } else if (operatorType == TokenType.PERCENT_EQ) {
+      // Use unwrapped left/right for calculation
+      if (left is num && right is num) {
+        return left % right;
+      }
+      // Fall through
+    } else if (operatorType == TokenType.QUESTION_QUESTION_EQ) {
+      // Note: Uses original currentValue, not unwrapped 'left'
+      if (currentValue == null) {
+        return rhsValue; // If left is null, assign right
+      } else {
+        return currentValue; // If left is not null, keep left
+      }
+    } else if (operatorType == TokenType.AMPERSAND_EQ) {
+      // Bitwise AND assignment (&=). The bool arm mirrors the binary `&` case:
+      // this is a separate dispatch site, so it needs its own bool handling
+      // rather than inheriting it.
+      if (left is int && right is int) {
+        return left & right;
+      } else if (left is bool && right is bool) {
+        return left & right;
+      } else if (left is BigInt && right is BigInt) {
+        return left & right;
+      }
+      // Fall through to extension search
+    } else if (operatorType == TokenType.BAR_EQ) {
+      // Bitwise OR assignment (|=)
+      if (left is int && right is int) {
+        return left | right;
+      } else if (left is bool && right is bool) {
+        return left | right;
+      } else if (left is BigInt && right is BigInt) {
+        return left | right;
+      }
+      // Fall through to extension search
+    } else if (operatorType == TokenType.CARET_EQ) {
+      // Bitwise XOR assignment (^=)
+      if (left is int && right is int) {
+        return left ^ right;
+      } else if (left is bool && right is bool) {
+        return left ^ right;
+      } else if (left is BigInt && right is BigInt) {
+        return left ^ right;
+      }
+      // Fall through to extension search
+    } else if (operatorType == TokenType.GT_GT_EQ) {
+      // Right shift assignment (>>=)
+      if (left is int && right is int) {
+        return left >> right;
+      } else if (left is BigInt && right is int) {
+        return left >> right;
+      }
+      // Fall through to extension search
+    } else if (operatorType == TokenType.LT_LT_EQ) {
+      // Left shift assignment (<<=)
+      if (left is int && right is int) {
+        return left << right;
+      } else if (left is BigInt && right is int) {
+        return left << right;
+      }
+      // Fall through to extension search
+    } else if (operatorType == TokenType.GT_GT_GT_EQ) {
+      // Unsigned right shift assignment (>>>=)
+      if (left is int && right is int) {
+        return left >>> right;
+      }
+      // Note: BigInt doesn't support >>> operator
+      // Fall through to extension search
+    }
+
+    Logger.debug(
+      "[CompoundAssign] Standard op failed for $operatorType. Trying extension operator.",
+    );
+    final String? operatorName = _mapCompoundToOperatorName(operatorType);
+
+    // DFUB9: dispatch a compound-assignment operator declared on an extension
+    // type (e.g. `c += 5` where c's type declares `operator +`). Uses the
+    // wrapped instance (not the unwrapped representation) as the receiver.
+    if (operatorName != null &&
+        currentValue is InterpretedExtensionTypeInstance) {
+      final operatorMethod = currentValue.extensionType.methods[operatorName];
+      if (operatorMethod != null) {
+        Logger.debug(
+          "[CompoundAssign] Found extension-type operator '$operatorName' on ${currentValue.extensionType.name}. Calling...",
+        );
+        try {
+          return operatorMethod.bind(currentValue).call(this, [rhsValue], {});
+        } on ReturnException catch (e) {
+          return e.value;
+        }
+      }
+    }
+
+    if (operatorName != null) {
+      try {
+        final extensionOperator = environment.findExtensionMember(
+          currentValue,
+          operatorName,
+        );
+
+        if (extensionOperator is ExtensionMemberCallable &&
+            extensionOperator.isOperator) {
+          Logger.debug(
+            "[CompoundAssign] Found extension operator '$operatorName' for type ${currentValue?.runtimeType}. Calling...",
+          );
+          // Call the extension operator method
+          // Args: receiver (currentValue), right-hand-side (rhsValue)
+          final extensionPositionalArgs = [currentValue, rhsValue];
+          try {
+            return extensionOperator.call(this, extensionPositionalArgs, {});
+          } on ReturnException catch (e) {
+            return e.value; // Should not happen for operators, but handle
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing extension operator '$operatorName' for compound assignment: $e",
+            );
+          }
+        }
+        Logger.debug(
+          "[CompoundAssign] No suitable extension operator '$operatorName' found for type ${currentValue?.runtimeType}.",
+        );
+      } on RuntimeD4rtException catch (findError) {
+        Logger.debug(
+          "[CompoundAssign] No extension member '$operatorName' found for type ${currentValue?.runtimeType}. Error: ${findError.message}",
+        );
+        // Fall through to the final unimplemented error
+      }
+    }
+
+    throw UnimplementedD4rtException(
+      'Compound assignment operator $operatorType not handled for types ${currentValue?.runtimeType} and ${rhsValue?.runtimeType}',
+    );
+  }
+
+  // Map compound assignment token to operator method name
+  String? _mapCompoundToOperatorName(TokenType compoundOp) {
+    switch (compoundOp) {
+      case TokenType.PLUS_EQ:
+        return '+';
+      case TokenType.MINUS_EQ:
+        return '-';
+      case TokenType.STAR_EQ:
+        return '*';
+      case TokenType.SLASH_EQ:
+        return '/';
+      case TokenType.PERCENT_EQ:
+        return '%';
+      case TokenType.TILDE_SLASH_EQ:
+        return '~/';
+      case TokenType.AMPERSAND_EQ:
+        return '&';
+      case TokenType.BAR_EQ:
+        return '|';
+      case TokenType.CARET_EQ:
+        return '^';
+      case TokenType.GT_GT_EQ:
+        return '>>';
+      case TokenType.LT_LT_EQ:
+        return '<<';
+      case TokenType.GT_GT_GT_EQ:
+        return '>>>';
+      // TokenType.QUESTION_QUESTION_EQ (??=) doesn't map to a binary operator method.
+      default:
+        return null;
+    }
+  }
+
+  /// Check if a List matches the expected generic type argument
+  bool _checkGenericListType(List list, TypeAnnotation elementTypeNode) {
+    // If list is empty, we can't verify element types
+    if (list.isEmpty) {
+      return true; // Accept empty lists for any type
+    }
+
+    // Check each element
+    for (final element in list) {
+      if (!_valueHasType(elementTypeNode, element)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Check if a Map matches the expected generic type arguments
+  bool _checkGenericMapType(
+    Map map,
+    TypeAnnotation keyTypeNode,
+    TypeAnnotation valueTypeNode,
+  ) {
+    // If map is empty, we can't verify key/value types
+    if (map.isEmpty) {
+      return true; // Accept empty maps for any type
+    }
+
+    // Check each key-value pair
+    for (final entry in map.entries) {
+      if (!_valueHasType(keyTypeNode, entry.key)) {
+        return false;
+      }
+      if (!_valueHasType(valueTypeNode, entry.value)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Whether [value] satisfies [targetType] — [_valueHasType]'s answer for a
+  /// bridged type, for an operand in ANY of the forms a bridged value arrives
+  /// in:
+  ///
+  /// * a `BridgedInstance` — the registered supertype walk first, then the
+  ///   native checks below against the object it wraps;
+  /// * a raw native object — as ordinary as a wrapped one: `dart:collection`
+  ///   constructors return the native, and a Flutter callback passes its native
+  ///   argument unwrapped (e.g. `KeyEvent` on `KeyboardListener.onKeyEvent`);
+  /// * an `InterpretedInstance` — a script class may extend or implement a
+  ///   bridged one, so its class answers (RC-7 walks the `bridgedSuperclass` /
+  ///   `bridgedInterfaces` chains). Short-circuiting it to `false` made
+  ///   `Doubler() is StreamTransformer` false for
+  ///   `class Doubler extends StreamTransformerBase` (SC6);
+  /// * `null` — never a bridged type.
+  ///
+  /// For a native operand, `isAssignable` (the host's own `v is X`) is
+  /// authoritative when the bridge-name walk misses. A bridge that declares no
+  /// `isAssignable` falls back to resolving the operand's own bridge the way
+  /// dispatch does and re-running the subtype walk (SC4:
+  /// `StreamController.sink` resolves to the `StreamSink` bridge, so
+  /// `sink is StreamSink` must be true). That fallback adds no `isAssignable`
+  /// closure, so bridge selection in `Environment.toBridgedInstance` is
+  /// untouched.
+  bool _nativeOrBridgedMatches(Object? value, BridgedClass targetType) {
+    Object? nativeValue;
+    if (value is BridgedInstance) {
+      if (value.bridgedClass.isSubtypeOf(targetType)) return true;
+      nativeValue = value.nativeObject;
+    } else if (value is InterpretedInstance) {
+      // RC-7: an interpreted class may extend or implement a bridged one.
+      return value.klass.isSubtypeOf(targetType, value: value);
+    } else if (value != null) {
+      nativeValue = value;
+    }
+    if (nativeValue == null) return false;
+    // `isAssignable` closes over the host's native `v is X`; authoritative when
+    // the bridge-name supertype walk misses or the operand was never wrapped.
+    if (targetType.isAssignable != null &&
+        targetType.isAssignable!(nativeValue)) {
+      return true;
+    }
+    // SC4: resolve the operand's own bridge the way dispatch does and re-run
+    // the subtype walk, for a bridge that declares no `isAssignable`.
+    final nativeRuntimeType = environment.getRuntimeType(nativeValue);
+    return nativeRuntimeType != null &&
+        nativeRuntimeType.isSubtypeOf(targetType, value: nativeValue);
+  }
+
+  @override
+  dynamic visitIdentifier(Identifier node) {
+    final value = environment.get(node.name);
+    if (value == null) {
+      // Log environment ID on failure
+      Logger.debug(
+        "[visitIdentifier] Failed to find '${node.name}' in env: ${environment.hashCode}",
+      );
+      throw undefinedNameError(node.name);
+    }
+    return value;
+  }
+
+  bool _isInCatchBlock = false;
+
+  InternalInterpreterD4rtException? _originalCaughtInternalExceptionForRethrow;
+
+  /// Whether [clause] handles [thrownValue].
+  ///
+  /// SCD41: extracted so the ASYNC path can ask the same question. It used to
+  /// take `catchClauses.first` regardless of type, so `on StateError catch` ran
+  /// for an `ArgumentError` and a clause that must not match caught anyway —
+  /// the same script behaving differently depending only on whether the
+  /// enclosing function is `async`. Two implementations of catch matching is
+  /// how that divergence arose; there is now one.
+  ///
+  /// The WRAPPER is passed, not an unwrapped native view: [_valueHasType] does
+  /// its own unwrapping where the host `is` needs it, and its bridged path
+  /// prefers the wrapper's own bridge.
+  bool catchClauseMatches(CatchClause clause, Object? thrownValue) {
+    // No `on Type`: matches anything.
+    if (clause.exceptionType == null) return true;
+
+    final typeNode = clause.exceptionType!;
+    final targetCatchTypeName = typeNode is NamedType
+        ? typeNode.name.lexeme
+        : '$typeNode';
+
+    // SCC20: `on T` asks exactly the question `x is T` asks, so it asks it
+    // through the same predicate. This was once a flat switch over sixteen
+    // hardcoded type names — a SMALLER predicate than [_valueHasType] — and the
+    // difference was measurable: `on Exception` missed a script class that
+    // implements `Exception`, `on List<int>` caught a `List<String>`,
+    // `on int Function(int)` was rejected outright, and a prefixed
+    // `on c.HashSet` never resolved.
+    try {
+      return _valueHasType(typeNode, thrownValue);
+    } on InternalInterpreterD4rtException {
+      // SCE127: an `on T` naming something that does not resolve to a type is
+      // a defect in the program text, and REAL DART REFUSES TO COMPILE IT
+      // (`non_type_in_catch_clause`). d4rt used to log a warning and answer
+      // `false`, which is the most dangerous available divergence: the clause
+      // is inert, a LATER clause takes the branch, and the script returns a
+      // value from a handler its author never meant to reach. With no later
+      // clause the exception escaped the `try` as if the handler were not
+      // written. Nothing in the output said so — a script author could only
+      // discover a dead clause by testing that it fires, which is exactly the
+      // test people skip, because catching by name is assumed to work.
+      //
+      // THE OLD COMMENT'S CONCERN IS REAL AND IS ANSWERED RATHER THAN
+      // DISCARDED: "letting the lookup failure escape would replace the
+      // exception being dispatched and lose the original". So the failure does
+      // not escape — a diagnostic is raised that names BOTH the unresolved
+      // type and the exception that was being dispatched when the dead clause
+      // was reached, so neither half is lost.
+      //
+      // WHEN, and why here: Dart checks at compile time over the whole
+      // program; d4rt resolves names lazily, so the analogue is to fail when
+      // the clause is REACHED. That is later than Dart and only fires on an
+      // exception that actually arrives — but it needs no new pass, and it
+      // converts the silent wrong branch into a loud failure at the exact
+      // moment the wrong branch would have been taken.
+      //
+      // MEASURED BEFORE CHANGING IT, because a legitimate unresolvable `on`
+      // type would make working scripts start throwing: a class declared after
+      // `main`, a class from another module, a prefixed `p.Other`, a generic
+      // `List<int>` and a `typedef` alias all resolve. The one shape that does
+      // not is a type from a library the script did not import — which Dart
+      // also rejects, so it is this same defect rather than an exception to it.
+      //
+      // `thrownValue`, NOT the lookup failure. The first draft reported
+      // `e.originalThrownValue` here, which is the resolution error itself —
+      // so the diagnostic ended "the exception being dispatched was: Undefined
+      // variable: X", naming the dead clause's own type back at the reader
+      // instead of the exception in flight. That is the very loss the old
+      // `return false` existed to prevent, reintroduced by the fix meant to
+      // preserve it. SCC20's F-SCC20-16 caught it.
+      throw RuntimeD4rtException.resolutionFailure(
+        "The `on` clause names '$targetCatchTypeName', which does not resolve "
+        "to a type, so it can never match and the exception would be handled "
+        "somewhere else or not at all. Real Dart rejects this program "
+        "(non_type_in_catch_clause). Import the library that declares "
+        "'$targetCatchTypeName', or register a bridge for it. The exception "
+        "being dispatched when the dead clause was reached was: $thrownValue",
+      );
+    } on UnimplementedD4rtException catch (e) {
+      Logger.warn(
+        "[TryStatement] Unsupported catch clause type node "
+        "${typeNode.runtimeType}: ${e.message}",
+      );
+      return false;
+    }
+  }
+
+  /// The clause of [node] that handles [thrownValue], or null when none does.
+  ///
+  /// SCC31: an undefined name is a defect in the program text, not a runtime
+  /// condition, so no clause may claim it — not `on Object`, not a bare
+  /// `catch (e)`. Real Dart rejects such a program at compile time, where no
+  /// handler exists to run.
+  CatchClause? selectCatchClause(TryStatement node, Object? thrownValue) {
+    if (thrownValue is UndefinedNameD4rtException) return null;
+    // SCF4: a cancelled generator unwinds like a `return` — finally runs, no
+    // catch clause may claim it.
+    if (thrownValue is GeneratorCancelledSignal) return null;
+    for (final clause in node.catchClauses) {
+      if (catchClauseMatches(clause, thrownValue)) return clause;
+    }
+    return null;
+  }
+
+  @override
+  Object? visitTryStatement(TryStatement node) {
+    // Store the internal exception if caught
+    InternalInterpreterD4rtException? caughtInternalException;
+    StackTrace? caughtStackTrace;
+
+    Object? tryResult;
+    Object? returnValue; // Store either the try result or the catch result
+
+    // SCC12: a `return` / `break` / `continue` out of the try or a catch block is
+    // held here rather than rethrown on the spot, so that the finally block still
+    // runs before it leaves the statement. It used to rethrow immediately — with
+    // a comment saying "the finally must execute" next to the line that ensured
+    // it did not.
+    Object? pendingControlFlow;
+
+    final originalEnv = environment; // Save to restore after catch/finally
+
+    try {
+      // 1. Execute the try block
+      Logger.debug("[TryStatement] Entering try block");
+      tryResult = node.body.accept<Object?>(this);
+      returnValue = tryResult; // Default value if no exception
+      Logger.debug("[TryStatement] Try block completed normally");
+    } on ReturnException catch (e) {
+      Logger.debug(
+        "[TryStatement] Holding ReturnException from try block "
+        "until the finally block has run.",
+      );
+      pendingControlFlow = e;
+    } on BreakException catch (e) {
+      Logger.debug("[TryStatement] Holding BreakException from try block");
+      pendingControlFlow = e;
+    } on ContinueException catch (e) {
+      Logger.debug("[TryStatement] Holding ContinueException from try block");
+      pendingControlFlow = e;
+    } on InternalInterpreterD4rtException catch (e, s) {
+      // Catch ONLY the exceptions already encapsulated (coming from a 'throw')
+      Logger.debug(
+        "[TryStatement] Caught internal exception in try block: ${e.originalThrownValue}",
+      );
+      caughtInternalException = e; // Store the internal exception
+      caughtStackTrace = s;
+      returnValue = null; // No normal try result
+    } catch (userException, userStack) {
+      // Catch any other exception (potentially native)
+      Logger.debug(
+        "[TryStatement] Caught unexpected non-InternalInterpreterException in TRY: $userException",
+      );
+      // OPEN B.5: a bridged adapter that threw a native/user exception wraps it
+      // in a RuntimeError carrying the original object. Recover the original so
+      // `on <NativeType>` / bare `catch` dispatch matches the real exception
+      // type rather than the RuntimeError wrapper.
+      final thrownValue =
+          (userException is RuntimeD4rtException &&
+              userException.originalException != null)
+          ? userException.originalException
+          : userException;
+      // Encapsulate the user/native exception in our internal type
+      caughtInternalException = InternalInterpreterD4rtException(thrownValue);
+      // SCC11: recovering the value without the trace left `catch (e, st)`
+      // reporting the *wrap site* inside the interpreter. That reads as an
+      // interpreter bug in any script that prints a trace, and it makes
+      // `Error.throwWithStackTrace` — whose entire purpose is carrying an
+      // earlier trace — indistinguishable from a plain `throw`.
+      caughtStackTrace =
+          (userException is RuntimeD4rtException
+              ? userException.originalStackTrace
+              : null) ??
+          userStack;
+      returnValue = null;
+    }
+
+    // 2. Execute the catch blocks (if an internal exception was raised AND stored)
+    if (caughtInternalException != null) {
+      // Use the ORIGINAL value from the internal exception for checks
+      final originalThrownValue = caughtInternalException.originalThrownValue;
+
+      // Diagnostics only. A bridged error constructed in script code
+      // (`throw StateError('x')`) arrives as a `BridgedInstance`, and the
+      // native type behind the wrapper is what makes a log line readable.
+      // MATCHING no longer uses this view: SCC20 hands the wrapper itself to
+      // [_valueHasType], whose bridged path consults the wrapper's own
+      // `bridgedClass` before falling back to the native object — strictly more
+      // precise than unwrapping up front, which is what SC5 had to do when the
+      // matching code here was a hand-written switch.
+      final thrownValueNativeView = originalThrownValue is BridgedInstance
+          ? originalThrownValue.nativeObject
+          : originalThrownValue;
+
+      Logger.debug(
+        "[TryStatement] Looking for catch clauses for thrown value: ${stringify(originalThrownValue)} (type: ${thrownValueNativeView?.runtimeType})",
+      );
+
+      // SCC31: an undefined name is a defect in the program text, not a runtime
+      // condition, so no clause may claim it — not `on Object`, not a bare
+      // `catch (e)`. Real Dart rejects such a program at compile time, where no
+      // handler exists to run; the nearest honest equivalent for an interpreter
+      // that has already started executing is an error that unwinds past every
+      // handler to the host. Skipping the loop rather than short-circuiting the
+      // whole block is deliberate: `caughtInternalException` stays non-null, so
+      // the finally block below still runs and the error still rethrows.
+      final isUnhandleable =
+          originalThrownValue is UndefinedNameD4rtException ||
+          originalThrownValue is GeneratorCancelledSignal;
+
+      for (final clause
+          in isUnhandleable ? const <CatchClause>[] : node.catchClauses) {
+        // SCD41: one predicate, shared with the async path. The matching rules
+        // that used to live inline here are in [catchClauseMatches]; the loop
+        // stays because this path also EXECUTES the clause it selects, which
+        // the async path does not.
+        final typeMatch = catchClauseMatches(clause, originalThrownValue);
+        final String? targetCatchTypeName = clause.exceptionType == null
+            ? null
+            : '${clause.exceptionType}';
+
+        if (typeMatch) {
+          Logger.debug(
+            "[TryStatement] Found matching catch clause${targetCatchTypeName != null ? ' for type $targetCatchTypeName' : ''}.",
+          );
+          final exceptionParameterName = clause.exceptionParameter?.name.lexeme;
+          final stackTraceParameterName =
+              clause.stackTraceParameter?.name.lexeme;
+
+          // Create an environment for the catch block
+          environment =
+              originalEnv; // Restore the environment before creating the catch environment
+          final catchEnv = Environment(enclosing: environment);
+          if (exceptionParameterName != null) {
+            // Define with the ORIGINAL thrown value
+            catchEnv.define(exceptionParameterName, originalThrownValue);
+            Logger.debug(
+              "[TryStatement] Defined exception var '$exceptionParameterName' with original value: ${stringify(originalThrownValue)}",
+            );
+          }
+          if (stackTraceParameterName != null) {
+            // Store the textual representation of the stack trace
+            // Ensure caughtStackTrace is not null before calling toString()
+            final stackTraceString =
+                caughtStackTrace?.toString() ?? "Stack trace unavailable";
+            catchEnv.define(stackTraceParameterName, stackTraceString);
+            Logger.debug(
+              "[TryStatement] Defined stacktrace var '$stackTraceParameterName'.",
+            ); // Don't print full trace here
+          }
+
+          // Execute the catch block in its environment
+          environment = catchEnv;
+          _isInCatchBlock = true;
+          _originalCaughtInternalExceptionForRethrow =
+              caughtInternalException; // Store the internal exception for potential rethrow
+          //
+          try {
+            Logger.debug("[TryStatement] Entering catch block body");
+            returnValue = clause.body.accept<Object?>(this);
+            Logger.debug("[TryStatement] Catch block completed normally");
+            // The exception is handled, clear caughtInternalException to not rethrow it after finally
+            caughtInternalException = null;
+          } on ReturnException catch (e) {
+            // SCC12: held, not rethrown. The finally block has to run on the way
+            // out of a `return` in a catch clause, exactly as it does on the way
+            // out of one in the try body.
+            Logger.debug(
+              "[TryStatement] Holding ReturnException from CATCH "
+              "block until the finally block has run.",
+            );
+            _isInCatchBlock = false;
+            _originalCaughtInternalExceptionForRethrow = null;
+            caughtInternalException = null; // The catch handled the exception.
+            pendingControlFlow = e;
+          } on BreakException catch (e) {
+            _isInCatchBlock = false;
+            _originalCaughtInternalExceptionForRethrow = null;
+            caughtInternalException = null;
+            pendingControlFlow = e;
+          } on ContinueException catch (e) {
+            _isInCatchBlock = false;
+            _originalCaughtInternalExceptionForRethrow = null;
+            caughtInternalException = null;
+            pendingControlFlow = e;
+          } on InternalInterpreterD4rtException catch (
+            catchInternalError,
+            catchStack
+          ) {
+            if (identical(
+              catchInternalError,
+              _originalCaughtInternalExceptionForRethrow,
+            )) {
+              // This is the exception rethrown by 'rethrow'. It propagates —
+              // but only AFTER this try's finally block has run. SCE205: it
+              // used to be relaunched right here, from inside the catch
+              // handling, which left the statement before step 3 below ever
+              // reached the finally; `try … catch (e) { rethrow; } finally {…}`
+              // never cleaned up, while the caller saw exactly the right
+              // exception. Held like an unhandled one instead, so the finally
+              // runs and the post-finally step throws it on.
+              Logger.debug(
+                "[TryStatement] Identified rethrown exception. Holding it "
+                "until the finally block has run.",
+              );
+              _isInCatchBlock = false;
+              _originalCaughtInternalExceptionForRethrow = null;
+              caughtInternalException = catchInternalError;
+              caughtStackTrace = catchStack;
+              returnValue = null;
+            } else {
+              // This is a NEW internal exception coming from the catch body.
+              Logger.debug(
+                "[TryStatement] Caught NEW internal exception in CATCH block: ${catchInternalError.originalThrownValue}",
+              );
+              caughtInternalException =
+                  catchInternalError; // The new internal exception replaces the old one
+              caughtStackTrace = catchStack; // Update stack trace too
+              // The new exception is NOT handled by this try/catch
+              returnValue = null;
+            }
+          } catch (nativeError, nativeStack) {
+            // Catch other unexpected errors from catch block
+            Logger.debug(
+              "[TryStatement] Caught unexpected non-InternalInterpreterException in CATCH: $nativeError",
+            );
+            // Wrap it as InternalInterpreterException to propagate
+            caughtInternalException = InternalInterpreterD4rtException(
+              nativeError,
+            );
+            caughtStackTrace = nativeStack;
+            returnValue = null;
+          } finally {
+            // IMPORTANT: Clean the rethrow state if we exit the catch
+            _isInCatchBlock = false;
+            _originalCaughtInternalExceptionForRethrow = null;
+            environment =
+                originalEnv; // Restore the environment after the catch
+          }
+          // Exit the for loop of catch clauses, because we found a match
+          break;
+        } else {
+          Logger.debug(
+            "[TryStatement] Skipping catch clause (type mismatch: needed $targetCatchTypeName, got ${originalThrownValue?.runtimeType})",
+          );
+        }
+      } // fin boucle for catchClauses
+    } // fin if (caughtInternalException != null)
+
+    // SCC12: the protected region suspended on an `await`, so it has NOT
+    // finished — the async driver will replay this whole statement once the
+    // future completes. Running the finally block now would run it twice, and a
+    // teardown clause that releases a resource twice is a behavioural difference
+    // a script can see. Native Dart runs a finally exactly once.
+    if (returnValue is AsyncSuspensionRequest) {
+      Logger.debug(
+        "[TryStatement] Protected region suspended; deferring the "
+        "finally block to the resumed pass.",
+      );
+      environment = originalEnv;
+      return returnValue;
+    }
+
+    // 3. Execute the finally block (always)
+    // Store potential exception from finally block (must be internal type now)
+    InternalInterpreterD4rtException? finallyInternalException;
+
+    if (node.finallyBlock != null) {
+      environment = originalEnv; // Ensure we are in the correct environment
+      Logger.debug("[TryStatement] Entering finally block");
+      try {
+        final finallyResult = node.finallyBlock!.accept<Object?>(this);
+        // SCC12: the finally block's value was discarded, and with it any
+        // `AsyncSuspensionRequest` an `await` inside it raised. The interpreter
+        // drives `await` by returning that sentinel up through every statement
+        // visitor to the async driver, so swallowing it does not lose a value —
+        // it loses the *future*, and the program then never completes at all.
+        // `try { … } finally { await release(); }` hung forever.
+        if (finallyResult is AsyncSuspensionRequest) {
+          Logger.debug("[TryStatement] Finally block suspended. Propagating.");
+          environment = originalEnv;
+          return finallyResult;
+        }
+        Logger.debug("[TryStatement] Finally block completed normally");
+      } on ReturnException {
+        // If finally returns, it overrides everything
+        Logger.debug("[TryStatement] Caught ReturnException in FINALLY block");
+        rethrow; // The return of the finally is the final value
+      } on InternalInterpreterD4rtException catch (e) {
+        // Catch internal exceptions coming from finally (throw/rethrow in finally)
+        Logger.debug(
+          "[TryStatement] Caught internal exception in FINALLY block: ${e.originalThrownValue}",
+        );
+        // The internal exception of the finally prevails
+        finallyInternalException = e; // Store internal exception
+        // We might want to store the stack trace too if needed later
+      } catch (e) {
+        // Catch other unexpected errors from finally block
+        Logger.debug(
+          "[TryStatement] Caught unexpected non-InternalInterpreterException in FINALLY: $e",
+        );
+        // Wrap it as InternalInterpreterException
+        finallyInternalException = InternalInterpreterD4rtException(e);
+      }
+    }
+
+    // 4. Déterminer le résultat final
+    if (finallyInternalException != null) {
+      Logger.debug(
+        "[TryStatement] Rethrowing internal exception from FINALLY: ${finallyInternalException.originalThrownValue}",
+      );
+      throw finallyInternalException; // The internal exception of the Finally always prevails
+    }
+
+    // SCC12: the held `return` / `break` / `continue` resumes here, after the
+    // finally block has run. An exception raised by the finally outranks it —
+    // checked above — which is what native Dart does too.
+    if (pendingControlFlow != null) {
+      Logger.debug(
+        "[TryStatement] Resuming held control flow: "
+        "${pendingControlFlow.runtimeType}",
+      );
+      throw pendingControlFlow;
+    }
+
+    // If there is an unhandled internal exception (either original, or from a catch) and no exception from the finally
+    if (caughtInternalException != null /* && !exceptionHandled */ ) {
+      // Note: If it was handled, caughtInternalException was set to null inside the matching catch block.
+      // So, if caughtInternalException is still non-null here, it means it wasn't handled.
+      Logger.debug(
+        "[TryStatement] Rethrowing unhandled internal exception from TRY/CATCH: ${caughtInternalException.originalThrownValue}",
+      );
+      throw caughtInternalException;
+    }
+
+    // Otherwise, return the value (either from the try, or from the catch that handled the exception)
+    // Note: if a catch made a return, it was already propagated by the 'rethrow' above.
+    Logger.debug("[TryStatement] Exiting normally, returning: $returnValue");
+    return returnValue;
+  }
+
+  @override
+  Object? visitThrowExpression(ThrowExpression node) {
+    // 1. Evaluate the expression that is thrown
+    final thrownValue = node.expression.accept<Object?>(this);
+
+    // 2. Create and throw an InternalInterpreterException.
+    final message = stringify(thrownValue); // Keep for debug log
+    Logger.debug("[ThrowExpression] Throwing (original value): $message");
+    // SCF39: an interpreted `Error` subclass gets its `stackTrace` on the
+    // first throw, as Dart sets it.
+    if (thrownValue is InterpretedInstance) {
+      thrownValue.recordThrowIfError(StackTrace.current);
+    }
+    // Throw the specific internal exception, wrapping the original value
+    throw InternalInterpreterD4rtException(thrownValue);
+    // We don't capture stack trace here, the 'catch' block does it.
+  }
+
+  @override
+  Object? visitRethrowExpression(RethrowExpression node) {
+    final asyncState = currentAsyncState;
+    if (asyncState == null) {
+      if (!_isInCatchBlock ||
+          _originalCaughtInternalExceptionForRethrow == null) {
+        throw RuntimeD4rtException(
+          "'rethrow' can only be used within a catch block.",
+        );
+      }
+      Logger.debug(
+        "[Rethrow] Rethrowing original internal exception: ${_originalCaughtInternalExceptionForRethrow!.originalThrownValue}",
+      );
+      // Re-launch the *original internal exception* that was caught by the enclosing catch block
+      throw _originalCaughtInternalExceptionForRethrow!;
+    }
+    if (!asyncState.isHandlingErrorForRethrow) {
+      throw RuntimeD4rtException(
+        "'rethrow' can only be used within a catch block.",
+      );
+    }
+    final originalError = asyncState.originalErrorForRethrow;
+    if (originalError == null) {
+      // Should not happen if isHandlingErrorForRethrow is true, but safety check
+      throw StateD4rtException(
+        "Internal error: Inconsistent state for rethrow.",
+      );
+    }
+    Logger.debug(
+      "[Rethrow] Rethrowing original internal exception: ${originalError.originalThrownValue}",
+    );
+    // Set flag to indicate this is a rethrow, not a new exception
+    asyncState.isCurrentlyRethrowing = true;
+    // Relaunch the original exception stored in the async state
+    throw originalError;
+  }
+
+  @override
+  Object? visitIsExpression(IsExpression node) {
+    final result = _valueHasType(
+      node.type,
+      node.expression.accept<Object?>(this),
+    );
+    return node.notOperator != null ? !result : result;
+  }
+
+  /// Whether [expressionValue] satisfies the type written as [typeNode] — the
+  /// predicate behind the `is` operator.
+  ///
+  /// SCC18 lifted this out of [visitIsExpression] so that typed *patterns*
+  /// could ask the same question. They previously did not ask at all, and the
+  /// two shapes that did (the object pattern's name heuristic, the catch
+  /// clause's `isAssignable` probe) each answered differently — which is how
+  /// SCB7's unwrap fix reached one copy and not the others. Anything that needs
+  /// "does this value have this type" belongs here; do not grow a private
+  /// switch beside it. The catch-clause copy is the last one still outstanding
+  /// (SCC20).
+  ///
+  /// That includes the ELEMENTS of a generic collection: [_checkGenericListType]
+  /// and [_checkGenericMapType] ask this predicate of each element, key and
+  /// value, so `[x] is List<T>` answers exactly as `x is T` does — a type name
+  /// the interpreter cannot resolve throws in both positions, a function or
+  /// record type is checked structurally in both, and `void` is false in both.
+  bool _valueHasType(TypeAnnotation typeNode, Object? expressionValue) {
+    final (expanded, scope, nullable) = _expandTypeAlias(typeNode, environment);
+    if (!identical(expanded, typeNode)) {
+      if (expressionValue == null && nullable) return true;
+      final previousScope = environment;
+      try {
+        environment = scope;
+        return _valueHasType(expanded, expressionValue);
+      } finally {
+        environment = previousScope;
+      }
+    }
+    bool result = false;
+
+    // SCD62: the `?` suffix is part of the question, and this predicate used
+    // to drop it. `null` satisfies EVERY nullable type — `Null` is a subtype
+    // of `T?` for all T — so the answer is yes before the name switch below
+    // ever runs. Without this, that switch reached the `String` / `int` /
+    // `Object` cases and asked the host's own `is`, which is false for null:
+    // `null is String?` and even `null is Object?` came back false, and there
+    // is no input for which the second of those is right.
+    //
+    // SCOPED TO NULL ON PURPOSE. A non-null value falls through and is tested
+    // against the bare type, which was always correct — `'hi' is String?` was
+    // true before this change. And `Null`, `dynamic` and `void` keep their
+    // existing branches untouched: none of them is written with a `?`, so
+    // none reaches this return, which is what SCC20's notes ask for when they
+    // warn against collapsing those three into the nullable question.
+    if (expressionValue == null && typeNode.question != null) {
+      return true;
+    }
+
+    if (typeNode is NamedType) {
+      final bareTypeName = typeNode.name.lexeme;
+      // GEN-100c: Prefixed type-tests (e.g. `attribute is ui.LocaleStringAttribute`)
+      // need to resolve the right-hand side via the prefixed import environment,
+      // not as the bare identifier. Mirrors the same fix in
+      // `_resolveTypeAnnotationWithEnvironment` and the `tom_d4rt_ast` visitor.
+      // Built-in primitives (`int`, `String`, …) are never prefixed, so a
+      // non-null `importPrefix` always routes to the user-type lookup.
+      final typePrefix = typeNode.importPrefix?.name.lexeme;
+      final typeName = typePrefix != null
+          ? '$typePrefix.$bareTypeName'
+          : bareTypeName;
+
+      // SCB7: the cases below answer with the host's own `is` operator, so
+      // they need the underlying native object. A bridged value arrives as a
+      // `BridgedInstance` wrapper, which is neither a `List` nor a `Map` — so
+      // `UnmodifiableListView(...) is List` and `HashMap() is Map` were false
+      // for every bridged `dart:collection` type. `Set` and `Iterable` are not
+      // in this switch, fall through to `default`, and were therefore already
+      // answered correctly by the bridged-subtype path, which is why the Set
+      // side looked healthy while the Map and List sides did not.
+      //
+      // Only the shape cases use this; `Null` / `Object` / `dynamic` / `void`
+      // and the `default` branch keep the operand as it arrived, because they
+      // ask about the value's identity or its bridge, not its native shape.
+      final shapeValue = expressionValue is BridgedInstance
+          ? expressionValue.nativeObject
+          : expressionValue;
+
+      // Handle built-in types first
+      switch (typeName) {
+        case 'int':
+          result = shapeValue is int;
+          break;
+        case 'double':
+          result = shapeValue is double;
+          break;
+        case 'num':
+          result = shapeValue is num;
+          break;
+        case 'String':
+          result = shapeValue is String;
+          break;
+        case 'bool':
+          result = shapeValue is bool;
+          break;
+        case 'List':
+          if (shapeValue is! List) {
+            result = false;
+          } else if (typeNode.typeArguments == null ||
+              typeNode.typeArguments!.arguments.isEmpty) {
+            // No type arguments specified, just check if it's a List
+            result = true;
+          } else {
+            // Check generic type arguments
+            result = _checkGenericListType(
+              shapeValue,
+              typeNode.typeArguments!.arguments[0],
+            );
+          }
+          break;
+        case 'Map':
+          if (shapeValue is! Map) {
+            result = false;
+          } else if (typeNode.typeArguments == null ||
+              typeNode.typeArguments!.arguments.isEmpty) {
+            // No type arguments specified, just check if it's a Map
+            result = true;
+          } else {
+            // Check generic type arguments
+            final typeArgs = typeNode.typeArguments!.arguments;
+            if (typeArgs.length >= 2) {
+              result = _checkGenericMapType(
+                shapeValue,
+                typeArgs[0],
+                typeArgs[1],
+              );
+            } else {
+              result = true; // Partial generic, just accept
+            }
+          }
+          break;
+        case 'Null':
+          result = expressionValue == null;
+          break;
+        case 'Record':
+          // DFIN5 (dguc7): every record is a `Record`; the name was undefined.
+          result =
+              expressionValue is InterpretedRecord || expressionValue is Record;
+          break;
+        case 'Type':
+          // SCD198: a bare class name is a VALUE denoting a type, and
+          // `SomeClass is Type` is the check a script writes before using one
+          // as a type at all. It evaluates to a `BridgedClass` (bridged) or an
+          // `InterpretedClass` (script-declared), neither of which is a Dart
+          // `Type`, so without this arm the answer was false for every class
+          // in the language while `x.runtimeType is Type` was true.
+          //
+          // A real `Type` still answers through the same arm, so this widens
+          // the predicate rather than replacing it.
+          result =
+              expressionValue is Type ||
+              expressionValue is BridgedClass ||
+              expressionValue is InterpretedClass;
+          break;
+        case 'Object':
+          // Everything non-null is an Object?
+          result = expressionValue != null;
+          break;
+        case 'dynamic': // 'is dynamic' is always true
+        case 'void': // 'is void' is always false (or error?) - let's say false
+          result = typeName == 'dynamic';
+          break;
+        default:
+          try {
+            final targetType = environment.get(typeName);
+
+            if (targetType is BridgedClass) {
+              result = _nativeOrBridgedMatches(expressionValue, targetType);
+            } else if (targetType is InterpretedClass) {
+              // SCF31: a proxy or a bridged super object IS its interpreted
+              // instance to the script, so `x is ScriptClass` asks about the
+              // instance. It answered false for both, while `x as ScriptClass`
+              // on the same value succeeded.
+              final instance = expressionValue is InterpretedInstance
+                  ? expressionValue
+                  : D4.interpretedBehind(expressionValue);
+              if (instance is InterpretedInstance) {
+                // DFUB6: when the test carries applied type arguments
+                // (`is Box<int>`), compare the value's applied runtime type
+                // against an `AppliedRuntimeType(targetClass, resolvedArgs)`
+                // so the arguments are checked element-wise. Without arguments
+                // (`is Box`) the raw base-class subtype check is used.
+                final typeArgNodes = typeNode.typeArguments?.arguments;
+                if (typeArgNodes != null && typeArgNodes.isNotEmpty) {
+                  final resolvedArgs = <RuntimeType>[
+                    for (final argNode in typeArgNodes)
+                      _resolveTypeAnnotation(argNode),
+                  ];
+                  final appliedTarget = AppliedRuntimeType(
+                    targetType,
+                    resolvedArgs,
+                  );
+                  result = instance.valueType.isSubtypeOf(appliedTarget);
+                } else {
+                  result = instance.klass.isSubtypeOf(targetType);
+                }
+              } else {
+                // A non-instance value cannot be a subtype of a user-defined class
+                result = false;
+              }
+            } else if (targetType is Callable) {
+              // SCC64: a callable is never a type, so this is a diagnosis
+              // rather than an answer — and until SCC64 the interpreter
+              // answered it by CALLING the function, twice, to see whether it
+              // returned a `Type`. A type test therefore ran arbitrary host
+              // code: `1 is print` surfaced a `RangeError` from inside
+              // `print`'s own body, and `1 is identical` reported "identical
+              // requires two arguments" as though the type test had arguments.
+              //
+              // That branch existed for exactly one registration in the whole
+              // stdlib — `HttpClientCredentials`, defined as a zero-arity
+              // native returning its own `Type` — which SCC64 replaced with a
+              // real bridge. No consumer package registers a `Type`-valued
+              // native either, so it was one workaround that every other
+              // callable fell into rather than a mechanism with one user.
+              //
+              // `Callable`, not `NativeFunction`: an interpreted function
+              // reached the `else` below and got "not found or is not a int",
+              // which names the OPERAND's type and so reads as though the
+              // operand were at fault. Both halves of the same mistake now
+              // give the same sentence.
+              throw RuntimeD4rtException(
+                "'$typeName' is a function, not a type, so it cannot be used "
+                "on the right-hand side of 'is'.",
+              );
+            } else {
+              throw RuntimeD4rtException(
+                "Type '$typeName' not found or is not a ${expressionValue.runtimeType}.",
+              );
+            }
+          } on RuntimeD4rtException catch (e) {
+            // Propagate type lookup error
+            // Wrap in InternalInterpreterException to be caught correctly
+            throw InternalInterpreterD4rtException(
+              RuntimeD4rtException(
+                "Type check failed: ${e.message}",
+                originalException: e.originalException,
+                originalStackTrace: e.originalStackTrace,
+              ),
+            );
+          }
+      }
+    } else if (typeNode is GenericFunctionType ||
+        typeNode is RecordTypeAnnotation) {
+      // DFUB5: `is (int, {String label})` / `is int Function(int)` — resolve the
+      // annotation to a structural Function/Record runtime type and compare it
+      // against the value's runtime type (functions expose a
+      // callableRuntimeType; records derive a RecordRuntimeType from their
+      // fields). Upstream 848f03d.
+      final targetType = _resolveTypeAnnotation(typeNode);
+      final valueType = environment.getRuntimeType(expressionValue);
+      result =
+          valueType != null &&
+          valueType.isSubtypeOf(targetType, value: expressionValue);
+    } else {
+      throw UnimplementedD4rtException(
+        'Type check for ${typeNode.runtimeType} not implemented.',
+      );
+    }
+
+    return result;
+  }
+
+  /// Recursively check if a CollectionElement represents a map entry.
+  /// This handles ForElement, IfElement, and MapLiteralEntry directly.
+  bool _isMapLiteralElement(CollectionElement element) {
+    if (element is MapLiteralEntry) {
+      return true;
+    } else if (element is ForElement) {
+      return _isMapLiteralElement(element.body);
+    } else if (element is IfElement) {
+      return _isMapLiteralElement(element.thenElement);
+    }
+    return false;
+  }
+
+  @override
+  Object? visitSetOrMapLiteral(SetOrMapLiteral node) {
+    // T3 (perf, F4): a const set/map literal is canonical — return the cached
+    // instance instead of re-inferring the type, re-evaluating elements and
+    // re-allocating an unmodifiable view on every visit.
+    if (node.constKeyword != null) {
+      final cached = _constCollectionCache[node];
+      if (cached != null) return cached;
+    }
+
+    bool isMap;
+    bool typeExplicit = false;
+
+    // Check explicit type arguments first
+    if (node.typeArguments != null &&
+        node.typeArguments!.arguments.isNotEmpty) {
+      isMap = node.typeArguments!.arguments.length == 2;
+      typeExplicit = true;
+      Logger.debug(
+        "[SetOrMapLiteral] Determined type via explicit args: isMap = $isMap",
+      );
+    } else {
+      // No explicit types, infer from content
+      isMap = false; // Default to Set if unsure initially
+      bool onlySpreads = true;
+      CollectionElement? firstEffectiveElement;
+
+      for (final element in node.elements) {
+        // Check if element (or its inner body) is a MapLiteralEntry
+        if (_isMapLiteralElement(element)) {
+          isMap = true;
+          onlySpreads = false;
+          firstEffectiveElement = element;
+          Logger.debug(
+            "[SetOrMapLiteral] Determined isMap = true (found MapLiteralEntry or element containing one).",
+          );
+          break; // Found a map entry, definitely a map
+        }
+        if (element is! SpreadElement && firstEffectiveElement == null) {
+          firstEffectiveElement = element;
+          onlySpreads = false;
+          // If it's an Expression, isMap remains false (it's a Set)
+          if (element is Expression) {
+            Logger.debug(
+              "[SetOrMapLiteral] Determined isMap = false (found first non-spread Expression).",
+            );
+          }
+        }
+        if (element is! SpreadElement) {
+          onlySpreads = false;
+        }
+      }
+
+      // Handle empty literal or spread-only literal
+      if (!typeExplicit) {
+        // Re-evaluate if type wasn't explicit
+        if (node.elements.isEmpty) {
+          isMap = true; // Empty literal defaults to Map
+          Logger.debug(
+            "[SetOrMapLiteral] Determined isMap = true (empty literal).",
+          );
+        } else if (onlySpreads) {
+          // Only spread elements, no explicit type args. Infer from first spread.
+          Logger.debug(
+            "[SetOrMapLiteral] Only spreads found. Inferring type from first spread element.",
+          );
+          final firstSpread = node.elements.first as SpreadElement;
+          final spreadValue = firstSpread.expression.accept<Object?>(this);
+          // Check if the evaluated spread value is a Map or looks like one
+          final bridgedInstance = toBridgedInstance(spreadValue);
+          if (spreadValue is Map ||
+              (bridgedInstance.$2 && bridgedInstance.$1?.nativeObject is Map)) {
+            isMap = true;
+            Logger.debug(
+              "[SetOrMapLiteral]   First spread evaluated to Map. Setting isMap = true.",
+            );
+          } else {
+            isMap = false; // Assume Set otherwise
+            Logger.debug(
+              "[SetOrMapLiteral]   First spread did not evaluate to Map. Setting isMap = false.",
+            );
+          }
+        } else if (firstEffectiveElement != null &&
+            _isMapLiteralElement(firstEffectiveElement)) {
+          isMap =
+              true; // Confirmation if first non-spread was entry (or contains one)
+        } else {
+          isMap = false; // If first non-spread was Expression, it's a Set
+        }
+      }
+    }
+
+    // Create and populate the collection
+    final Object collection = isMap ? <Object?, Object?>{} : <Object?>{};
+
+    for (final element in node.elements) {
+      try {
+        // SCE80, as in `visitListLiteral`: abandon the literal and let the
+        // state machine replay it.
+        final suspension = _processCollectionElement(
+          element,
+          collection,
+          isMap: isMap,
+        );
+        if (suspension != null) return suspension;
+      } on RuntimeD4rtException catch (e) {
+        final literalType = isMap ? "Map" : "Set";
+        // Check if error already contains context to avoid duplication
+        if (!e.message.contains('in $literalType literal')) {
+          throw RuntimeD4rtException("${e.message} (in $literalType literal)");
+        } else {
+          rethrow; // Rethrow original error with context
+        }
+      }
+    }
+
+    // If this is a const collection, return an unmodifiable version and cache
+    // it (T3): the same literal node must canonicalize to one instance.
+    if (node.constKeyword != null) {
+      final Object canonical = isMap
+          ? Map.unmodifiable(collection as Map<Object?, Object?>)
+          : Set.unmodifiable(collection as Set<Object?>);
+      _constCollectionCache[node] = canonical;
+      return canonical;
+    }
+
+    return collection;
+  }
+
+  // Resolve TypeAnnotation AST node to RuntimeType
+  RuntimeType _resolveTypeAnnotation(
+    TypeAnnotation? typeNode, {
+    bool isAsync = false,
+  }) {
+    return _resolveTypeAnnotationWithEnvironment(
+      typeNode,
+      environment,
+      isAsync: isAsync,
+    );
+  }
+
+  // Resolve TypeAnnotation AST node to RuntimeType using a specific environment
+  RuntimeType _resolveTypeAnnotationWithEnvironment(
+    TypeAnnotation? typeNode,
+    Environment env, {
+    bool isAsync = false,
+  }) {
+    if (typeNode == null) {
+      return BridgedClass(nativeType: dynamic, name: 'dynamic');
+    }
+    if (typeNode is NamedType) {
+      String typeName = isAsync
+          ? typeNode
+                .toSource()
+                .replaceAll('?', '')
+                .substringAfter('<')
+                .substringBeforeLast('>')
+          : typeNode.name.lexeme;
+      if (typeName.contains('<') && typeName.contains('>')) {
+        typeName = typeName.substring(0, typeName.indexOf('<'));
+      }
+      // GEN-100c: Handle import-prefixed type annotations
+      // (e.g. `ui.PointerData`, `math.Point`).
+      // Mirrors the same fix in tom_d4rt_ast.
+      if (!isAsync && typeNode.importPrefix != null) {
+        typeName = '${typeNode.importPrefix!.name.lexeme}.$typeName';
+      }
+      if (typeName == "void") {
+        return BridgedClass(nativeType: VoidType, name: 'void');
+      }
+      Logger.debug("[ResolveType] Resolving NamedType: $typeName");
+      try {
+        final resolved = env.get(typeName);
+        if (resolved is RuntimeType) {
+          Logger.debug(
+            "[ResolveType]   Resolved to RuntimeType: ${resolved.name}",
+          );
+          return resolved;
+        } else {
+          throw RuntimeD4rtException(
+            "Symbol '$typeName' resolved to non-type value: $resolved",
+          );
+        }
+      } on RuntimeD4rtException {
+        // Handle special case: 'dynamic' type doesn't exist in environment usually
+        if (typeName == 'dynamic') {
+          Logger.debug("[ResolveType]   Resolved to dynamic (special case)");
+          // Need a representation for dynamic. Using a placeholder for now.
+          // Ideally, have a predefined DynamicRuntimeType() instance.
+          return BridgedClass(
+            nativeType: Object,
+            name: 'dynamic',
+          ); // Corrected placeholder
+        }
+        // DFIN5 (dguc7): `Record` is the supertype of every record type, which
+        // RecordRuntimeType.isSubtypeOf already recognises by name.
+        if (typeName == 'Record') {
+          return BridgedClass(nativeType: Record, name: 'Record');
+        }
+        throw RuntimeD4rtException("Type '$typeName' not found.");
+      }
+    } else if (typeNode is RecordTypeAnnotation) {
+      // DFUB5: resolve record type annotations like `(int, int)` or
+      // `(int, {String name})` into a structural RecordRuntimeType so `is`/`as`
+      // and return-type checks can compare shape + field types (upstream
+      // 848f03d). Nested field types resolve recursively through this same
+      // resolver (so import-prefixed field types keep working).
+      Logger.debug(
+        "[ResolveType] Resolving RecordTypeAnnotation: ${typeNode.toSource()}",
+      );
+      final positional = <RuntimeType>[
+        for (final field in typeNode.positionalFields)
+          _resolveTypeAnnotationWithEnvironment(field.type, env),
+      ];
+      final named = <String, RuntimeType>{};
+      final namedFields = typeNode.namedFields;
+      if (namedFields != null) {
+        for (final field in namedFields.fields) {
+          named[field.name.lexeme] = _resolveTypeAnnotationWithEnvironment(
+            field.type,
+            env,
+          );
+        }
+      }
+      return RecordRuntimeType(
+        positionalFieldTypes: positional,
+        namedFieldTypes: named,
+      );
+    } else if (typeNode is GenericFunctionType) {
+      // DFUB5: resolve function type annotations like `int Function(int)` into a
+      // structural FunctionRuntimeType (upstream 848f03d), replacing the coarse
+      // `Function` placeholder so `is`/return checks compare parameter + return
+      // types.
+      Logger.debug(
+        "[ResolveType] Resolving GenericFunctionType: ${typeNode.toSource()}",
+      );
+      return _functionRuntimeTypeFromParts(
+        typeNode.returnType,
+        typeNode.parameters,
+        env,
+      );
+    } else {
+      Logger.error(
+        "[ResolveType] Unsupported TypeAnnotation type: ${typeNode.runtimeType}",
+      );
+      throw UnimplementedD4rtException(
+        "Type resolution for ${typeNode.runtimeType} not implemented yet.",
+      );
+    }
+  }
+
+  /// DFUB5: build a [FunctionRuntimeType] from a return-type node and a formal
+  /// parameter list, splitting required-positional / optional-positional /
+  /// named parameters and resolving each parameter type through the shared
+  /// resolver. Used for `GenericFunctionType` annotations.
+  FunctionRuntimeType _functionRuntimeTypeFromParts(
+    TypeAnnotation? returnTypeNode,
+    FormalParameterList? parameters,
+    Environment env,
+  ) {
+    final returnType = _resolveTypeAnnotationWithEnvironment(
+      returnTypeNode,
+      env,
+    );
+    final positional = <RuntimeType>[];
+    final optionalPositional = <RuntimeType>[];
+    final named = <String, RuntimeType>{};
+    if (parameters != null) {
+      for (final param in parameters.parameters) {
+        final paramType = _resolveFormalParameterRuntimeType(param, env);
+        if (param.isNamed) {
+          named[param.name?.lexeme ?? ''] = paramType;
+        } else if (param.isOptionalPositional) {
+          optionalPositional.add(paramType);
+        } else {
+          positional.add(paramType);
+        }
+      }
+    }
+    return FunctionRuntimeType(
+      returnType: returnType,
+      positionalParameterTypes: positional,
+      optionalPositionalParameterTypes: optionalPositional,
+      namedParameterTypes: named,
+    );
+  }
+
+  /// DFUB5: resolve the declared type of a single formal parameter to a
+  /// [RuntimeType], falling back to `dynamic` when the parameter has no
+  /// annotation or the annotation cannot be resolved.
+  RuntimeType _resolveFormalParameterRuntimeType(
+    FormalParameter param,
+    Environment env,
+  ) {
+    final normal = param is DefaultFormalParameter
+        ? param.parameter
+        : param as NormalFormalParameter;
+    TypeAnnotation? typeNode;
+    if (normal is SimpleFormalParameter) {
+      typeNode = normal.type;
+    } else if (normal is FieldFormalParameter) {
+      typeNode = normal.type;
+    } else if (normal is SuperFormalParameter) {
+      typeNode = normal.type;
+    }
+    if (typeNode == null) {
+      return const NamedRuntimeType('dynamic');
+    }
+    try {
+      return _resolveTypeAnnotationWithEnvironment(typeNode, env);
+    } catch (_) {
+      return const NamedRuntimeType('dynamic');
+    }
+  }
+
+  /// DFUB6: enforce applied generic type arguments on a function return.
+  ///
+  /// The base subtype check treats `Box<String>` and `Box<int>` as the same raw
+  /// `Box`, so `Box<String> f() => Box<int>(...)` and
+  /// `List<String> f() => [1,2,3]` slip through. This compares the value's
+  /// applied runtime type
+  /// against the declared applied return type, throwing the standard
+  /// "can't be returned" error when the arguments are incompatible.
+  ///
+  /// Scope is deliberately narrow: it only fires when the declared return type
+  /// is a generic `NamedType` and the value's applied arguments can be
+  /// determined (an interpreted instance carrying type arguments, or a
+  /// homogeneous native List/Set/Map). Empty/heterogeneous collections and
+  /// unresolvable annotations stay permissive so nothing regresses.
+  void _checkAppliedGenericReturn(
+    Object? returnValue,
+    AstNode? eDecl,
+    String functionName,
+    bool isNullable,
+  ) {
+    if (eDecl is! FunctionDeclaration) return;
+    final rtNode = eDecl.returnType;
+    if (rtNode is! NamedType) return;
+    final argNodes = rtNode.typeArguments?.arguments;
+    if (argNodes == null || argNodes.isEmpty) return;
+
+    final RuntimeType baseType;
+    final List<RuntimeType> declaredArgs;
+    try {
+      baseType = _resolveTypeAnnotationWithEnvironment(rtNode, environment);
+      declaredArgs = [
+        for (final argNode in argNodes)
+          _resolveTypeAnnotationWithEnvironment(argNode, environment),
+      ];
+    } catch (_) {
+      return; // Unresolvable annotation → stay permissive.
+    }
+    final appliedDeclared = AppliedRuntimeType(baseType, declaredArgs);
+
+    final appliedValue = environment.appliedRuntimeTypeOf(returnValue);
+    if (appliedValue == null) return;
+
+    if (!appliedValue.isSubtypeOf(appliedDeclared)) {
+      final declaredTypeName = isNullable
+          ? '${appliedDeclared.name}?'
+          : appliedDeclared.name;
+      throw RuntimeD4rtException(
+        "A value of type '${appliedValue.name}' can't be returned from the function '$functionName' because it has a return type of '$declaredTypeName'.",
+      );
+    }
+  }
+
+  @override
+  Object? visitInstanceCreationExpression(InstanceCreationExpression node) {
+    final constructorNameNode = node.constructorName.type;
+
+    // Resolve class name and named constructor, handling unresolved AST
+    // ambiguity where the parser can't distinguish ClassName.namedCtor(...)
+    // from importPrefix.ClassName(...). In unresolved AST, ClassName goes
+    // into NamedType.importPrefix and namedCtor goes into NamedType.name,
+    // with ConstructorName.name being null.
+    //
+    // Mirrors tom_d4rt_ast's visitInstanceCreationExpression: the
+    // importPrefix-as-classname resolution is done UPFRONT, before any
+    // environment.get(constructorName) lookup, so a local variable named
+    // like a constructor (e.g. `final all = ...; ... Border.all(...)`)
+    // cannot shadow the constructor name resolution.
+    String constructorName;
+    String? namedConstructorPart;
+    String? resolvedImportPrefix; // Real library prefix for prefix.ClassName()
+
+    if (node.constructorName.name != null) {
+      // Resolved form: type.name = class, constructorName.name = named ctor
+      // May also have importPrefix for prefix.ClassName.namedCtor() calls
+      constructorName = constructorNameNode.name.lexeme;
+      namedConstructorPart = node.constructorName.name!.name;
+      if (constructorNameNode.importPrefix != null) {
+        resolvedImportPrefix = constructorNameNode.importPrefix!.name.lexeme;
+      }
+    } else if (constructorNameNode.importPrefix != null) {
+      // Unresolved ambiguity: check if importPrefix is actually a class name.
+      // Examples: EdgeInsets.symmetric(...), WidgetStateProperty.all(...),
+      // Border.all(...).
+      final possibleClassName = constructorNameNode.importPrefix!.name.lexeme;
+      Object? possibleType;
+      try {
+        possibleType = environment.get(possibleClassName);
+      } on RuntimeD4rtException {
+        possibleType = null;
+      }
+      if (possibleType is InterpretedClass || possibleType is BridgedClass) {
+        // importPrefix was actually the class name, name is the named ctor.
+        constructorName = possibleClassName;
+        namedConstructorPart = constructorNameNode.name.lexeme;
+      } else {
+        // It really is a prefix.ClassName() call (e.g. ui.PointerData()).
+        constructorName = constructorNameNode.name.lexeme;
+        resolvedImportPrefix = constructorNameNode.importPrefix!.name.lexeme;
+        namedConstructorPart = null;
+      }
+    } else {
+      // Simple: ClassName() with no prefix, no named constructor
+      constructorName = constructorNameNode.name.lexeme;
+      namedConstructorPart = null;
+    }
+
+    Logger.debug(
+      "[InstanceCreation] Creating instance of '$constructorName'${namedConstructorPart != null ? '.$namedConstructorPart' : ''}",
+    );
+
+    // Resolve the type — use prefix if present so that e.g. ui.StrutStyle
+    // resolves through the dart:ui prefixed environment, not the current scope.
+    final lookupName = resolvedImportPrefix != null
+        ? '$resolvedImportPrefix.$constructorName'
+        : constructorName;
+    Object? typeValue;
+    try {
+      typeValue = environment.get(lookupName);
+    } on RuntimeD4rtException {
+      throw RuntimeD4rtException(
+        "Type '$constructorName' not found for instantiation.",
+      );
+    }
+
+    // Check the resolved type
+    if (typeValue is InterpretedClass) {
+      // CASE 1: InterpretedClass
+      final klass = typeValue;
+      Logger.debug(
+        "[InstanceCreation]   Type resolved to InterpretedClass: '$constructorName'",
+      );
+
+      // RC-3: If the interpreted class extends a bridged type that has a
+      // registered interface proxy (e.g. StatefulWidget, StatelessWidget),
+      // convert the InterpretedInstance to its native proxy so that runtime
+      // type checks like `is Widget` pass naturally.
+      Object applyInterfaceProxy(InterpretedInstance instance) {
+        return D4.tryCreateInterfaceProxyWithVisitor<Object>(instance, this) ??
+            instance;
+      }
+
+      // Find and call the constructor (interpreted)
+      final constructorLookupName =
+          namedConstructorPart ?? ''; // Use '' for default
+      final constructor = klass.findConstructor(constructorLookupName);
+
+      if (constructor == null) {
+        throw RuntimeD4rtException(
+          "Class '$constructorName' does not have a constructor named '$constructorLookupName'.",
+        );
+      }
+
+      // G-DOV2-3 FIX: Check if the class is abstract AFTER finding the constructor
+      // Factory constructors are allowed on abstract classes
+      if (klass.isAbstract && !constructor.isFactory) {
+        throw RuntimeD4rtException(
+          "Cannot instantiate abstract class '$constructorName'.",
+        );
+      }
+
+      // Evaluate the arguments
+      final evaluationResult = _evaluateArgumentsAsync(node.argumentList);
+      if (evaluationResult is AsyncSuspensionRequest) {
+        return evaluationResult; // Propagate suspension
+      }
+      final (positionalArgs, namedArgs) =
+          evaluationResult as (List<Object?>, Map<String, Object?>);
+
+      try {
+        // Evaluate the type arguments
+        List<RuntimeType>? evaluatedTypeArguments;
+        final typeArgsNode = node.constructorName.type.typeArguments;
+        if (typeArgsNode != null) {
+          evaluatedTypeArguments = typeArgsNode.arguments
+              .map((typeNode) => _resolveTypeAnnotation(typeNode))
+              .toList();
+        }
+
+        // Handle factory constructors differently from regular constructors
+        if (constructor.isFactory) {
+          // Factory constructors don't need a pre-created instance
+          // They are responsible for creating and returning their own instance
+          Logger.debug(
+            "[InstanceCreation] Calling factory constructor '$constructorLookupName'",
+          );
+
+          // Call the factory constructor directly without creating an instance first
+          // The factory will create its own instance and return it
+          final result = constructor.call(
+            this,
+            positionalArgs,
+            namedArgs,
+            evaluatedTypeArguments,
+          );
+
+          // Factory constructors should return an instance of the expected type
+          if (result is InterpretedInstance && result.klass == klass) {
+            return applyInterfaceProxy(result);
+          } else if (result is InterpretedInstance) {
+            throw RuntimeD4rtException(
+              "Factory constructor '$constructorLookupName' returned an instance of '${result.klass.name}' but expected '$constructorName'.",
+            );
+          } else {
+            throw RuntimeD4rtException(
+              "Factory constructor '$constructorLookupName' must return an instance, but returned ${result?.runtimeType}.",
+            );
+          }
+        } else {
+          // Regular constructors: create instance first, then call constructor
+          Logger.debug(
+            "[InstanceCreation] Calling regular constructor '$constructorLookupName'",
+          );
+
+          // Create and initialize the fields, passing the type arguments
+          final instance = klass.createAndInitializeInstance(
+            this,
+            evaluatedTypeArguments,
+          );
+          // Bind 'this' and call the constructor logic
+          final boundConstructor = constructor.bind(instance);
+          boundConstructor.call(
+            this,
+            positionalArgs,
+            namedArgs,
+            evaluatedTypeArguments,
+          );
+          // The constructor call returns the instance
+          return applyInterfaceProxy(instance);
+        }
+      } on ReturnException catch (e) {
+        // Handle return exceptions (applies to both factory and regular constructors)
+        if (constructor.isFactory) {
+          // For factory constructors, the return value is the actual result
+          final factoryResult = e.value;
+          if (factoryResult is InterpretedInstance) {
+            return applyInterfaceProxy(factoryResult);
+          }
+          return factoryResult;
+        } else {
+          // For regular constructors, check if returned value is valid
+          if (e.value != null && e.value is InterpretedInstance) {
+            final instance = e.value as InterpretedInstance; // Explicit cast
+            if (instance.klass == klass) {
+              // Check on the casted instance
+              return applyInterfaceProxy(instance);
+            }
+          }
+          // If the condition fails (null, not InterpretedInstance, or wrong class)
+          throw RuntimeD4rtException(
+            "Constructor return value error for '$constructorName'.",
+          );
+        }
+      } on RuntimeD4rtException catch (e) {
+        // Simplified error message
+        throw RuntimeD4rtException(
+          "Constructor execution error for '$constructorName.': ${e.message}",
+          originalException: e.originalException,
+          originalStackTrace: e.originalStackTrace,
+        );
+      }
+    } else if (typeValue is BridgedClass) {
+      // CASE 2: BridgedClass
+      final bridgedClass = typeValue;
+      Logger.debug(
+        "[InstanceCreation]   Type resolved to BridgedClass: '$constructorName'",
+      );
+
+      final (positionalArgs, namedArgs) = _evaluateArguments(node.argumentList);
+
+      // RC-2: Evaluate type arguments for BridgedClass constructors
+      List<RuntimeType>? evaluatedTypeArguments;
+      final typeArgsNode = node.constructorName.type.typeArguments;
+      if (typeArgsNode != null) {
+        evaluatedTypeArguments = typeArgsNode.arguments
+            .map((typeNode) => _resolveTypeAnnotation(typeNode))
+            .toList();
+      }
+
+      // Find the constructor adapter (bridged)
+      final constructorLookupName =
+          namedConstructorPart ?? ''; // Use '' if null
+
+      // RC-2: Check for a registered generic constructor factory first.
+      // Fires for both generic calls (GlobalKey<NavigatorState>()) and
+      // non-generic constructor overrides (StrutStyle()).
+      // Returns null to fall through to regular bridge constructor.
+      {
+        final genericCtor = D4.findGenericConstructor(
+          constructorName,
+          constructorLookupName,
+        );
+        if (genericCtor != null) {
+          try {
+            final nativeObject = D4.withActiveVisitor(
+              this,
+              () => genericCtor(
+                this,
+                positionalArgs,
+                namedArgs,
+                evaluatedTypeArguments,
+              ),
+            );
+            // null means "fall through to regular constructor"
+            if (nativeObject != null) {
+              if (nativeObject is Future || nativeObject is Stream) {
+                return nativeObject;
+              }
+              if (D4.usageLogEnabled) {
+                D4.recordUsageHit(
+                  'ctor',
+                  constructorName,
+                  evaluatedTypeArguments?.map((t) => t.toString()).join(',') ??
+                      '',
+                );
+              }
+              final bridgedInstance = BridgedInstance(
+                bridgedClass,
+                nativeObject,
+                typeArguments: evaluatedTypeArguments ?? const [],
+              );
+              Logger.debug(
+                "[InstanceCreation]   Created via generic constructor factory: ${nativeObject.runtimeType}",
+              );
+              return bridgedInstance;
+            }
+          } on RuntimeD4rtException {
+            rethrow;
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error in generic constructor factory for '$constructorName': $e",
+            );
+          }
+        }
+      }
+
+      final constructorAdapter = bridgedClass.findConstructorAdapter(
+        constructorLookupName,
+      );
+
+      if (constructorAdapter == null) {
+        // GEN-129 (generic factory-as-static fix): some stdlib/Flutter
+        // bridges register factory constructors as `staticMethods` (e.g.
+        // Stream.periodic, Stream.value, Future.value). When the source
+        // adds type arguments — `Stream<int>.periodic(...)` — the
+        // analyzer parses the call as an InstanceCreationExpression and
+        // routes us here; without type args it would be a
+        // MethodInvocation routed through static-method lookup. To make
+        // both forms behave identically we fall back to staticMethods
+        // before giving up. This is fully generic — no Stream- or
+        // Flutter-specific special-casing.
+        if (constructorLookupName.isNotEmpty) {
+          final staticAdapter = bridgedClass.findStaticMethodAdapter(
+            constructorLookupName,
+          );
+          if (staticAdapter != null) {
+            try {
+              final nativeObject = D4.withActiveVisitor(
+                this,
+                () => staticAdapter(
+                  this,
+                  positionalArgs,
+                  namedArgs,
+                  evaluatedTypeArguments,
+                ),
+              );
+              if (nativeObject == null) {
+                throw RuntimeD4rtException(
+                  "Bridged static-as-constructor adapter for '$constructorName.$constructorLookupName' returned null unexpectedly.",
+                );
+              }
+              if (nativeObject is Future || nativeObject is Stream) {
+                return nativeObject;
+              }
+              return BridgedInstance(
+                bridgedClass,
+                nativeObject,
+                typeArguments: evaluatedTypeArguments ?? const [],
+              );
+            } on RuntimeD4rtException {
+              rethrow;
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error during bridged static-as-constructor '$constructorLookupName' for class '$constructorName': $e",
+              );
+            }
+          }
+        }
+        throw RuntimeD4rtException(
+          "Bridged class '$constructorName' does not have a registered constructor named '$constructorLookupName'. Check bridge definition.",
+        );
+      }
+
+      // Call the constructor adapter
+      try {
+        // The adapter is responsible for:
+        // 1. Converting the interpreted positionalArgs/namedArgs to native types.
+        // 2. Calling the actual native constructor.
+        // 3. Returning the created native object.
+        // Wrap with withActiveVisitor so that D4 helper methods (getRequiredNamedArg
+        // etc.) can access the visitor for interface proxy creation (RC-1).
+        final nativeObject = D4.withActiveVisitor(
+          this,
+          () => constructorAdapter(this, positionalArgs, namedArgs),
+        );
+
+        // Check if the adapter returned a value (it should)
+        if (nativeObject == null) {
+          throw RuntimeD4rtException(
+            "Bridged constructor adapter for '\$constructorName.$constructorLookupName' returned null unexpectedly.",
+          );
+        }
+
+        // Don't wrap Futures in BridgedInstance - they need to be awaitable directly
+        // Similarly, don't wrap Streams as they need direct subscription
+        if (nativeObject is Future || nativeObject is Stream) {
+          Logger.debug(
+            "[InstanceCreation]   Returning native ${nativeObject.runtimeType} directly (not wrapping)",
+          );
+          return nativeObject;
+        }
+
+        // Wrap the native object in BridgedInstance
+        final bridgedInstance = BridgedInstance(
+          bridgedClass,
+          nativeObject,
+          typeArguments: evaluatedTypeArguments ?? const [],
+        );
+        Logger.debug(
+          "[InstanceCreation]   Successfully created BridgedInstance wrapping native object: \${nativeObject.runtimeType}",
+        );
+        return bridgedInstance;
+      } on RuntimeD4rtException catch (e) {
+        // If the adapter itself raises a RuntimeError (e.g. conversion failure)
+        // SCD34: carry the preserved trace across the re-wrap.
+        throw RuntimeD4rtException(
+          "Error during bridged constructor '$constructorLookupName' for class '$constructorName': ${e.message}",
+          originalStackTrace: e.originalStackTrace,
+          originalException: e.originalException,
+        );
+      } catch (e, s) {
+        // Catch potential native exceptions raised by the adapter or the native constructor
+        Logger.error(
+          "[InstanceCreation] Native exception during bridged constructor '$constructorName.$constructorLookupName': $e\n$s",
+        );
+        // Encapsulate the native error in a RuntimeError for propagation
+        // SCB28: an unguarded adapter indexed past the end of the
+        // argument list -- report the arity, not the RangeError.
+        final arityError = D4.describeArityError(
+          e,
+          positionalArgs,
+          '$constructorName.$constructorLookupName',
+        );
+        if (arityError != null) {
+          // SCD34: the arity description deliberately replaces the native
+          // error as the *value* (SCB28), but the trace still belongs to the
+          // adapter that indexed past the end -- which is the only frame that
+          // says where.
+          // SCE109: type preserved, as at the eight sites above. SCD34's
+          // point about the stack trace is unaffected — a `RangeError`
+          // carries none, so the adapter frame is lost either way and
+          // the note below is now the only pointer to it.
+          throw RangeError(arityError);
+        }
+        throw RuntimeD4rtException(
+          "Native error during bridged constructor '$constructorLookupName' for class '$constructorName': $e",
+          originalException: e,
+          originalStackTrace: s,
+        );
+      }
+    } else {
+      // CASE 3: The resolved type is neither InterpretedClass nor BridgedClass
+      throw RuntimeD4rtException(
+        "Identifier '$constructorName' resolved to ${typeValue?.runtimeType}, which is not a class type that can be instantiated.",
+      );
+    }
+  }
+
+  (List<Object?>, Map<String, Object?>) _evaluateArguments(
+    ArgumentList argumentList,
+  ) {
+    List<Object?> positionalArgs = [];
+    Map<String, Object?> namedArgs = {};
+
+    // Note: Dart allows named arguments to appear anywhere in the argument
+    // list (Dart 3 relaxed the old "named must come last" rule). Positional
+    // arguments are appended in source order; named arguments are keyed by
+    // name, so interleaving them produces well-defined results.
+    for (final arg in argumentList.arguments) {
+      if (arg is NamedExpression) {
+        final name = arg.name.label.name;
+        final value = arg.expression.accept<Object?>(this);
+
+        // Check for async suspension in named arguments
+        if (value is AsyncSuspensionRequest) {
+          return value as dynamic; // Propagate suspension request
+        }
+
+        if (namedArgs.containsKey(name)) {
+          throw RuntimeD4rtException(
+            "Named argument '$name' provided more than once.",
+          );
+        }
+        final bridgedInstance = toBridgedInstance(value);
+        namedArgs[name] = _bridgeInterpreterValueToNative(
+          bridgedInstance.$2 ? bridgedInstance.$1!.nativeObject : value,
+        );
+      } else {
+        final a = arg.accept<Object?>(this);
+
+        // Check for async suspension in positional arguments
+        if (a is AsyncSuspensionRequest) {
+          return a as dynamic; // Propagate suspension request
+        }
+
+        final bridgedInstance = toBridgedInstance(a);
+        positionalArgs.add(
+          _bridgeInterpreterValueToNative(
+            bridgedInstance.$2 ? bridgedInstance.$1!.nativeObject : a,
+          ),
+        );
+      }
+    }
+
+    return (positionalArgs, namedArgs);
+  }
+
+  Object? _bridgeInterpreterValueToNative(Object? interpreterValue) {
+    // Step 4 of the d4rt consolidation plan: delegate the leaf-level
+    // BridgedInstance/BridgedEnumValue/null/passthrough logic to the shared
+    // [D4.unwrapAs] helper. With T == Object? the helper returns:
+    //   * BridgedInstance.nativeObject
+    //   * BridgedEnumValue.nativeValue
+    //   * null when input is null
+    //   * value as-is otherwise (the `value is T` branch matches Object? for
+    //     every non-null value, including InterpretedInstance / Callable)
+    // — exactly the original three-branch contract.
+    //
+    // SCF40: a bare CLASS NAME is normalised too, to its native `Type`. It
+    // evaluates to its `BridgedClass`, and SCD198 already stores the native
+    // `Type` when a set or map LITERAL holds one (`_unwrapHashKey`). A key
+    // that reached a native collection through a METHOD (`add`, `[]=`,
+    // `putIfAbsent`) arrived here instead and was stored as the
+    // `BridgedClass`, so a lookup by `x.runtimeType` asked `Type ==
+    // BridgedClass` — which `Type.==` refuses — and an identity collection
+    // compared identities natively. Every call's arguments cross this one
+    // boundary, so no collection has to be listed. ENG-002's `D4.coerce*`
+    // conversion for Type-typed parameters is the same rule, which bridges
+    // now receive already applied.
+    if (interpreterValue is BridgedClass) return interpreterValue.nativeType;
+    return D4.unwrapAs<Object?>(interpreterValue, visitor: this);
+  }
+
+  /// Wraps a native return value from a bridged call in a [BridgedInstance]
+  /// if a bridge exists, otherwise returns the value as-is.
+  ///
+  /// This is needed when bridged static getters or methods return instances
+  /// of private subclasses (e.g., `Curves.linear` returns `_Linear` which
+  /// extends `Curve`). The private class instance needs to be wrapped using
+  /// the public superclass bridge.
+  Object? wrapNativeReturnValue(Object? nativeValue) {
+    if (nativeValue == null ||
+        nativeValue is String ||
+        nativeValue is num ||
+        nativeValue is bool) {
+      return nativeValue;
+    }
+    if (nativeValue is BridgedInstance) {
+      return nativeValue;
+    }
+    if (nativeValue is List) {
+      return nativeValue.map(wrapNativeReturnValue).toList();
+    }
+    if (nativeValue is Map) {
+      return nativeValue.map(
+        (key, value) =>
+            MapEntry(wrapNativeReturnValue(key), wrapNativeReturnValue(value)),
+      );
+    }
+    // RCC7: Re-wrap native enum values as their bridged counterparts before
+    // falling back to [toBridgedInstance] (which would mint a generic
+    // BridgedInstance for the enum). This makes native->script enum returns
+    // wrap consistently regardless of indirection depth — an enum stored in
+    // native static state and returned through a second native call still
+    // compares equal to the script's enum literal.
+    if (nativeValue is Enum) {
+      final bridgedEnum =
+          environment.getBridgedEnumValue(nativeValue) ??
+          globalEnvironment.getBridgedEnumValue(nativeValue);
+      if (bridgedEnum != null) return bridgedEnum;
+    }
+    // Try to find a bridge for this native value
+    final result = toBridgedInstance(nativeValue);
+    if (result.$2) {
+      return result.$1;
+    }
+    // No bridge found, return the value as-is
+    return nativeValue;
+  }
+
+  /// Evaluates arguments for async function calls, handling await expressions.
+  /// Returns either (List&lt;Object?&gt;, Map&lt;String, Object?&gt;) or AsyncSuspensionRequest.
+  Object? _evaluateArgumentsAsync(ArgumentList argumentList) {
+    List<Object?> positionalArgs = [];
+    Map<String, Object?> namedArgs = {};
+
+    // Note: Dart allows named arguments to appear anywhere in the argument
+    // list (Dart 3 relaxed the old "named must come last" rule). Positional
+    // arguments are appended in source order; named arguments are keyed by
+    // name, so interleaving them produces well-defined results.
+    for (final arg in argumentList.arguments) {
+      if (arg is NamedExpression) {
+        final name = arg.name.label.name;
+        final value = arg.expression.accept<Object?>(this);
+
+        // Check for async suspension in named arguments
+        if (value is AsyncSuspensionRequest) {
+          Logger.debug(
+            "[_evaluateArgumentsAsync] Async suspension in named argument '$name'",
+          );
+          return value; // Propagate suspension request
+        }
+
+        if (namedArgs.containsKey(name)) {
+          throw RuntimeD4rtException(
+            "Named argument '$name' provided more than once.",
+          );
+        }
+        final bridgedInstance = toBridgedInstance(value);
+        namedArgs[name] = _bridgeInterpreterValueToNative(
+          bridgedInstance.$2 ? bridgedInstance.$1!.nativeObject : value,
+        );
+      } else {
+        final a = arg.accept<Object?>(this);
+
+        // Check for async suspension in positional arguments
+        if (a is AsyncSuspensionRequest) {
+          Logger.debug(
+            "[_evaluateArgumentsAsync] Async suspension in positional argument",
+          );
+          return a; // Propagate suspension request
+        }
+
+        final bridgedInstance = toBridgedInstance(a);
+        positionalArgs.add(
+          _bridgeInterpreterValueToNative(
+            bridgedInstance.$2 ? bridgedInstance.$1!.nativeObject : a,
+          ),
+        );
+      }
+    }
+
+    Logger.debug(
+      "[_evaluateArgumentsAsync] All arguments evaluated successfully: ${positionalArgs.length} positional, ${namedArgs.length} named",
+    );
+    return (positionalArgs, namedArgs);
+  }
+
+  // Add FunctionExpressionInvocation handler
+  @override
+  Object? visitFunctionExpressionInvocation(FunctionExpressionInvocation node) {
+    // 1. Evaluate the function expression itself.
+    // This should result in a Callable (like InterpretedFunction or NativeFunction).
+    // SCE176: an interpreted instance declaring `call` resolves to that method.
+    final evaluated = node.function.accept<Object?>(this);
+    final calleeValue = interpretedCallMethod(evaluated) ?? evaluated;
+
+    // 2. Evaluate arguments (shared logic).
+    final (positionalArgs, namedArgs) = _evaluateArguments(node.argumentList);
+
+    // 3. Evaluate type arguments (shared logic).
+    List<RuntimeType>? evaluatedTypeArguments;
+    final typeArgsNode = node.typeArguments;
+    if (typeArgsNode != null) {
+      evaluatedTypeArguments = typeArgsNode.arguments
+          .map((typeNode) => _resolveTypeAnnotation(typeNode))
+          .toList();
+    }
+
+    // 4. Check if it's actually callable (standard callable).
+    if (calleeValue is Callable) {
+      // 5. Perform the standard call.
+      try {
+        return calleeValue.call(
+          this,
+          positionalArgs,
+          namedArgs,
+          evaluatedTypeArguments,
+        );
+      } on ReturnException catch (e) {
+        return e.value;
+      }
+    }
+
+    // DFUB9: invoke a `call` method declared on an extension type instance,
+    // e.g. `(calc)(5)` where calc's extension type declares `int call(int x)`.
+    if (calleeValue is InterpretedExtensionTypeInstance) {
+      final callMethod = calleeValue.extensionType.methods['call'];
+      if (callMethod != null) {
+        Logger.debug(
+          "[FuncExprInvoke] Found 'call' method on extension type ${calleeValue.extensionType.name}. Invoking...",
+        );
+        try {
+          return callMethod
+              .bind(calleeValue)
+              .call(this, positionalArgs, namedArgs, evaluatedTypeArguments);
+        } on ReturnException catch (e) {
+          return e.value;
+        }
+      }
+    }
+
+    // INTER-001 FIX: Check if it's a BridgedInstance with a call() method.
+    // A native Function is called natively below (SCF38, GEN-110), not
+    // through the `Function` bridge's `call`, which serves Callables only.
+    final bridgedResult = calleeValue is Function
+        ? (null, false)
+        : toBridgedInstance(calleeValue);
+    if (bridgedResult.$2) {
+      final bridgedInstance = bridgedResult.$1!;
+      final callMethodAdapter = bridgedInstance.bridgedClass
+          .findInstanceMethodAdapter('call');
+      if (callMethodAdapter != null) {
+        Logger.debug(
+          "[FuncExprInvoke] Found 'call' method on BridgedInstance (${bridgedInstance.bridgedClass.name}). Invoking...",
+        );
+        try {
+          return callMethodAdapter(
+            this,
+            bridgedInstance.nativeObject,
+            positionalArgs,
+            namedArgs,
+            evaluatedTypeArguments,
+          );
+        } on ReturnException catch (e) {
+          return e.value;
+        }
+      }
+    }
+
+    // Try Extension 'call' Method
+    {
+      const methodName = 'call';
+      try {
+        final extensionMethod = environment.findExtensionMember(
+          calleeValue,
+          methodName,
+        );
+
+        if (extensionMethod is ExtensionMemberCallable &&
+            !extensionMethod
+                .isOperator && // Ensure it's a regular method named 'call'
+            !extensionMethod.isGetter &&
+            !extensionMethod.isSetter) {
+          Logger.debug(
+            "[FuncExprInvoke] Found extension method 'call' for type ${calleeValue?.runtimeType}. Calling...",
+          );
+
+          // Prepare arguments for extension method:
+          // First arg is the receiver (the object being called)
+          final extensionPositionalArgs = [calleeValue, ...positionalArgs];
+
+          try {
+            // Call the extension method
+            return extensionMethod.call(
+              this,
+              extensionPositionalArgs,
+              namedArgs,
+              evaluatedTypeArguments,
+            );
+          } on ReturnException catch (e) {
+            return e.value;
+          } catch (e) {
+            throw RuntimeD4rtException(
+              "Error executing extension method 'call': $e",
+            );
+          }
+        }
+        Logger.debug(
+          "[FuncExprInvoke] No suitable extension method 'call' found for type ${calleeValue?.runtimeType}.",
+        );
+      } on RuntimeD4rtException catch (findError) {
+        Logger.debug(
+          "[FuncExprInvoke] No extension member 'call' found for type ${calleeValue?.runtimeType}. Error: ${findError.message}",
+        );
+        // Fall through to the final standard error below.
+      }
+
+      // GEN-083: Allow invoking native Dart Function values (e.g. callbacks
+      // that were stored on a bridged target via a typed-wrapper setter and
+      // then read back through the getter).
+      //
+      // GEN-110 extension: Callable positional/named args (interpreted
+      // closures) are wrapped via `D4.coerceCallableToFunction` so they
+      // satisfy the native function's typed parameters.
+      if (calleeValue is Function) {
+        final wrappedPositional = positionalArgs
+            .map((a) => D4.coerceCallableToFunction(this, a))
+            .toList();
+        final wrappedNamed = namedArgs.map(
+          (k, v) => MapEntry(k, D4.coerceCallableToFunction(this, v)),
+        );
+        final symbolNamed = wrappedNamed.isEmpty
+            ? const <Symbol, Object?>{}
+            : wrappedNamed.map<Symbol, Object?>(
+                (k, v) => MapEntry(Symbol(k), v),
+              );
+        try {
+          return Function.apply(calleeValue, wrappedPositional, symbolNamed);
+        } on ReturnException catch (e) {
+          return e.value;
+        }
+      }
+
+      // Original Error: The expression evaluated did not yield a callable function or an object with a callable 'call' extension.
+      throw RuntimeD4rtException(
+        "Attempted to call something that is not a function and has no 'call' extension method. Got type: ${calleeValue?.runtimeType}."
+        '${unbridgedNativeClause(calleeValue)}',
+      );
+    }
+  }
+
+  @override
+  Object? visitConstructorReference(ConstructorReference node) {
+    final typeNode = node.constructorName.type;
+    final constructorId = node.constructorName.name; // Null for default
+    final constructorLookupName = constructorId?.name ?? '';
+
+    // Resolve the class type
+    final className = typeNode.name.lexeme;
+    Object? classValue;
+    try {
+      classValue = environment.get(className);
+    } on RuntimeD4rtException {
+      throw RuntimeD4rtException(
+        "Type '$className' not found for constructor reference.",
+      );
+    }
+
+    if (classValue is InterpretedClass) {
+      // Find the InterpretedFunction for the constructor
+      final constructorFunction = classValue.findConstructor(
+        constructorLookupName,
+      );
+      if (constructorFunction == null) {
+        throw RuntimeD4rtException(
+          "Constructor '$constructorLookupName' not found for class '$className'.",
+        );
+      }
+      // Return the constructor function itself as the tear-off value
+      return constructorFunction;
+    } else if (classValue is BridgedClass) {
+      // Find the adapter (just to check existence)
+      final adapter = classValue.findConstructorAdapter(constructorLookupName);
+      if (adapter == null) {
+        throw RuntimeD4rtException(
+          "Bridged constructor '$constructorLookupName' not found for class '$className'.",
+        );
+      }
+
+      throw UnimplementedD4rtException(
+        "Tear-off for bridged constructors ('$className.$constructorLookupName') is not yet supported.",
+      );
+    } else {
+      throw RuntimeD4rtException(
+        "Identifier '$className' did not resolve to a class type.",
+      );
+    }
+  }
+
+  @override
+  Object? visitFunctionReference(FunctionReference node) {
+    // The actual logic is in visiting the underlying function expression
+    // (Identifier, PropertyAccess, ConstructorReference, etc.)
+    // which should return the Callable/Function object itself.
+    return node.function.accept<Object?>(this);
+  }
+
+  @override
+  Object? visitEmptyStatement(EmptyStatement node) {
+    // An empty statement does nothing.
+    return null;
+  }
+
+  @override
+  Object? visitSwitchStatement(SwitchStatement node) {
+    final labels = _labelsOf(node);
+    final switchValue = node.expression.accept<Object?>(this);
+    final switchEnvironment = Environment(enclosing: environment);
+    final previousEnvironment = environment;
+    environment = switchEnvironment;
+
+    // Build a map of labels to member indices for 'continue <label>'
+    final Map<String, int> labelToIndex = {};
+    for (int i = 0; i < node.members.length; i++) {
+      final member = node.members[i];
+      for (final label in member.labels) {
+        labelToIndex[label.label.name] = i;
+      }
+    }
+
+    bool matched = false; // Has any case matched the switchValue?
+    bool execute =
+        false; // Should we execute statements in the current/next section?
+    int startIndex = 0; // Starting index for processing members
+
+    try {
+      while (true) {
+        // outer loop for continue with label
+        try {
+          for (int i = startIndex; i < node.members.length; i++) {
+            final member = node.members[i];
+            List<Statement> statementsToExecute = [];
+            // Cluster C2: Dart 3 pattern cases do not fall through. When a
+            // SwitchPatternCase with a constant pattern matches and runs,
+            // we must break out of the for loop after executing — otherwise
+            // subsequent cases would run with `execute` still true,
+            // re-evaluating their bodies (e.g. reassigning `late final`
+            // locals → "already been assigned").
+            bool patternCaseMatchedThisIteration = false;
+
+            if (member is SwitchCase) {
+              if (!matched) {
+                final caseValue = member.expression.accept<Object?>(this);
+                Logger.debug(
+                  "[Switch] Checking legacy case value: $caseValue against $switchValue",
+                );
+                // Cluster-26: see _matchAndBind ConstantPattern — the
+                // native enum / BridgedEnumValue boundary is asymmetric.
+                if (switchValue == caseValue ||
+                    (caseValue != null && caseValue == switchValue)) {
+                  matched = true;
+                  execute = true;
+                  Logger.debug("[Switch] Matched legacy case: $caseValue");
+                }
+              }
+              statementsToExecute = member.statements;
+            } else if (member is SwitchPatternCase) {
+              // Try explicit cast to potentially help the linter
+              final pattern = member.guardedPattern.pattern;
+              if (pattern is ConstantPattern) {
+                // This handles 'case <constant>:'
+                if (!matched) {
+                  // Access expression from the ConstantPattern
+                  final caseValue = pattern.expression.accept<Object?>(this);
+                  Logger.debug(
+                    "[Switch] Checking pattern case value: $caseValue against $switchValue",
+                  );
+                  // Cluster-26: see _matchAndBind ConstantPattern — the
+                  // native enum / BridgedEnumValue boundary is asymmetric.
+                  if (switchValue == caseValue ||
+                      (caseValue != null && caseValue == switchValue)) {
+                    matched = true;
+                    execute = true; // Start executing
+                    patternCaseMatchedThisIteration = true;
+                    Logger.debug("[Switch] Matched pattern case: $caseValue");
+                  }
+                }
+                statementsToExecute = member.statements;
+              } else {
+                // Handle other pattern types using our improved _matchAndBind function
+                if (!matched) {
+                  // Create a temporary environment for pattern matching in switch
+                  final tempEnvironment = Environment(enclosing: environment);
+                  try {
+                    _matchAndBind(pattern, switchValue, tempEnvironment);
+                    // If we get here, the pattern matched
+                    matched = true;
+                    // G-DOV-8 FIX: Execute pattern case body in the pattern's own scope
+                    // and do NOT fall through to subsequent cases (Dart 3 semantics).
+                    Logger.debug(
+                      "[Switch] Matched pattern case: ${pattern.runtimeType}",
+                    );
+
+                    // Check guard clause (when)
+                    if (member.guardedPattern.whenClause != null) {
+                      final prevEnv = environment;
+                      environment = tempEnvironment;
+                      try {
+                        final guardResult = member
+                            .guardedPattern
+                            .whenClause!
+                            .expression
+                            .accept<Object?>(this);
+                        if (guardResult != true) {
+                          environment = prevEnv;
+                          // Guard failed, pattern doesn't match - reset matched so other cases can try
+                          matched = false;
+                          Logger.debug(
+                            "[Switch] Guard clause failed, skipping case",
+                          );
+                          statementsToExecute = member.statements;
+                          continue; // Skip to next case member
+                        }
+                      } catch (e) {
+                        environment = prevEnv;
+                        rethrow;
+                      }
+                      environment = prevEnv;
+                    }
+
+                    // Execute statements in the pattern environment
+                    final prevEnv = environment;
+                    environment = tempEnvironment;
+                    try {
+                      for (final statement in member.statements) {
+                        statement.accept<Object?>(this);
+                      }
+                    } on BreakException catch (e) {
+                      environment = prevEnv;
+                      if (e.label == null || labels.contains(e.label)) {
+                        break; // Exit the loop over members
+                      } else {
+                        rethrow;
+                      }
+                    } on ContinueException catch (e) {
+                      environment = prevEnv;
+                      if (e.label != null &&
+                          labelToIndex.containsKey(e.label)) {
+                        startIndex = labelToIndex[e.label]!;
+                        matched = true;
+                        execute = true;
+                        throw ContinueSwitchLabel();
+                      } else {
+                        rethrow;
+                      }
+                    } catch (e) {
+                      environment = prevEnv;
+                      rethrow;
+                    }
+                    environment = prevEnv;
+                    // Pattern cases do not fall through - break out
+                    break;
+                  } on PatternMatchD4rtException catch (e) {
+                    Logger.debug(
+                      "[Switch] Pattern ${pattern.runtimeType} did not match: ${e.message}",
+                    );
+                    // Pattern didn't match, continue to next case
+                  }
+                }
+                statementsToExecute = member.statements;
+              }
+            } else if (member is SwitchDefault) {
+              Logger.debug("[Switch] Reached default case.");
+              if (!matched || execute) {
+                // Execute default if no match OR fallthrough
+                execute = true;
+              }
+              statementsToExecute = member.statements;
+            } else {
+              throw StateD4rtException(
+                'Unknown switch member type: ${member.runtimeType}',
+              );
+            }
+
+            // Execute statements if needed (either matched this round or fell through)
+            if (execute) {
+              Logger.debug(
+                "[Switch] Executing statements for matched/fallthrough/default...",
+              );
+              try {
+                for (final statement in statementsToExecute) {
+                  statement.accept<Object?>(this);
+                }
+                // Fall-through continues if no break
+              } on BreakException catch (e) {
+                Logger.debug(
+                  "[Switch] Caught BreakException (label: ${e.label}) with labels: $labels",
+                );
+                if (e.label == null || labels.contains(e.label)) {
+                  // Unlabeled break OR labeled break targeting this switch.
+                  Logger.debug("[Switch] Breaking switch.");
+                  execute = false; // Stop execution after this block
+                  break; // Exit the loop over members
+                } else {
+                  // Labeled break targeting an outer construct.
+                  Logger.debug("[Switch] Rethrowing outer break...");
+                  rethrow;
+                }
+              } on ContinueException catch (e) {
+                if (e.label != null && labelToIndex.containsKey(e.label)) {
+                  // Continue to a labeled case in this switch
+                  Logger.debug("[Switch] Continue to labeled case: ${e.label}");
+                  startIndex = labelToIndex[e.label]!;
+                  matched =
+                      true; // Mark as matched so we execute the target case
+                  execute = true;
+                  throw ContinueSwitchLabel(); // Signal to restart from target index
+                } else {
+                  // 'continue' without a label or with unknown label
+                  throw RuntimeD4rtException(
+                    "'continue' is not valid inside a switch case/default block without a loop target.",
+                  );
+                }
+              }
+            }
+            // Cluster C2: Dart 3 SwitchPatternCase with a constant pattern
+            // does not fall through. After running its body, exit the
+            // member loop so subsequent cases are not re-executed.
+            //
+            // Cluster C12: …but only break when the matching case actually
+            // had statements. Dart 3 multi-case grouping —
+            //   case A:
+            //   case B:
+            //     stmt;
+            // — is parsed as two SwitchPatternCase nodes: A with empty
+            // statements and B with the body. The match fires on A, then
+            // we must fall through to B so the body runs. Breaking out on
+            // A would skip the body and silently return null from the
+            // enclosing function (mirror of the fix in tom_d4rt_ast).
+            if (patternCaseMatchedThisIteration &&
+                statementsToExecute.isNotEmpty) {
+              execute = false;
+              break;
+            }
+          }
+          // Normal completion - exit the while(true) loop
+          break;
+        } on ContinueSwitchLabel {
+          // Restart execution from startIndex (already set before throwing)
+          continue;
+        }
+      }
+    } finally {
+      environment = previousEnvironment;
+    }
+
+    return null; // Switch statements don't produce a value.
+  }
+
+  // Await Expression (Partial Support)
+  @override
+  Object? visitAwaitExpression(AwaitExpression node) {
+    // Check for async state machine: do we have an async state?
+    if (currentAsyncState == null) {
+      // This shouldn't happen if the call is properly orchestrated
+      throw StateD4rtException(
+        "Internal error: 'await' encountered outside of a managed async execution state.",
+      );
+    }
+
+    // Initial check: Are we in an async function?
+    if (!currentAsyncState!.function.isAsync) {
+      throw RuntimeD4rtException(
+        "'await' can only be used inside an async function.",
+      );
+    }
+
+    // Resuming a statement re-evaluates it from the top, so this await site may
+    // already have been resolved on an earlier pass. Replay ITS OWN value.
+    //
+    // SCC40: this used to read `lastAwaitResult` whenever the frame was in
+    // invocation-resumption mode, which is a single slot shared by every await
+    // in the statement — so `(await a) + (await b)` produced `'AA'`. Falling
+    // through when the site is absent from the map is the other half of the
+    // fix: an await that has not been reached yet must still suspend, rather
+    // than silently adopting a neighbour's value.
+    // SCF43: every collection-`for` body in flight records the await sites
+    // it reaches, so a completed iteration can drop them from the node cache
+    // and the next iteration suspends afresh.
+    for (final scope in _collectionForAwaitScopes) {
+      scope.add(node);
+    }
+    final resolvedAwaits = currentAsyncState!.resolvedAwaitResults;
+    if (resolvedAwaits.containsKey(node)) {
+      Logger.debug(
+        "[AwaitExpression] Replaying already-resolved await site: ${resolvedAwaits[node]}",
+      );
+      return resolvedAwaits[node];
+    }
+
+    Logger.debug("[AwaitExpression] Evaluating expression for await...");
+    final expressionValue = node.expression.accept<Object?>(this);
+
+    // HANDLING NESTED SUSPENSIONS
+    if (expressionValue is AsyncSuspensionRequest) {
+      // If the awaited expression itself is an await, just propagate its suspension request.
+      Logger.debug(
+        "[AwaitExpression] Awaited expression itself suspended. Propagating AsyncSuspensionRequest.",
+      );
+      return expressionValue;
+    }
+
+    // Bug-92: Unwrap BridgedInstance containing a Future
+    // When Future is created via bridged constructor, it gets wrapped in BridgedInstance
+    // We need to unwrap it to get the actual Future for await
+    Object? futureValue = expressionValue;
+    if (expressionValue is BridgedInstance &&
+        expressionValue.nativeObject is Future) {
+      futureValue = expressionValue.nativeObject;
+      Logger.debug(
+        "[AwaitExpression] Unwrapped BridgedInstance to get native Future.",
+      );
+    }
+
+    if (futureValue is Future) {
+      Logger.debug(
+        "[AwaitExpression] Expression evaluated to a Future. Returning AsyncSuspensionRequest.",
+      );
+      final future = futureValue as Future<Object?>;
+
+      // CRUCIAL: Return the suspension request with the future and the current state.
+      // The async state machine will use this information.
+      // Note: currentAsyncState cannot be null here because of the previous check.
+      return AsyncSuspensionRequest(
+        future,
+        currentAsyncState!,
+        awaitNode: node,
+      );
+    } else {
+      // SCE223: Dart allows `await` on any value — `await 5` is 5 and
+      // `await null` is null — and still yields to the event loop. So a
+      // non-Future is wrapped and suspended on like any other; it used to be
+      // refused as an error.
+      return AsyncSuspensionRequest(
+        Future<Object?>.value(futureValue),
+        currentAsyncState!,
+        awaitNode: node,
+      );
+    }
+  }
+
+  // =======================================================================
+  // Pattern Matching Helper
+  // =======================================================================
+
+  /// Signals a non-match when [typeNode] is written and [value] does not have
+  /// that type. A null [typeNode] is an untyped `var x` / `_`, which is
+  /// irrefutable and must keep matching anything.
+  ///
+  /// SCC18: the two branches that call this — `DeclaredVariablePattern` and
+  /// `WildcardPattern` — used to read only the pattern's *name*, so `case int _`
+  /// accepted a String and the first arm of every switch won regardless of the
+  /// scrutinee. Neither branch had any path that could throw, which is why a
+  /// corpus of ~2270 green tests never noticed: every one of them exercised an
+  /// arm that was meant to match.
+  void _requireDeclaredType(TypeAnnotation? typeNode, Object? value) {
+    if (typeNode == null) return;
+    if (_valueHasType(typeNode, value)) return;
+    throw PatternMatchD4rtException(
+      "Pattern type '$typeNode' does not match value of type "
+      "'${value?.runtimeType}'",
+    );
+  }
+
+  /// Attempts to match the [pattern] against the [value].
+  /// If successful, binds any variables declared in the pattern within the [environment].
+  /// Throws [PatternMatchD4rtException] on failure.
+  void _matchAndBind(
+    DartPattern pattern,
+    Object? value,
+    Environment environment,
+  ) {
+    if (Logger.isDebug) {
+      Logger.debug(
+        "[_matchAndBind] Matching pattern ${pattern.runtimeType} against value ${value?.runtimeType}",
+      );
+    }
+
+    if (pattern is DeclaredVariablePattern) {
+      // Handles: var x, final T x, int x
+      _requireDeclaredType(pattern.type, value);
+      final name = pattern.name.lexeme;
+      if (name == '_') {
+        // Wildcard name in declaration: match succeeds, no binding
+        if (Logger.isDebug) {
+          Logger.debug("[_matchAndBind] Wildcard (declared) match success.");
+        }
+        return;
+      }
+      environment.define(name, value);
+      if (Logger.isDebug) {
+        Logger.debug("[_matchAndBind] Bound variable '$name' = $value");
+      }
+    } else if (pattern is WildcardPattern) {
+      // Handles: `_` and `T _` when used as a standalone sub-pattern
+      _requireDeclaredType(pattern.type, value);
+      if (Logger.isDebug) {
+        Logger.debug("[_matchAndBind] Wildcard (sub-pattern) match success.");
+      }
+      return; // Match succeeds, no binding
+    } else if (pattern is AssignedVariablePattern) {
+      // Handles assignment patterns like: (a, _) = record;
+      final name = pattern.name.lexeme;
+      if (name == '_') {
+        // Wildcard name in assignment: match succeeds, no binding
+        if (Logger.isDebug) {
+          Logger.debug("[_matchAndBind] Wildcard (assigned) match success.");
+        }
+        return;
+      }
+      try {
+        environment.assign(name, value);
+        if (Logger.isDebug) {
+          Logger.debug("[_matchAndBind] Assigned variable '$name' = $value");
+        }
+      } on RuntimeD4rtException catch (e) {
+        // Convert assignment errors (e.g., variable not defined) to PatternMatchException
+        throw PatternMatchD4rtException(
+          "Failed to assign pattern variable '$name': ${e.message}",
+        );
+      }
+    } else if (pattern is ConstantPattern) {
+      // Handles: case 1:, case "abc":, case MyClass.constant:
+      // Evaluate the constant expression within the pattern
+      final patternValue = pattern.expression.accept<Object?>(this);
+      // Compare the switch value against the evaluated pattern constant.
+      // Cluster-26: cross-type-boundary equality is asymmetric — the native
+      // Dart enum's operator== doesn't know about BridgedEnumValue, so
+      // `nativeEnum == bridgedEnumValue` always returns false even when they
+      // refer to the same value. BridgedEnumValue.operator== handles the
+      // other direction. Try both sides before declaring no match.
+      final matches =
+          value == patternValue ||
+          (patternValue != null && patternValue == value);
+      if (!matches) {
+        throw PatternMatchD4rtException(
+          "Constant pattern value $patternValue does not match switch value $value",
+        );
+      }
+      if (Logger.isDebug) {
+        Logger.debug(
+          "[_matchAndBind] Constant pattern matched: $value == $patternValue",
+        );
+      }
+      // No binding needed for constant patterns
+    } else if (pattern is ListPattern) {
+      // Handles: [p1, p2, ...], including rest elements like [p1, ...rest]
+      if (value is! List) {
+        throw PatternMatchD4rtException(
+          "Expected a List, but got ${value?.runtimeType}",
+        );
+      }
+
+      // Check if there's a rest element and handle accordingly
+      final restElementIndex = pattern.elements.indexWhere(
+        (e) => e is RestPatternElement,
+      );
+
+      if (restElementIndex == -1) {
+        // No rest element: exact length match required
+        if (pattern.elements.length != value.length) {
+          throw PatternMatchD4rtException(
+            "List pattern expected ${pattern.elements.length} elements, but List has ${value.length}.",
+          );
+        }
+
+        // Match subpatterns recursively
+        for (int i = 0; i < pattern.elements.length; i++) {
+          final element = pattern.elements[i];
+          final subValue = value[i];
+
+          // Extract the actual pattern from the element wrapper
+          DartPattern subPattern;
+          if (element is DartPattern) {
+            subPattern = element;
+          } else {
+            throw StateD4rtException(
+              "Unexpected ListPatternElement type: ${element.runtimeType}",
+            );
+          }
+
+          if (Logger.isDebug) {
+            Logger.debug(
+              "[_matchAndBind]   Matching list element $i: ${subPattern.runtimeType} against ${subValue?.runtimeType}",
+            );
+          }
+          _matchAndBind(subPattern, subValue, environment);
+        }
+      } else {
+        // Has rest element: more complex matching
+        final RestPatternElement restElement =
+            pattern.elements[restElementIndex] as RestPatternElement;
+        final beforeRestCount = restElementIndex;
+        final afterRestCount = pattern.elements.length - restElementIndex - 1;
+        final minRequiredLength = beforeRestCount + afterRestCount;
+
+        if (value.length < minRequiredLength) {
+          throw PatternMatchD4rtException(
+            "List pattern expected at least $minRequiredLength elements, but List has ${value.length}.",
+          );
+        }
+
+        // Match elements before rest
+        for (int i = 0; i < beforeRestCount; i++) {
+          final element = pattern.elements[i];
+          final subValue = value[i];
+
+          DartPattern subPattern;
+          if (element is DartPattern) {
+            subPattern = element;
+          } else {
+            throw StateD4rtException(
+              "Unexpected ListPatternElement type before rest: ${element.runtimeType}",
+            );
+          }
+
+          if (Logger.isDebug) {
+            Logger.debug(
+              "[_matchAndBind]   Matching list element $i (before rest): ${subPattern.runtimeType} against ${subValue?.runtimeType}",
+            );
+          }
+          _matchAndBind(subPattern, subValue, environment);
+        }
+
+        // Handle rest element
+        final restStartIndex = beforeRestCount;
+        final restEndIndex = value.length - afterRestCount;
+        final restValues = value.sublist(restStartIndex, restEndIndex);
+
+        if (restElement.pattern != null) {
+          // Rest element has a pattern (e.g., ...rest), bind the sublist
+          if (Logger.isDebug) {
+            Logger.debug(
+              "[_matchAndBind]   Matching rest element: ${restElement.pattern!.runtimeType} against List of ${restValues.length} elements",
+            );
+          }
+          _matchAndBind(restElement.pattern!, restValues, environment);
+        }
+        // If restElement.pattern is null, it's just "..." (anonymous rest), no binding needed
+
+        // Match elements after rest
+        for (int i = 0; i < afterRestCount; i++) {
+          final patternIndex = restElementIndex + 1 + i;
+          final valueIndex = value.length - afterRestCount + i;
+          final element = pattern.elements[patternIndex];
+          final subValue = value[valueIndex];
+
+          DartPattern subPattern;
+          if (element is DartPattern) {
+            subPattern = element;
+          } else {
+            throw StateD4rtException(
+              "Unexpected ListPatternElement type after rest: ${element.runtimeType}",
+            );
+          }
+
+          if (Logger.isDebug) {
+            Logger.debug(
+              "[_matchAndBind]   Matching list element $valueIndex (after rest): ${subPattern.runtimeType} against ${subValue?.runtimeType}",
+            );
+          }
+          _matchAndBind(subPattern, subValue, environment);
+        }
+      }
+      if (Logger.isDebug) {
+        Logger.debug("[_matchAndBind] List pattern matched successfully.");
+      }
+    } else if (pattern is MapPattern) {
+      // Handles: {'key': p1, 'key2': p2, ...}, including rest elements like {'key': p1, ...rest}
+      if (value is! Map) {
+        throw PatternMatchD4rtException(
+          "Expected a Map, but got ${value?.runtimeType}",
+        );
+      }
+
+      final Set<Object?> matchedKeys = {};
+
+      // Match regular entries first
+      for (int i = 0; i < pattern.elements.length; i++) {
+        final element = pattern.elements[i];
+
+        if (element is MapPatternEntry) {
+          final keyPatternExpr = element.key;
+          final valuePattern = element.value;
+
+          final keyToLookup = keyPatternExpr.accept<Object?>(this);
+
+          if (!value.containsKey(keyToLookup)) {
+            throw PatternMatchD4rtException(
+              "Map pattern key '$keyToLookup' not found in the map.",
+            );
+          }
+
+          final subValue = value[keyToLookup];
+          if (Logger.isDebug) {
+            Logger.debug(
+              "[_matchAndBind]   Matching map entry '$keyToLookup': ${valuePattern.runtimeType} against ${subValue?.runtimeType}",
+            );
+          }
+          _matchAndBind(valuePattern, subValue, environment);
+          matchedKeys.add(keyToLookup);
+        } else if (element is RestPatternElement) {
+          // Handle rest element
+          final remainingEntries = <Object?, Object?>{};
+          for (final entry in value.entries) {
+            if (!matchedKeys.contains(entry.key)) {
+              remainingEntries[entry.key] = entry.value;
+            }
+          }
+
+          if (element.pattern != null) {
+            // Rest element has a pattern (e.g., ...rest), bind the remaining map
+            if (Logger.isDebug) {
+              Logger.debug(
+                "[_matchAndBind]   Matching rest element: ${element.pattern!.runtimeType} against Map of ${remainingEntries.length} entries",
+              );
+            }
+            _matchAndBind(element.pattern!, remainingEntries, environment);
+          }
+          // If element.pattern is null, it's just "..." (anonymous rest), no binding needed
+        } else {
+          throw StateD4rtException(
+            "Unexpected MapPatternElement type: ${element.runtimeType}",
+          );
+        }
+      }
+
+      if (Logger.isDebug) {
+        Logger.debug("[_matchAndBind] Map pattern matched successfully.");
+      }
+    } else if (pattern is RecordPattern) {
+      if (Logger.isDebug) {
+        Logger.debug(
+          '[_matchAndBind] Matching pattern ${pattern.runtimeType} against value ${value.runtimeType}',
+        );
+      }
+      if (value is! InterpretedRecord) {
+        if (Logger.isDebug) {
+          Logger.debug(
+            'DEBUG [_matchAndBind] Mismatch: Value is not an InterpretedRecord.',
+          );
+        }
+        // Failure case handled by throwing or returning normally if not exhaustive
+        // Depending on context (declaration vs refutable)
+        // For now, let's assume declaration context (must match or throw)
+        throw PatternMatchD4rtException(
+          'Expected a Record, but got ${value?.runtimeType}',
+        ); // Corrected message
+      }
+
+      final positionalPatternFields = pattern.fields
+          .where((f) => f.name == null)
+          .toList();
+      final namedPatternFieldsNodes = pattern.fields
+          .where((f) => f.name != null)
+          .toList();
+
+      if (Logger.isDebug) {
+        Logger.debug(
+          '[_matchAndBind]   Pattern positional fields count: ${positionalPatternFields.length}',
+        );
+      }
+      if (Logger.isDebug) {
+        Logger.debug(
+          '[_matchAndBind]   Value positional fields count: ${value.positionalFields.length}',
+        );
+      }
+      if (Logger.isDebug) {
+        Logger.debug(
+          '[_matchAndBind]   Pattern named fields count: ${namedPatternFieldsNodes.length}',
+        );
+      }
+      if (Logger.isDebug) {
+        Logger.debug(
+          '[_matchAndBind]   Value named fields count: ${value.namedFields.length}',
+        );
+      }
+
+      // Check positional fields count FIRST
+      if (positionalPatternFields.length > value.positionalFields.length) {
+        // Adjusted error message to match test expectation
+        throw RuntimeD4rtException(
+          'Pattern match failed: Record pattern expected at least ${positionalPatternFields.length} positional fields, but Record only has ${value.positionalFields.length}.',
+        );
+      }
+
+      // Match positional fields
+      for (int i = 0; i < positionalPatternFields.length; i++) {
+        final fieldPatternNode = positionalPatternFields[i];
+        final fieldValue = value.positionalFields[i];
+        if (Logger.isDebug) {
+          Logger.debug(
+            'DEBUG [_matchAndBind]   Matching record positional field $i: ${fieldPatternNode.runtimeType} against ${fieldValue?.runtimeType ?? 'null'}',
+          );
+        }
+
+        // Assume fieldPatternNode IS a RecordPatternField because it came from pattern.fields
+        // We need the actual pattern nested within the field.
+        // Directly access .pattern assuming the node type is correct (dynamic access if needed)
+        final fieldPattern = (fieldPatternNode as dynamic).pattern;
+
+        // Recursive call, rely on exceptions for failure
+        _matchAndBind(fieldPattern, fieldValue, environment);
+        if (Logger.isDebug) {
+          Logger.debug(
+            'DEBUG [_matchAndBind]     Positional field $i match success.',
+          );
+        }
+      }
+
+      // Match named fields
+      for (final fieldNode in namedPatternFieldsNodes) {
+        // We know fieldNode has name != null here
+        // Assume fieldNode is RecordPatternField based on filtering
+        final fieldPatternNode = fieldNode;
+
+        // Use the corrected access path
+        // For shorthand syntax (:name), fieldPatternNode.name.name is null
+        // and the name comes from the pattern itself (a DeclaredVariablePattern)
+        String? fieldName = fieldPatternNode.name?.name?.lexeme;
+        if (fieldName == null) {
+          // Shorthand syntax: (:name) - name comes from the pattern
+          final fieldSubPattern = (fieldPatternNode as dynamic).pattern;
+          if (fieldSubPattern is DeclaredVariablePattern) {
+            fieldName = fieldSubPattern.name.lexeme;
+          }
+        }
+        if (fieldName == null) {
+          // This case implies we couldn't determine the field name from either source
+          throw StateD4rtException(
+            'Internal error: Named field detected but name lexeme is null.',
+          );
+        }
+
+        if (Logger.isDebug) {
+          Logger.debug(
+            'DEBUG [_matchAndBind]   Matching record named field \'$fieldName\': ${fieldPatternNode.pattern.runtimeType} against value type ${value.namedFields[fieldName]?.runtimeType ?? 'null'}',
+          );
+        }
+
+        if (!value.namedFields.containsKey(fieldName)) {
+          throw PatternMatchD4rtException(
+            'Record pattern named field \'$fieldName\' not found in the record.',
+          );
+        }
+        final fieldValue = value.namedFields[fieldName];
+
+        // Recursive match on the pattern inside the field
+        final fieldSubPattern = (fieldPatternNode as dynamic).pattern;
+        _matchAndBind(fieldSubPattern, fieldValue, environment);
+        if (Logger.isDebug) {
+          Logger.debug(
+            'DEBUG [_matchAndBind]     Named field \'$fieldName\' match success.',
+          );
+        }
+      }
+
+      if (Logger.isDebug) {
+        Logger.debug('[_matchAndBind] Record pattern matched successfully.');
+      }
+      // Success: function completes normally
+    } else if (pattern is ObjectPattern) {
+      // Handles: ClassName(field1: pattern1, field2: pattern2)
+      if (Logger.isDebug) {
+        Logger.debug(
+          '[_matchAndBind] Matching object pattern ${pattern.type.name.lexeme} against value ${value?.runtimeType}',
+        );
+      }
+
+      // Get the expected type name (for the diagnostic; the test itself is by
+      // annotation, not by name)
+      final expectedTypeName = pattern.type.name.lexeme;
+
+      // SCC18: this used to be a fourth private type test — a name-equality
+      // walk for interpreted instances, a hardcoded ladder for seven builtins,
+      // an `actualTypeName.endsWith(expectedTypeName)` heuristic, and finally
+      // "the name resolves to *a* RuntimeType, so call it a match". That last
+      // fallback is why `case int()` matched the String 's': `int` resolves, so
+      // it said yes without ever looking at the value. Asking the `is`
+      // predicate answers all four shapes at once and keeps object patterns
+      // consistent with `x is T`.
+      if (!_valueHasType(pattern.type, value)) {
+        final actualTypeName = value is InterpretedInstance
+            ? value.klass.name
+            : value?.runtimeType.toString() ?? 'null';
+        throw PatternMatchD4rtException(
+          "Object pattern expected type '$expectedTypeName', but got '$actualTypeName'",
+        );
+      }
+
+      // Match each field pattern
+      for (final field in pattern.fields) {
+        final PatternFieldName? fieldName = field.name;
+        final DartPattern fieldPattern = field.pattern;
+
+        // Get the field name string - handle shorthand syntax (:fieldName)
+        String fieldNameStr;
+        if (fieldName != null && fieldName.name != null) {
+          fieldNameStr = fieldName.name!.lexeme;
+        } else if (fieldPattern is DeclaredVariablePattern) {
+          // Shorthand syntax: (:fieldName) means field name is the variable name
+          fieldNameStr = fieldPattern.name.lexeme;
+        } else {
+          throw PatternMatchD4rtException(
+            "Object pattern field name could not be determined",
+          );
+        }
+
+        // Extract the field value from the object
+        Object? fieldValue;
+
+        if (value is InterpretedInstance) {
+          // Use InterpretedInstance.get() to access fields/getters
+          try {
+            fieldValue = value.get(fieldNameStr, visitor: this);
+          } catch (e) {
+            throw PatternMatchD4rtException(
+              "Object pattern field '$fieldNameStr' not found on '${value.klass.name}': $e",
+            );
+          }
+        } else if (value is Map && value.containsKey(fieldNameStr)) {
+          fieldValue = value[fieldNameStr];
+        } else if (toBridgedInstance(value).$2) {
+          // SCC18: `int(isEven: true)` and `String(length: 3)` are ordinary
+          // Dart, but a native operand reached neither branch above and the
+          // pattern failed with "field access is not supported". Reading the
+          // member through the value's bridge — getter adapter first, then the
+          // registered supertype walk — is the same route `value.isEven` takes
+          // in an expression, so the two cannot disagree.
+          final bridgedInstance = toBridgedInstance(value).$1!;
+          final getterAdapter = bridgedInstance.bridgedClass
+              .findInstanceGetterAdapter(fieldNameStr);
+          if (getterAdapter != null) {
+            fieldValue = getterAdapter(this, bridgedInstance.nativeObject);
+          } else {
+            final supertypeMatch = lookupOnBridgedSupertypes(
+              bridgedInstance,
+              fieldNameStr,
+            );
+            if (!supertypeMatch.$2) {
+              throw PatternMatchD4rtException(
+                "Object pattern field '$fieldNameStr' not found on "
+                "'${bridgedInstance.bridgedClass.name}'",
+              );
+            }
+            fieldValue = supertypeMatch.$1;
+          }
+        } else {
+          throw PatternMatchD4rtException(
+            "Object pattern field access '$fieldNameStr' is not supported for type '${value?.runtimeType}'",
+          );
+        }
+
+        if (Logger.isDebug) {
+          Logger.debug(
+            "[_matchAndBind]   Matching object field '$fieldNameStr': ${fieldPattern.runtimeType} against ${fieldValue?.runtimeType}",
+          );
+        }
+        _matchAndBind(fieldPattern, fieldValue, environment);
+      }
+
+      if (Logger.isDebug) {
+        Logger.debug("[_matchAndBind] Object pattern matched successfully.");
+      }
+    } else if (pattern is RelationalPattern) {
+      // G-DOV-3/4 FIX: Handle relational patterns (>= x, <= x, > x, < x, == x, != x)
+      final operand = pattern.operand.accept<Object?>(this);
+      final operator = pattern.operator.type;
+      if (Logger.isDebug) {
+        Logger.debug(
+          "[_matchAndBind] RelationalPattern: comparing $value $operator $operand",
+        );
+      }
+      bool matches = false;
+      if (value is Comparable && operand is Comparable) {
+        final cmp = value.compareTo(operand);
+        switch (operator) {
+          case TokenType.LT:
+            matches = cmp < 0;
+          case TokenType.LT_EQ:
+            matches = cmp <= 0;
+          case TokenType.GT:
+            matches = cmp > 0;
+          case TokenType.GT_EQ:
+            matches = cmp >= 0;
+          case TokenType.EQ_EQ:
+            matches = value == operand;
+          case TokenType.BANG_EQ:
+            matches = value != operand;
+          default:
+            throw UnimplementedD4rtException(
+              "Relational pattern operator not supported: $operator",
+            );
+        }
+      } else if (operator == TokenType.EQ_EQ) {
+        matches = value == operand;
+      } else if (operator == TokenType.BANG_EQ) {
+        matches = value != operand;
+      } else {
+        throw PatternMatchD4rtException(
+          "Cannot compare $value ($operator) with $operand - not both Comparable",
+        );
+      }
+      if (!matches) {
+        throw PatternMatchD4rtException(
+          "Relational pattern $operator $operand did not match value $value",
+        );
+      }
+    } else if (pattern is LogicalOrPattern) {
+      // Lim-8, Bug-13, Bug-68 FIX: Handle Logical OR patterns (pattern1 || pattern2)
+      // Try matching the left operand first, if that fails, try the right operand
+      if (Logger.isDebug) {
+        Logger.debug(
+          "[_matchAndBind] LogicalOrPattern: trying left operand ${pattern.leftOperand.runtimeType}",
+        );
+      }
+      try {
+        _matchAndBind(pattern.leftOperand, value, environment);
+        if (Logger.isDebug) {
+          Logger.debug(
+            "[_matchAndBind] LogicalOrPattern: left operand matched",
+          );
+        }
+        return; // Left matched, done
+      } on PatternMatchD4rtException {
+        // Left didn't match, try right
+        if (Logger.isDebug) {
+          Logger.debug(
+            "[_matchAndBind] LogicalOrPattern: left failed, trying right operand ${pattern.rightOperand.runtimeType}",
+          );
+        }
+        _matchAndBind(pattern.rightOperand, value, environment);
+        if (Logger.isDebug) {
+          Logger.debug(
+            "[_matchAndBind] LogicalOrPattern: right operand matched",
+          );
+        }
+        // If right also throws, the exception propagates up
+      }
+    } else if (pattern is LogicalAndPattern) {
+      // G-DOV-3/4 FIX: Handle Logical AND patterns (pattern1 && pattern2)
+      // Both operands must match for the pattern to match
+      if (Logger.isDebug) {
+        Logger.debug(
+          "[_matchAndBind] LogicalAndPattern: trying left operand ${pattern.leftOperand.runtimeType}",
+        );
+      }
+      _matchAndBind(pattern.leftOperand, value, environment);
+      if (Logger.isDebug) {
+        Logger.debug(
+          "[_matchAndBind] LogicalAndPattern: left matched, trying right operand ${pattern.rightOperand.runtimeType}",
+        );
+      }
+      _matchAndBind(pattern.rightOperand, value, environment);
+      if (Logger.isDebug) {
+        Logger.debug(
+          "[_matchAndBind] LogicalAndPattern: both operands matched",
+        );
+      }
+    } else if (pattern is CastPattern) {
+      // SCE104: `case var x as T` is a CAST, and a failing cast throws. This
+      // branch used to raise `PatternMatchD4rtException`, which every
+      // arm-selection site catches and reads as "this arm did not match" — so
+      // the failure was converted into arm selection and a program that should
+      // have stopped ran on down `default`. `as` in a pattern exists to assert;
+      // a cast pattern that cannot fail is a cast pattern that does nothing.
+      //
+      // The cast itself is [_tryCast], shared with `visitAsExpression`, which
+      // replaces this branch's own nine-name ladder — a ladder whose `default`
+      // read "for custom types, be permissive". That permissiveness was safe
+      // while a wrong answer only cost an arm and is not safe now, which is
+      // exactly why the ladder went rather than being thrown from.
+      //
+      // The CAST'S RESULT is bound, not the original value: `1 as double`
+      // binds 1.0, and a proxy cast to the class it wraps binds the
+      // interpreted instance (C21). Binding the operand instead would make the
+      // cast a test with no effect, which is half of what it is.
+      final result = _tryCast(value, pattern.type);
+      if (identical(result, _castFailed)) {
+        final valueDesc = value?.runtimeType.toString() ?? 'Null';
+        throw D4rtTypeError(
+          "type '$valueDesc' is not a subtype of type "
+          "'${_castTypeDescription(pattern.type)}' in type cast",
+        );
+      }
+      _matchAndBind(pattern.pattern, result, environment);
+      if (Logger.isDebug) {
+        Logger.debug("[_matchAndBind] CastPattern: matched successfully");
+      }
+    } else if (pattern is ParenthesizedPattern) {
+      // SCD64: `(p)` is pure grouping. It matches exactly what `p` matches and
+      // binds exactly what `p` binds, so recursing IS the implementation — no
+      // type test, no binding, no unwrapping of the value. A non-match inside
+      // propagates out as the same `PatternMatchD4rtException` every caller
+      // already handles, which is why the parentheses need no arm-selection
+      // logic of their own.
+      _matchAndBind(pattern.pattern, value, environment);
+    } else if (pattern is NullCheckPattern) {
+      // SCD64: `p?` — a null does NOT match, and a non-null is then matched
+      // against the inner pattern.
+      //
+      // Measured against the SDK rather than assumed, because this is the half
+      // of the pair that is easy to get backwards: `case int n?` with a null
+      // scrutinee falls through to the next arm, quietly. It does not throw.
+      // `p!` below is the same shape with the opposite answer for null, and
+      // writing either one's behaviour into the other is the mistake this
+      // comment exists to prevent.
+      if (value == null) {
+        throw PatternMatchD4rtException(
+          'Null-check pattern does not match null',
+        );
+      }
+      _matchAndBind(pattern.pattern, value, environment);
+    } else if (pattern is NullAssertPattern) {
+      // SCD64: `p!` — a null THROWS rather than failing to match, so it can
+      // never select a later arm. Signalling a non-match here instead would
+      // turn a program that is supposed to stop into one that quietly takes
+      // `default`.
+      //
+      // `D4rtTypeError`, with the SDK's own wording, because that is what a
+      // script's `on TypeError` matches — and because the arm-selection sites
+      // catch `PatternMatchD4rtException` and nothing else, so the type of the
+      // exception is what decides whether this propagates at all.
+      if (value == null) {
+        throw D4rtTypeError('Null check operator used on a null value');
+      }
+      _matchAndBind(pattern.pattern, value, environment);
+    } else {
+      throw UnimplementedD4rtException(
+        "Pattern type not yet supported in _matchAndBind: ${pattern.runtimeType}",
+      );
+    }
+  }
+
+  @override
+  Object? visitRecordLiteral(RecordLiteral node) {
+    final positional = <Object?>[];
+    final named = <String, Object?>{};
+
+    for (final field in node.fields) {
+      if (field is NamedExpression) {
+        final name = field.name.label.name;
+        final value = field.expression.accept<Object?>(this);
+        if (named.containsKey(name)) {
+          throw RuntimeD4rtException(
+            "Record literal field '$name' specified more than once.",
+          );
+        }
+        named[name] = value;
+      } else {
+        // Positional field: expression
+        if (named.isNotEmpty) {
+          // As per Dart spec, positional fields must come before named fields
+          throw RuntimeD4rtException(
+            "Positional fields must come before named fields in record literal.",
+          );
+        }
+        positional.add(field.accept<Object?>(this));
+      }
+    }
+    Logger.debug("[visitRecordLiteral] Created record: ($positional, $named)");
+    return InterpretedRecord(positional, named);
+  }
+
+  @override
+  Object? visitPatternAssignment(PatternAssignment node) {
+    // 1. Evaluate the right-hand side expression
+    final rhsValue = node.expression.accept<Object?>(this);
+
+    // 2. Match the pattern against the value and bind variables
+    try {
+      _matchAndBind(node.pattern, rhsValue, environment);
+    } on PatternMatchD4rtException catch (e) {
+      // Convert pattern match failures into standard RuntimeErrors for assignment expressions
+      throw RuntimeD4rtException("Pattern assignment failed: ${e.message}");
+    } on TypeError {
+      // SCD64 — see the matching note on the declaration site.
+      rethrow;
+    } catch (e) {
+      // Catch other potential errors during binding
+      throw RuntimeD4rtException("Error during pattern assignment: $e");
+    }
+
+    // 3. Pattern assignment expression evaluates to the RHS value
+    return rhsValue;
+  }
+
+  @override
+  Object? visitSwitchExpression(SwitchExpression node) {
+    final switchValue = node.expression.accept<Object?>(this);
+    final originalEnvironment = environment; // Backup current environment
+
+    for (final caseExpr in node.cases) {
+      final pattern = caseExpr.guardedPattern.pattern;
+      final guard = caseExpr.guardedPattern.whenClause?.expression;
+      final body = caseExpr.expression;
+
+      // Create a temporary environment for this case's pattern variables
+      // Enclose the *original* environment where the switch expression is evaluated
+      final caseEnvironment = Environment(enclosing: originalEnvironment);
+
+      try {
+        // Attempt to match and bind variables in the temporary environment
+        _matchAndBind(pattern, switchValue, caseEnvironment);
+        Logger.debug(
+          "[SwitchExpr] Pattern ${pattern.runtimeType} matched value ${switchValue?.runtimeType}",
+        );
+
+        // Pattern matched, now check the guard (if it exists)
+        bool guardPassed = true;
+        if (guard != null) {
+          final previousVisitorEnv = environment; // Backup
+          try {
+            environment = caseEnvironment; // Evaluate guard in case scope
+            final guardResult = guard.accept<Object?>(this);
+            if (guardResult is! bool) {
+              throw RuntimeD4rtException(
+                "Switch expression 'when' clause must evaluate to a boolean.",
+              );
+            }
+            guardPassed = guardResult;
+            Logger.debug("[SwitchExpr] Guard evaluated to: $guardPassed");
+          } finally {
+            environment = previousVisitorEnv; // Restore
+          }
+        }
+
+        // If guard passed (or no guard), evaluate and return the body result
+        if (guardPassed) {
+          Logger.debug("[SwitchExpr] Guard passed or absent. Evaluating body.");
+
+          final previousVisitorEnv = environment; // Backup
+          try {
+            environment = caseEnvironment; // Evaluate body in case scope
+            final result = body.accept<Object?>(this);
+            Logger.debug("[SwitchExpr] Body evaluated to: $result. Returning.");
+            return result; // Return the result of the matching case's body
+          } finally {
+            environment = previousVisitorEnv; // Restore
+          }
+        }
+      } on PatternMatchD4rtException catch (e) {
+        // Pattern didn't match, try the next case
+        Logger.debug(
+          "[SwitchExpr] Pattern ${pattern.runtimeType} did not match: ${e.message}. Trying next case.",
+        );
+        continue;
+      }
+      // If we reach here, it means the pattern matched but the guard failed.
+      Logger.debug(
+        "[SwitchExpr] Pattern matched but guard failed. Trying next case.",
+      );
+    } // End of loop through cases
+
+    // If no case matched and returned a value
+    throw RuntimeD4rtException(
+      "Switch expression was not exhaustive for value: $switchValue (${switchValue?.runtimeType})",
+    );
+  }
+
+  @override
+  Object? visitExtensionDeclaration(ExtensionDeclaration node) {
+    final extensionName = node.name?.lexeme;
+    Logger.debug(
+      "[visitExtensionDeclaration] Declaring extension: ${extensionName ?? '<unnamed>'}",
+    );
+
+    // 1. Resolve the 'on' type
+    final onTypeNode = node.onClause?.extendedType;
+    if (onTypeNode == null) {
+      // This might happen for extension types, which are different.
+      // For now, assume classic extensions always have an 'on' clause.
+      Logger.warn(
+        "[visitExtensionDeclaration] Extension '${extensionName ?? '<unnamed>'}' has no 'on' clause, skipping.",
+      );
+      return null;
+    }
+
+    // Resolve the type name from the AST node
+    String onTypeName;
+    bool isOnNullableType = false; // G-DOV-10/11: Track nullable on-type
+    if (onTypeNode is NamedType) {
+      onTypeName = onTypeNode.name.lexeme;
+      isOnNullableType = onTypeNode.question != null; // Check for 'T?' syntax
+    } else {
+      Logger.warn(
+        "[visitExtensionDeclaration] Unsupported 'on' type node for resolution: ${onTypeNode.runtimeType}. Skipping extension.",
+      );
+      return null;
+    }
+
+    // Look up the RuntimeType in the environment
+    RuntimeType onRuntimeType;
+    try {
+      final typeValue = environment.get(onTypeName);
+
+      // Handle Resolution of Native/Bridged Types
+      if (typeValue is RuntimeType) {
+        // Standard case: Found an InterpretedClass/Mixin or existing BridgedClass
+        onRuntimeType = typeValue;
+        Logger.debug(
+          "[visitExtensionDeclaration] Resolved 'on' type '$onTypeName' to RuntimeType: ${onRuntimeType.name}",
+        );
+      } else if (typeValue is NativeFunction) {
+        // Heuristic: If environment.get returns a NativeFunction for a common type name,
+        // assume it represents the native type and find/create a corresponding BridgedClass.
+        // This relies on the global environment being populated correctly with type bridges.
+        BridgedClass? bridgedType = _getBridgedClassForNativeType(onTypeName);
+        if (bridgedType != null) {
+          onRuntimeType = bridgedType;
+          Logger.debug(
+            "[visitExtensionDeclaration] Resolved native 'on' type '$onTypeName' to BridgedClass: ${onRuntimeType.name}",
+          );
+        } else {
+          // We found something, but couldn't map it to a known bridged type
+          throw RuntimeD4rtException(
+            "Symbol '$onTypeName' resolved to NativeFunction but could not map to a known BridgedClass.",
+          );
+        }
+      } else {
+        // Resolved to something unexpected (e.g., an instance, null, etc.)
+        throw RuntimeD4rtException(
+          "Symbol '$onTypeName' resolved to non-type: ${typeValue?.runtimeType}",
+        );
+      }
+    } on RuntimeD4rtException catch (e) {
+      // SCC31: the type named in `on T` resolved to nothing at all, which is a
+      // question here rather than an answer — a core type may still be reachable
+      // as a bridge. Asked by type and by exact name: the old
+      // `e.message.contains(...)` made a formatted diagnostic load-bearing, and
+      // also took this branch when the name merely *appeared* in an unrelated
+      // failure's message.
+      if (e is UndefinedNameD4rtException && e.name == onTypeName) {
+        // Special handling for core types that might not be explicitly defined if stdlib wasn't fully loaded?
+        // Or maybe they are always NativeFunctions?
+        BridgedClass? coreBridgedType = _getBridgedClassForNativeType(
+          onTypeName,
+        );
+        if (coreBridgedType != null) {
+          onRuntimeType = coreBridgedType;
+          Logger.debug(
+            "[visitExtensionDeclaration] Resolved unfound core 'on' type '$onTypeName' to BridgedClass: ${onRuntimeType.name}",
+          );
+        } else {
+          // Type genuinely not found or not a recognized core type
+          throw RuntimeD4rtException(
+            "Could not resolve 'on' type '$onTypeName' for extension '${extensionName ?? '<unnamed>'}': Type not found or not a recognized core type.",
+          );
+        }
+      } else {
+        // Propagate other RuntimeErrors (like the non-type error from above)
+        //
+        // SCE70: the sibling throw above is NOT given the payload, and the
+        // difference is the branch condition rather than an oversight. That one
+        // fires when `e is UndefinedNameD4rtException` — a name that resolved to
+        // nothing, which scc31 keeps deliberately uncatchable and which carries
+        // no preserved native exception. There is nothing there to forward.
+        throw RuntimeD4rtException(
+          "Could not resolve 'on' type '$onTypeName' for extension '${extensionName ?? '<unnamed>'}': ${e.message}",
+          originalException: e.originalException,
+          originalStackTrace: e.originalStackTrace,
+        );
+      }
+    }
+
+    // 2. Process members (methods, getters, setters, operators) - both instance and static
+    final members = <String, Callable>{};
+    final staticMethods = <String, Callable>{};
+    final staticGetters = <String, Callable>{};
+    final staticSetters = <String, Callable>{};
+    final staticFields = <String, Object?>{};
+
+    for (final member in node.members) {
+      if (member is MethodDeclaration) {
+        final methodName = member
+            .name
+            .lexeme; // Operator names like '+', '[]' are also lexemes
+
+        if (member.isStatic) {
+          // Handle static methods, getters, and setters
+          final function = InterpretedFunction.method(
+            member,
+            environment,
+            null,
+          );
+
+          if (member.isGetter) {
+            staticGetters[methodName] = function;
+            Logger.debug(
+              "[visitExtensionDeclaration]   Added static getter: $methodName",
+            );
+          } else if (member.isSetter) {
+            staticSetters[methodName] = function;
+            Logger.debug(
+              "[visitExtensionDeclaration]   Added static setter: $methodName",
+            );
+          } else {
+            staticMethods[methodName] = function;
+            Logger.debug(
+              "[visitExtensionDeclaration]   Added static method: $methodName",
+            );
+          }
+        } else {
+          // Create InterpretedExtensionMethod for instance method-like declarations
+          final function = InterpretedExtensionMethod(
+            member,
+            environment,
+            onRuntimeType,
+          );
+          members[methodName] = function;
+          String memberType = "method";
+          if (member.isGetter) memberType = "getter";
+          if (member.isSetter) memberType = "setter";
+          if (member.isOperator) memberType = "operator";
+          Logger.debug(
+            "[visitExtensionDeclaration]   Added extension $memberType: $methodName",
+          );
+        }
+      } else if (member is FieldDeclaration) {
+        // Only static fields are allowed in extensions.
+        if (!member.isStatic) {
+          Logger.warn(
+            "[visitExtensionDeclaration] Instance fields are not allowed in extensions. Skipping field '$member'.",
+          );
+          continue; // Skip instance fields
+        }
+        // Handle static fields - store in the InterpretedExtension object
+        for (final variable in member.fields.variables) {
+          final fieldName = variable.name.lexeme;
+          Object? value;
+          if (variable.initializer != null) {
+            // Evaluate static initializer immediately in the current environment
+            try {
+              value = variable.initializer!.accept<Object?>(this);
+            } catch (e) {
+              throw RuntimeD4rtException(
+                "Error evaluating static initializer for extension field '$fieldName': $e",
+              );
+            }
+          }
+          // Store in staticFields map instead of environment
+          staticFields[fieldName] = value;
+          Logger.debug(
+            "[visitExtensionDeclaration]   Stored static field: $fieldName",
+          );
+        }
+      } else {
+        Logger.warn(
+          "[visitExtensionDeclaration] Unsupported extension member type: ${member.runtimeType}. Skipping.",
+        );
+      }
+    }
+
+    // 3. Create and store the InterpretedExtension
+    final interpretedExtension = InterpretedExtension(
+      name: extensionName,
+      onType: onRuntimeType,
+      isOnNullableType: isOnNullableType, // G-DOV-10/11: Pass nullable flag
+      members: members,
+      staticMethods: staticMethods,
+      staticGetters: staticGetters,
+      staticSetters: staticSetters,
+      staticFields: staticFields,
+    );
+
+    // How to store it? In the environment associated with its name?
+    // Or in a separate list in the environment?
+    // Let's try defining it by name if it has one, otherwise maybe a special list.
+    if (extensionName != null) {
+      environment.define(extensionName, interpretedExtension);
+      Logger.debug(
+        "[visitExtensionDeclaration] Defined named extension '$extensionName' in environment.",
+      );
+    } else {
+      // Store unnamed extensions in a special list in the environment
+      environment.addUnnamedExtension(interpretedExtension);
+      Logger.debug(
+        "[visitExtensionDeclaration] Added unnamed extension to environment list.",
+      );
+    }
+
+    return null; // Declarations typically return null
+  }
+
+  /// Lim-1 FIX: Handle extension type declarations (Dart 3.3+)
+  @override
+  Object? visitExtensionTypeDeclaration(ExtensionTypeDeclaration node) {
+    final typeName = node.name.lexeme;
+    Logger.debug(
+      "[visitExtensionTypeDeclaration] Declaring extension type: $typeName",
+    );
+
+    // Get the representation field name and type
+    final representation = node.representation;
+    final representationFieldName = representation.fieldName.lexeme;
+    final representationTypeNode = representation.fieldType;
+
+    Logger.debug(
+      "[visitExtensionTypeDeclaration] Representation field: $representationFieldName, type: ${representationTypeNode.toSource()}",
+    );
+
+    // Resolve the representation type
+    RuntimeType? representationType;
+    if (representationTypeNode is NamedType) {
+      final representationTypeName = representationTypeNode.name.lexeme;
+      try {
+        final typeValue = environment.get(representationTypeName);
+        if (typeValue is RuntimeType) {
+          representationType = typeValue;
+        }
+      } catch (e) {
+        // Type not found, leave as null
+        Logger.debug(
+          "[visitExtensionTypeDeclaration] Could not resolve representation type: $e",
+        );
+      }
+    }
+
+    // Collect getters, methods and setters from members
+    final getters = <String, InterpretedFunction>{};
+    final methods = <String, InterpretedFunction>{};
+    final setters = <String, InterpretedFunction>{};
+
+    // G-DOV3-1 FIX: Create the extension type first so we can pass it as owner
+    // to the methods/getters (needed for bind() to work)
+    final extensionType = InterpretedExtensionType(
+      typeName,
+      representationFieldName,
+      representationType,
+      environment,
+      getters, // Will be populated below
+      methods, // Will be populated below
+      setters, // Will be populated below
+    );
+
+    // SCE116: as for classes and enums — the instance's `toString()` needs a
+    // visitor to reach a script's override, and cannot be handed one.
+    extensionType.declaringVisitor = this;
+
+    // Define it in the environment early so methods can reference the type
+    environment.define(typeName, extensionType);
+
+    for (final member in node.members) {
+      if (member is MethodDeclaration) {
+        final methodName = member.name.lexeme;
+        final isGetter = member.isGetter;
+        final isSetter = member.isSetter;
+        final isStatic = member.isStatic;
+
+        if (isStatic) {
+          // Skip static members for now
+          continue;
+        }
+
+        // Create the interpreted function using the method constructor
+        // G-DOV3-1 FIX: Pass extension type as owner so bind() works
+        final interpretedMethod = InterpretedFunction.method(
+          member,
+          environment,
+          extensionType,
+        );
+
+        if (isGetter) {
+          getters[methodName] = interpretedMethod;
+          Logger.debug(
+            "[visitExtensionTypeDeclaration]   Added getter: $methodName",
+          );
+        } else if (isSetter) {
+          // DFUB4: setters were previously dropped. Store them so
+          // InterpretedExtensionTypeInstance.set() can dispatch.
+          setters[methodName] = interpretedMethod;
+          Logger.debug(
+            "[visitExtensionTypeDeclaration]   Added setter: $methodName",
+          );
+        } else {
+          methods[methodName] = interpretedMethod;
+          Logger.debug(
+            "[visitExtensionTypeDeclaration]   Added method: $methodName",
+          );
+        }
+      }
+    }
+
+    Logger.debug(
+      "[visitExtensionTypeDeclaration] Defined extension type '$typeName' in environment.",
+    );
+
+    return null;
+  }
+
+  BridgedClass? _getBridgedClassForNativeType(String typeName) {
+    // This function maps core Dart type names (as strings) to their
+    // corresponding BridgedClass representations used by the interpreter.
+    // This relies on these BridgedClass instances being available (e.g., created during stdlib setup).
+    // We get them from the global environment.
+    Object? typeValue;
+    try {
+      // Use globalEnvironment which should have stdlib types defined.
+      typeValue = globalEnvironment.get(typeName);
+    } on RuntimeD4rtException {
+      // Type not found in global environment
+      Logger.warn(
+        "[_getBridgedClassForNativeType] Type '$typeName' not found in global environment.",
+      );
+      return null;
+    }
+
+    if (typeValue is BridgedClass) {
+      // Successfully found the corresponding BridgedClass
+      return typeValue;
+    } else {
+      // Found the name, but it wasn't a BridgedClass (e.g., maybe the NativeFunction constructor)
+      Logger.warn(
+        "[_getBridgedClassForNativeType] Symbol '$typeName' found in global env but is not a BridgedClass (type: ${typeValue?.runtimeType}).",
+      );
+      // Special case: Maybe it maps to a fundamental type like Object?
+      if (typeName == 'dynamic') {
+        try {
+          final objectType = globalEnvironment.get('Object');
+          if (objectType is BridgedClass) return objectType;
+          // ignore: empty_catches
+        } on RuntimeD4rtException {}
+      }
+      return null;
+    }
+  }
+
+  @override
+  Object? visitSuperConstructorInvocation(SuperConstructorInvocation node) {
+    // 1. Retrieve the 'this' instance currently being created.
+    InterpretedInstance? thisInstance;
+    try {
+      final thisValue = environment.get('this');
+      if (thisValue is InterpretedInstance) {
+        thisInstance = thisValue;
+      } else {
+        throw RuntimeD4rtException(
+          "Internal error: 'this' is not an InterpretedInstance during super constructor call.",
+        );
+      }
+    } on RuntimeD4rtException {
+      throw RuntimeD4rtException(
+        "Internal error: Could not find 'this' during super constructor call.",
+      );
+    }
+
+    // 2. Check that the class has a bridged superclass.
+    final currentClass = thisInstance.klass;
+    final bridgedSuper = currentClass.bridgedSuperclass;
+    if (bridgedSuper == null) {
+      // If the superclass is interpreted, this call should be handled differently
+      // (standard inherited constructor call).
+      // For now, assume that if we get here, it's because of a bridged superclass.
+      throw RuntimeD4rtException(
+        "Cannot call super() constructor: Class '${currentClass.name}' does not have a registered bridged superclass.",
+      );
+    }
+
+    // 3. Determine the name of the super constructor to call.
+    final constructorName =
+        node.constructorName?.name ?? ''; // '' for the default
+
+    // 4. Find the constructor adapter for the bridged superclass.
+    final constructorAdapter = bridgedSuper.findConstructorAdapter(
+      constructorName,
+    );
+    if (constructorAdapter == null) {
+      throw RuntimeD4rtException.resolutionFailure(
+        "Bridged superclass '${bridgedSuper.name}' has no constructor named '$constructorName'.",
+      );
+    }
+
+    // 5. Evaluate the arguments passed to super(...).
+    final (positionalArgs, namedArgs) = _evaluateArguments(node.argumentList);
+
+    // 6. Call the constructor adapter.
+    Object? nativeSuperObject;
+    try {
+      nativeSuperObject = constructorAdapter(this, positionalArgs, namedArgs);
+      if (nativeSuperObject == null) {
+        throw RuntimeD4rtException(
+          "Bridged super constructor adapter for '${bridgedSuper.name}.$constructorName' returned null.",
+        );
+      }
+    } catch (e, s) {
+      Logger.error(
+        "Native exception during super constructor call to '${bridgedSuper.name}.$constructorName': $e\n$s",
+      );
+      // SCB28: an unguarded adapter indexed past the end of the
+      // argument list -- report the arity, not the RangeError.
+      final arityError = D4.describeArityError(
+        e,
+        positionalArgs,
+        '${bridgedSuper.name}.$constructorName',
+      );
+      if (arityError != null) {
+        // SCE109: a RangeError stays a RangeError. Replacing the VALUE is
+        // SCB28's point; replacing the TYPE was not, and it made
+        // `on RangeError` stop catching a script's own out-of-range
+        // read — an error that was not an `Error` at all.
+        throw RangeError(arityError);
+      }
+      throw RuntimeD4rtException(
+        "Native error during super constructor call '$constructorName': $e",
+        originalException: e,
+        originalStackTrace: s,
+      );
+    }
+
+    // 7. Store the returned native object on the 'this' instance.
+    thisInstance.bridgedSuperObject = nativeSuperObject;
+    Logger.debug(
+      "[SuperConstructorInvocation] Stored native super object (${nativeSuperObject.runtimeType}) on instance of ${currentClass.name}.",
+    );
+
+    return null; // The super() call itself doesn't return a value.
+  }
+
+  @override
+  Object? visitImportDirective(ImportDirective node) {
+    final importUriString = node.uri.stringValue;
+    if (importUriString == null) {
+      Logger.warn(
+        "[visitImportDirective] Import directive with null URI string.",
+      );
+      return null; // Return null if the URI is null
+    }
+
+    Logger.debug(
+      "[InterpreterVisitor.visitImportDirective] START processing import: $importUriString",
+    );
+
+    Uri resolvedUri;
+    final importUri = Uri.parse(importUriString);
+
+    if (importUri.hasScheme) {
+      // DFUB2 — any already-absolute URI (dart:, package:, file:, …) is
+      // self-resolving and needs no base. Resolving an absolute URI against a
+      // base returns the absolute URI unchanged, so this only widens the set of
+      // imports that succeed WITHOUT a base (notably absolute `file:` imports),
+      // matching upstream. The filesystem read + permission gate downstream in
+      // ModuleLoader decides whether such a URI is actually loadable.
+      resolvedUri = importUri;
+      Logger.debug(
+        "[visitImportDirective] Using absolute/unresolvable URI: $resolvedUri",
+      );
+    } else {
+      final baseUri = moduleLoader.currentlibrary;
+
+      if (baseUri != null) {
+        Logger.debug(
+          "[visitImportDirective] Attempting to resolve relative URI '$importUriString' relative to '$baseUri'",
+        );
+        resolvedUri = baseUri.resolveUri(importUri);
+        Logger.debug(
+          "[visitImportDirective] Resolved relative URI: $resolvedUri",
+        );
+      } else {
+        throw RuntimeD4rtException(
+          "Unable to resolve relative import '$importUriString': Base URI not defined in ModuleLoader. "
+          "Either provide a basePath parameter or use absolute URIs.",
+        );
+      }
+    }
+
+    final prefixIdentifier = node.prefix; // Get the prefix identifier
+    final prefixName = prefixIdentifier?.name;
+
+    // Extract the show/hide combinators from the import directive BEFORE loading
+    Set<String>? showNames;
+    Set<String>? hideNames;
+
+    for (final combinator in node.combinators) {
+      if (combinator is ShowCombinator) {
+        showNames ??= {};
+        showNames.addAll(combinator.shownNames.map((id) => id.name));
+        Logger.debug(
+          "[visitImportDirective] Combinator: show ${combinator.shownNames.map((id) => id.name).join(', ')}",
+        );
+      } else if (combinator is HideCombinator) {
+        hideNames ??= {};
+        hideNames.addAll(combinator.hiddenNames.map((id) => id.name));
+        Logger.debug(
+          "[visitImportDirective] Combinator: hide ${combinator.hiddenNames.map((id) => id.name).join(', ')}",
+        );
+      }
+    }
+
+    Logger.debug(
+      "[visitImportDirective] Loading module for resolved URI: $resolvedUri (prefix: $prefixName, show: $showNames, hide: $hideNames)",
+    );
+
+    // Pass show/hide to loadModule so bridged content respects the filters.
+    // DFUB13 — this is the TOP-LEVEL directive: the script the user ran, which
+    // has no enclosing module to supply owner context, so it is attached here.
+    // The owner MUST be read before the call: loadModule advances
+    // `currentlibrary` to the module it is loading, so reading it in the catch
+    // would report owner == target.
+    //
+    // It is null for a bare `source:` string, and there the wrap is SKIPPED
+    // rather than filled with a placeholder. Owner context earns its keep by
+    // distinguishing the file holding the directive from the file that could
+    // not be found; with a single anonymous script those coincide, so naming a
+    // synthetic owner would restate the target and leak an internal URI.
+    final ownerUri = moduleLoader.currentlibrary;
+    LoadedModule loadedModule;
+    try {
+      loadedModule = moduleLoader.loadModule(
+        resolvedUri,
+        showNames: showNames,
+        hideNames: hideNames,
+      );
+    } on D4rtException catch (e) {
+      if (ownerUri == null) rethrow;
+      throw wrapDirectiveError('import', ownerUri, resolvedUri, e);
+    }
+
+    if (prefixName != null) {
+      Logger.debug(
+        "[visitImportDirective] Importation du module '${resolvedUri.toString()}' avec le préfixe '$prefixName'. Show: $showNames, Hide: $hideNames",
+      );
+
+      Environment envForPrefix;
+      if (showNames != null || hideNames != null) {
+        // Apply show/hide to the exported environment of the loaded module BEFORE defining it for the prefix
+        envForPrefix = loadedModule.exportedEnvironment.shallowCopyFiltered(
+          showNames: showNames,
+          hideNames: hideNames,
+        );
+      } else {
+        envForPrefix = loadedModule.exportedEnvironment;
+      }
+      environment.definePrefixedImport(prefixName, envForPrefix);
+    } else {
+      Logger.debug(
+        "[visitImportDirective] Direct import of module '${resolvedUri.toString()}' into the current environment. Show: $showNames, Hide: $hideNames",
+      );
+      // Apply show/hide directly during import into the current environment
+      environment.importEnvironment(
+        loadedModule.exportedEnvironment,
+        show: showNames,
+        hide: hideNames,
+      );
+      // SCD4 (scd4_aicv): a name ambiguous further up the chain is judged
+      // against what this script imports.
+      environment.recordUnprefixedImport(
+        resolvedUri.toString(),
+        loadedModule.exportedEnvironment,
+        show: showNames,
+        hide: hideNames,
+      );
+    }
+    return null; // Import directives do not produce a value.
+  }
+
+  /// E6 — Access a field of a native Dart `Record` value by name.
+  ///
+  /// Native Dart records (the `(int, String)` syntax) are produced by
+  /// stdlib APIs such as `Iterable.indexed` and survive across the
+  /// interpreter ↔ native boundary. They expose positional fields via
+  /// the synthetic getters `$1`, `$2`, … but do not implement
+  /// reflection without `dart:mirrors` (forbidden in Flutter), so we
+  /// dispatch positional access through `dynamic` calls and clamp the
+  /// supported arity at 9 (covers all common record literals).
+  ///
+  /// Named-field access on native records is not supported because
+  /// the field name is only known at the call site and there is no
+  /// reflective lookup; callers should use `InterpretedRecord` for
+  /// records authored inside d4rt source if they need named fields.
+  Object? _accessNativeRecordField(Record record, String fieldName) {
+    switch (fieldName) {
+      case 'hashCode':
+        return record.hashCode;
+      case 'runtimeType':
+        return record.runtimeType;
+      case 'toString':
+        return NativeFunction(
+          (_, args, _, _) => record.toString(),
+          arity: 0,
+          name: 'toString',
+        );
+    }
+    if (fieldName.startsWith(r'$') && fieldName.length > 1) {
+      final indexStr = fieldName.substring(1);
+      final index = int.tryParse(indexStr);
+      if (index == null || index < 1) {
+        throw RuntimeD4rtException(
+          "Invalid positional record field accessor '$fieldName'.",
+        );
+      }
+      // ignore: avoid_dynamic_calls
+      final dyn = record as dynamic;
+      try {
+        switch (index) {
+          case 1:
+            return dyn.$1;
+          case 2:
+            return dyn.$2;
+          case 3:
+            return dyn.$3;
+          case 4:
+            return dyn.$4;
+          case 5:
+            return dyn.$5;
+          case 6:
+            return dyn.$6;
+          case 7:
+            return dyn.$7;
+          case 8:
+            return dyn.$8;
+          case 9:
+            return dyn.$9;
+        }
+      } on NoSuchMethodError {
+        throw RuntimeD4rtException.resolutionFailure(
+          "Native record has no positional field \$$index. Record: $record",
+        );
+      }
+      throw RuntimeD4rtException(
+        "Native record positional field \$$index exceeds the supported arity (max 9).",
+      );
+    }
+    throw RuntimeD4rtException.resolutionFailure(
+      "Cannot access named field '$fieldName' on a native Dart record. "
+      "Native records expose positional fields ('\$1', '\$2', …) but their "
+      "named fields are not reflectively accessible without `dart:mirrors`.",
+    );
+  }
+
+  /// Helper method to create the appropriate operand for ++ and -- operators.
+  /// For numeric types, returns 1 or -1 directly.
+  /// For custom classes, attempts to create an instance with value 1 or -1.
+  Object? _createIncrementOperand(Object? targetValue, bool isIncrement) {
+    if (targetValue is! InterpretedInstance) {
+      // For primitive types (num, int, double), return the literal value
+      return isIncrement ? 1 : -1;
+    }
+
+    // For custom class instances, try to create an instance of the same class
+    // with the value 1 or -1. This handles cases like CustomNumber(1).
+    try {
+      final klass = targetValue.klass;
+      final operandValue = isIncrement ? 1 : -1;
+
+      // Try to create an instance with the operand value
+      final newInstance = klass.call(this, [operandValue], {});
+      return newInstance;
+    } catch (e) {
+      // If we can't create an instance, fall back to the literal value
+      // This allows the operator to handle the error appropriately
+      return isIncrement ? 1 : -1;
+    }
+  }
+} // End of InterpreterVisitor class
+
+/// G-DOV2-2 FIX: A callable tear-off for named/factory constructors.
+///
+/// When a named constructor is accessed as a tear-off (e.g., `Settings.fromMap`
+/// passed to `map()`), this class wraps the constructor to make it callable
+/// with positional/named arguments as if it were a regular function.
+class _NamedConstructorTearOff implements Callable {
+  final InterpretedClass _klass;
+  final InterpretedFunction _constructor;
+  final String _constructorName;
+
+  _NamedConstructorTearOff(
+    this._klass,
+    this._constructor,
+    this._constructorName,
+  );
+
+  @override
+  int get arity => _constructor.arity;
+
+  @override
+  Object? call(
+    InterpreterVisitor visitor,
+    List<Object?> positionalArguments, [
+    Map<String, Object?>? namedArguments,
+    List<RuntimeType>? explicitTypeArguments,
+  ]) {
+    Logger.debug(
+      "[_NamedConstructorTearOff] Invoking constructor '$_constructorName' on class '${_klass.name}'",
+    );
+
+    final namedArgs = namedArguments ?? {};
+
+    try {
+      // Handle factory constructors differently from regular constructors
+      if (_constructor.isFactory) {
+        // Factory constructors create and return their own instance
+        Logger.debug(
+          "[_NamedConstructorTearOff] Calling factory constructor '$_constructorName'",
+        );
+        final result = _constructor.call(
+          visitor,
+          positionalArguments,
+          namedArgs,
+          explicitTypeArguments,
+        );
+        // Handle return from factory constructor
+        if (result is InterpretedInstance) {
+          return result;
+        }
+        return result;
+      } else {
+        // Regular constructors: create instance first, then call constructor
+        Logger.debug(
+          "[_NamedConstructorTearOff] Calling regular constructor '$_constructorName'",
+        );
+
+        // Create and initialize the fields
+        final instance = _klass.createAndInitializeInstance(
+          visitor,
+          explicitTypeArguments,
+        );
+        // Bind 'this' and call the constructor logic
+        final boundConstructor = _constructor.bind(instance);
+        boundConstructor.call(
+          visitor,
+          positionalArguments,
+          namedArgs,
+          explicitTypeArguments,
+        );
+        return instance;
+      }
+    } on ReturnException catch (e) {
+      // Handle return exceptions (applies to both factory and regular constructors)
+      return e.value;
+    } on RuntimeD4rtException {
+      rethrow;
+    } catch (e) {
+      throw RuntimeD4rtException(
+        "Error during named constructor '$_constructorName' for class '${_klass.name}': $e",
+      );
+    }
+  }
+
+  @override
+  String toString() => '${_klass.name}.$_constructorName';
+}
+
+/// Callable wrapper for a bridged-class constructor tear-off.
+///
+/// Mirrors tom_d4rt_ast/_BridgedConstructorTearOff. Produced when a
+/// script writes `BridgedClass.new` (Dart 2.15+ unnamed constructor
+/// tear-off) or `BridgedClass.namedCtor`. Invoking the wrapper calls
+/// the underlying [BridgedConstructorCallable] adapter and returns
+/// the resulting native object.
+class _BridgedConstructorTearOff implements Callable {
+  final BridgedClass _bridgedClass;
+  final BridgedConstructorCallable _adapter;
+  final String _constructorName; // '' for unnamed (`.new`)
+
+  _BridgedConstructorTearOff(
+    this._bridgedClass,
+    this._adapter,
+    this._constructorName,
+  );
+
+  @override
+  int get arity => 0; // Adapter accepts variadic positional args.
+
+  @override
+  Object? call(
+    InterpreterVisitor visitor,
+    List<Object?> positionalArguments, [
+    Map<String, Object?>? namedArguments,
+    List<RuntimeType>? explicitTypeArguments,
+  ]) {
+    Logger.debug(
+      "[_BridgedConstructorTearOff] Invoking '${_bridgedClass.name}"
+      "${_constructorName.isEmpty ? '' : '.$_constructorName'}'",
+    );
+    return _adapter(visitor, positionalArguments, namedArguments ?? const {});
+  }
+
+  @override
+  String toString() => _constructorName.isEmpty
+      ? '${_bridgedClass.name}.new'
+      : '${_bridgedClass.name}.$_constructorName';
+}
+
+/// One evaluation of a collection-literal `for` element in an async body, and
+/// what makes an `await` in its BODY replayable (SCF43).
+///
+/// The interpreter drives `await` by replay: a suspension re-evaluates the
+/// whole literal once the future completes. Two things go wrong for a loop
+/// body, and this answers both.
+///
+///  * EARLIER ITERATIONS WOULD RUN AGAIN. Each iteration evaluates into a
+///    fresh buffer. A completed buffer is kept, and merged into the literal
+///    only then, so a suspended iteration leaves nothing behind. When an
+///    iteration suspends, the completed buffers are filed in
+///    [AsyncExecutionState.collectionForReplay], and the replay emits them
+///    instead of re-running those bodies.
+///  * THE NODE CACHE WOULD REPLAY THE WRONG VALUE. `resolvedAwaitResults` is
+///    keyed by the await NODE, which every iteration shares. The await sites
+///    an iteration reached leave that cache when it completes, so the next
+///    iteration suspends for its own value.
+///
+/// The record exists only between a suspension and the literal's completion.
+/// A `for` element that never suspends allocates a buffer per iteration and
+/// records nothing, so evaluating the same node twice in one statement (a sync
+/// helper called twice) cannot read another evaluation's record.
+///
+/// A replayed iteration skips its body. The loop variable is still bound and a
+/// classic loop's updaters still run; only the body's own side effects, and
+/// any body-side write to the loop variable, are not repeated, which is the
+/// point.
+class _CollectionForReplay {
+  _CollectionForReplay(this._visitor, this._element)
+    : _state = _visitor.currentAsyncState,
+      _recorded =
+          _visitor.currentAsyncState?.collectionForReplay[_element] ??
+          const <Object>[];
+
+  final InterpreterVisitor _visitor;
+  final AstNode _element;
+  final AsyncExecutionState? _state;
+  final List<Object> _recorded;
+  final List<Object> _completed = [];
+
+  /// Runs iteration [index] of [body] into [collection]. Returns the
+  /// suspension that must propagate, or null when the iteration completed.
+  Object? runIteration(
+    int index,
+    CollectionElement body,
+    Object collection, {
+    required bool isMap,
+  }) {
+    final state = _state;
+    if (state == null) {
+      // Outside an async body there is no await, so nothing can suspend.
+      final suspension = _visitor._processCollectionElement(
+        body,
+        collection,
+        isMap: isMap,
+      );
+      if (suspension != null) {
+        throw StateD4rtException(
+          'Internal error: a collection-literal `for` body suspended outside '
+          'an async execution state.',
+        );
+      }
+      return null;
+    }
+    if (index < _recorded.length) {
+      final output = _recorded[index];
+      _completed.add(output);
+      _merge(collection, output);
+      return null;
+    }
+    final Object buffer = collection is List
+        ? <Object?>[]
+        : collection is Set
+        ? <Object?>{}
+        : <Object?, Object?>{};
+    final awaitSites = <Object>{};
+    _visitor._collectionForAwaitScopes.add(awaitSites);
+    final Object? suspension;
+    try {
+      suspension = _visitor._processCollectionElement(
+        body,
+        buffer,
+        isMap: isMap,
+      );
+    } finally {
+      _visitor._collectionForAwaitScopes.removeLast();
+    }
+    if (suspension != null) {
+      state.collectionForReplay[_element] = _completed;
+      return suspension;
+    }
+    for (final site in awaitSites) {
+      state.resolvedAwaitResults.remove(site);
+    }
+    _completed.add(buffer);
+    _merge(collection, buffer);
+    return null;
+  }
+
+  /// The literal's loop is done: its record, if any, has served its replay.
+  void finish() => _state?.collectionForReplay.remove(_element);
+
+  /// Adds one element at a time, so a typed target (`<int>[...]`) checks
+  /// each, as the direct path did.
+  static void _merge(Object collection, Object output) {
+    if (collection is List) {
+      for (final value in output as List) {
+        collection.add(value);
+      }
+    } else if (collection is Set) {
+      for (final value in output as Set) {
+        collection.add(value);
+      }
+    } else if (collection is Map) {
+      (output as Map).forEach((key, value) => collection[key] = value);
+    }
+  }
+}

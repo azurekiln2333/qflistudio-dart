@@ -1,0 +1,211 @@
+import 'dart:typed_data';
+import 'package:tom_d4rt/d4rt.dart';
+
+import 'inherited_list_methods.dart';
+
+class Float32ListTypedData {
+  static BridgedClass get definition => BridgedClass(
+    name: 'Float32List',
+    nativeType: Float32List,
+    isAssignable: (v) => v is Float32List,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length == 1 && positionalArgs[0] is int) {
+          return Float32List(positionalArgs[0] as int);
+        }
+        throw RuntimeD4rtException(
+          "Float32List constructor expects one int argument (length).",
+        );
+      },
+      'fromList': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length == 1 && positionalArgs[0] is List) {
+          final sourceList = positionalArgs[0] as List;
+          final doubleList = sourceList.toNativeList().map((e) {
+            if (e is num) return e.toDouble();
+            throw RuntimeD4rtException(
+              "Float32List.fromList expects a List<num>.",
+            );
+          }).toList();
+          return Float32List.fromList(doubleList);
+        }
+        throw RuntimeD4rtException(
+          "Float32List.fromList expects one List<num> argument.",
+        );
+      },
+      'view': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty && positionalArgs[0] is ByteBuffer) {
+          final buffer = positionalArgs[0] as ByteBuffer;
+          final offsetInBytes = positionalArgs.length > 1
+              ? positionalArgs[1] as int? ?? 0
+              : 0;
+          final length = positionalArgs.length > 2
+              ? positionalArgs[2] as int?
+              : null;
+          return Float32List.view(buffer, offsetInBytes, length);
+        }
+        throw RuntimeD4rtException(
+          "Float32List.view expects ByteBuffer and optional offset/length arguments.",
+        );
+      },
+      'sublistView': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty && positionalArgs[0] is TypedData) {
+          final data = positionalArgs[0] as TypedData;
+          final start = positionalArgs.length > 1
+              ? positionalArgs[1] as int? ?? 0
+              : 0;
+          final end = positionalArgs.length > 2
+              ? positionalArgs[2] as int?
+              : null;
+          return Float32List.sublistView(data, start, end);
+        }
+        throw RuntimeD4rtException(
+          "Float32List.sublistView expects TypedData and optional start/end arguments.",
+        );
+      },
+    },
+    methods: {
+      // Index operators
+      '[]': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is Float32List &&
+            positionalArgs.length == 1 &&
+            positionalArgs[0] is int) {
+          return target[positionalArgs[0] as int];
+        }
+        throw RuntimeD4rtException("Float32List[index] expects an int index.");
+      },
+      '[]=': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is Float32List &&
+            positionalArgs.length == 2 &&
+            positionalArgs[0] is int &&
+            positionalArgs[1] is num) {
+          final index = positionalArgs[0] as int;
+          final value = (positionalArgs[1] as num).toDouble();
+          target[index] = value;
+          // SCE185: void, like the SDK operator. The interpreter never reads
+          // this — an index assignment evaluates to the assigned value itself.
+          return null;
+        }
+        throw RuntimeD4rtException(
+          "Float32List[index] = value expects int index and num value.",
+        );
+      },
+
+      // List methods
+      'sublist': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Float32List.sublist', atMost: 2);
+        final start = positionalArgs.isNotEmpty ? positionalArgs[0] as int : 0;
+        final end = positionalArgs.length > 1
+            ? positionalArgs[1] as int?
+            : null;
+        return (target as Float32List).sublist(start, end);
+      },
+      'getRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Float32List.getRange', atMost: 2);
+        final start = positionalArgs[0] as int;
+        final end = positionalArgs[1] as int;
+        return (target as Float32List).getRange(start, end);
+      },
+      'setRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Float32List.setRange', atMost: 4);
+        final start = positionalArgs[0] as int;
+        final end = positionalArgs[1] as int;
+        final iterable = coerceElements<double>(
+          positionalArgs[2],
+          'Float32List.setRange',
+        );
+        final skipCount = positionalArgs.length > 3
+            ? positionalArgs[3] as int
+            : 0;
+        (target as Float32List).setRange(start, end, iterable, skipCount);
+        return null;
+      },
+      'setAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Float32List.setAll', atMost: 2);
+        final at = positionalArgs[0] as int;
+        final iterable = coerceElements<double>(
+          positionalArgs[1],
+          'Float32List.setAll',
+        );
+        (target as Float32List).setAll(at, iterable);
+        return null;
+      },
+      'fillRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Float32List.fillRange', atMost: 3);
+        final start = positionalArgs[0] as int;
+        final end = positionalArgs[1] as int;
+        final fill = positionalArgs.length > 2
+            ? (positionalArgs[2] as num?)?.toDouble()
+            : null;
+        (target as Float32List).fillRange(start, end, fill);
+        return null;
+      },
+
+      // SCD27: `buffer` was registered HERE as well as in `getters`,
+      // so `l.buffer()` resolved. In the SDK it is a getter inherited
+      // from `TypedData` and that call does not compile as Dart — the
+      // widening shape, where a script is green here and invalid there.
+      // The getter registration below is the correct one and stays.
+      // Absence pinned by F-SCD27-*.
+      // NOT AN SDK MEMBER, and deliberately so. No typed list declares
+      // `asUint8ListView`: `dart analyze` on a native one answers "The method
+      // 'asUint8ListView' isn't defined". It is a convenience over
+      // `buffer.asUint8List(offsetInBytes, lengthInBytes)`, and it is the
+      // WIDENING SHAPE — a script using it is green in this interpreter and
+      // does not compile as real Dart, so the error surfaces only when the
+      // script leaves here.
+      //
+      // KEPT, and that is a decision rather than an inheritance (sce65). The
+      // gap audit accepts it, all eleven variants are pinned present by
+      // `F-SCC60-3-*`, and nothing in this workspace calls it — so removing it
+      // would be a breaking interpreter change bought for no reader. The
+      // precedent for deletion is scd24's four `InternetAddressType` members
+      // and it does not apply: those were wired to unrelated `Object` members
+      // and returned wrong answers, while this returns what its name says.
+      // `FileSystemEvent`'s four `is*` getters are the same accepted
+      // category, and were already commented this way — which is the whole
+      // defect sce65 names: the acceptance existed, in a document, and not
+      // where a reader meets the member.
+      // See `tom_d4rt/doc/stdlib_sdk_gap_audit.md`.
+      'asUint8ListView': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Float32List.asUint8ListView', atMost: 2);
+        final offsetInBytes = positionalArgs.isNotEmpty
+            ? positionalArgs[0] as int?
+            : null;
+        final length = positionalArgs.length > 1
+            ? positionalArgs[1] as int?
+            : null;
+        return (target as Float32List).buffer.asUint8List(
+          offsetInBytes ?? 0,
+          length,
+        );
+      },
+
+      // Standard methods
+      'toString': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as Float32List).toString();
+      },
+      '==': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Float32List.==', atMost: 1);
+        return (target as Float32List) == positionalArgs[0];
+      },
+
+      // Inherited Iterable<double> / List<double> read-only methods.
+      // See inherited_list_methods.dart — these are declared per variant
+      // because the element type has to be reified at the native boundary,
+      // which the generic `List` bridge cannot do. The supertype walk does
+      // reach `List`, so pruning this spread looks safe and is not.
+      ...inheritedListMethods<double>(
+        (t) => t as Float32List,
+        className: 'Float32List',
+        unmodifiableView: (t) => (t as Float32List).asUnmodifiableView(),
+      ),
+    },
+    staticGetters: typedListStaticGetters(Float32List.bytesPerElement),
+    setters: inheritedListSetters<double>((t) => t as Float32List),
+    getters: {
+      ...typedListGetters<double>((t) => t as Float32List),
+      ...inheritedListGetters<double>((t) => t as Float32List),
+    },
+  );
+}

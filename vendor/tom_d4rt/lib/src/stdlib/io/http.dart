@@ -1,0 +1,2021 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:convert';
+import 'package:tom_d4rt/d4rt.dart';
+
+import '../core/map.dart';
+import '../run_action.dart';
+import '../stream_listen.dart';
+import 'websocket.dart';
+import 'network_permission_helper.dart';
+
+/// Binds a script callback for a native API that will call it later.
+///
+/// Two things have to happen at SET time rather than at call time. The visitor
+/// is nullable on a setter adapter and the deferred invocation needs a real
+/// one; and a non-function value is the script's mistake, so it should be
+/// reported where the script made it. A failure discovered inside the HTTP
+/// client's own callback surfaces as a connection error with nothing pointing
+/// back to the assignment.
+///
+/// The returned closure awaits the result only when there is something to
+/// await: a script callback may be `async` or not, and the native signatures
+/// here are `Future`-returning either way.
+Future<Object?> Function(List<Object?>) _deferredCallback(
+  InterpreterVisitor? visitor,
+  Object? value,
+  String member,
+) {
+  if (visitor == null) {
+    throw RuntimeD4rtException('$member cannot be set without an interpreter.');
+  }
+  if (value is! Callable) {
+    throw RuntimeD4rtException('$member requires a function or null.');
+  }
+  return (args) async {
+    final result = value.call(visitor, args);
+    return result is Future ? await result : result;
+  };
+}
+
+class HttpClientIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpClient,
+    name: 'HttpClient',
+    isAssignable: (v) => v is HttpClient,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        final context = namedArgs['context'] as SecurityContext?;
+        return HttpClient(context: context);
+      },
+    },
+    staticMethods: {
+      'findProxyFromEnvironment': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Uri) {
+          throw RuntimeD4rtException(
+            'HttpClient.findProxyFromEnvironment requires a Uri argument.',
+          );
+        }
+        // SCD70: coerce, not cast — a script's map literal is a
+        // `Map<Object?, Object?>` whatever its entries hold.
+        final environmentMap = D4.coerceMapOrNull<String, String>(
+          namedArgs['environment'],
+          'environment',
+          visitor,
+        );
+        return HttpClient.findProxyFromEnvironment(
+          positionalArgs[0] as Uri,
+          environment: environmentMap,
+        );
+      },
+    },
+    methods: {
+      'getUrl': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Uri) {
+          throw RuntimeD4rtException('getUrl requires a Uri argument.');
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          (positionalArgs[0] as Uri).host,
+          (positionalArgs[0] as Uri).port,
+          operation: 'HttpClient.getUrl',
+        );
+        return (target as HttpClient).getUrl(positionalArgs[0] as Uri);
+      },
+      'postUrl': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Uri) {
+          throw RuntimeD4rtException('postUrl requires a Uri argument.');
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          (positionalArgs[0] as Uri).host,
+          (positionalArgs[0] as Uri).port,
+          operation: 'HttpClient.postUrl',
+        );
+        return (target as HttpClient).postUrl(positionalArgs[0] as Uri);
+      },
+      'putUrl': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Uri) {
+          throw RuntimeD4rtException('putUrl requires a Uri argument.');
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          (positionalArgs[0] as Uri).host,
+          (positionalArgs[0] as Uri).port,
+          operation: 'HttpClient.putUrl',
+        );
+        return (target as HttpClient).putUrl(positionalArgs[0] as Uri);
+      },
+      'deleteUrl': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Uri) {
+          throw RuntimeD4rtException('deleteUrl requires a Uri argument.');
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          (positionalArgs[0] as Uri).host,
+          (positionalArgs[0] as Uri).port,
+          operation: 'HttpClient.deleteUrl',
+        );
+        return (target as HttpClient).deleteUrl(positionalArgs[0] as Uri);
+      },
+      'headUrl': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Uri) {
+          throw RuntimeD4rtException('headUrl requires a Uri argument.');
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          (positionalArgs[0] as Uri).host,
+          (positionalArgs[0] as Uri).port,
+          operation: 'HttpClient.headUrl',
+        );
+        return (target as HttpClient).headUrl(positionalArgs[0] as Uri);
+      },
+      'patchUrl': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Uri) {
+          throw RuntimeD4rtException('patchUrl requires a Uri argument.');
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          (positionalArgs[0] as Uri).host,
+          (positionalArgs[0] as Uri).port,
+          operation: 'HttpClient.patchUrl',
+        );
+        return (target as HttpClient).patchUrl(positionalArgs[0] as Uri);
+      },
+      'open': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 4 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! String ||
+            positionalArgs[2] is! int ||
+            positionalArgs[3] is! String) {
+          throw RuntimeD4rtException(
+            'open requires method, host, port, and path arguments.',
+          );
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          positionalArgs[1],
+          positionalArgs[2],
+          operation: 'HttpClient.open',
+        );
+        return (target as HttpClient).open(
+          positionalArgs[0] as String,
+          positionalArgs[1] as String,
+          positionalArgs[2] as int,
+          positionalArgs[3] as String,
+        );
+      },
+      'openUrl': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 2 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! Uri) {
+          throw RuntimeD4rtException(
+            'openUrl requires method and Uri arguments.',
+          );
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          (positionalArgs[1] as Uri).host,
+          (positionalArgs[1] as Uri).port,
+          operation: 'HttpClient.openUrl',
+        );
+        return (target as HttpClient).openUrl(
+          positionalArgs[0] as String,
+          positionalArgs[1] as Uri,
+        );
+      },
+      'get': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 3 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! int ||
+            positionalArgs[2] is! String) {
+          throw RuntimeD4rtException(
+            'get requires host, port, and path arguments.',
+          );
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          positionalArgs[0],
+          positionalArgs[1],
+          operation: 'HttpClient.get',
+        );
+        return (target as HttpClient).get(
+          positionalArgs[0] as String,
+          positionalArgs[1] as int,
+          positionalArgs[2] as String,
+        );
+      },
+      'post': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 3 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! int ||
+            positionalArgs[2] is! String) {
+          throw RuntimeD4rtException(
+            'post requires host, port, and path arguments.',
+          );
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          positionalArgs[0],
+          positionalArgs[1],
+          operation: 'HttpClient.post',
+        );
+        return (target as HttpClient).post(
+          positionalArgs[0] as String,
+          positionalArgs[1] as int,
+          positionalArgs[2] as String,
+        );
+      },
+      'put': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 3 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! int ||
+            positionalArgs[2] is! String) {
+          throw RuntimeD4rtException(
+            'put requires host, port, and path arguments.',
+          );
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          positionalArgs[0],
+          positionalArgs[1],
+          operation: 'HttpClient.put',
+        );
+        return (target as HttpClient).put(
+          positionalArgs[0] as String,
+          positionalArgs[1] as int,
+          positionalArgs[2] as String,
+        );
+      },
+      'delete': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 3 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! int ||
+            positionalArgs[2] is! String) {
+          throw RuntimeD4rtException(
+            'delete requires host, port, and path arguments.',
+          );
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          positionalArgs[0],
+          positionalArgs[1],
+          operation: 'HttpClient.delete',
+        );
+        return (target as HttpClient).delete(
+          positionalArgs[0] as String,
+          positionalArgs[1] as int,
+          positionalArgs[2] as String,
+        );
+      },
+      'patch': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 3 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! int ||
+            positionalArgs[2] is! String) {
+          throw RuntimeD4rtException(
+            'patch requires host, port, and path arguments.',
+          );
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          positionalArgs[0],
+          positionalArgs[1],
+          operation: 'HttpClient.patch',
+        );
+        return (target as HttpClient).patch(
+          positionalArgs[0] as String,
+          positionalArgs[1] as int,
+          positionalArgs[2] as String,
+        );
+      },
+      'head': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 3 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! int ||
+            positionalArgs[2] is! String) {
+          throw RuntimeD4rtException(
+            'head requires host, port, and path arguments.',
+          );
+        }
+        checkNetworkConnectPermission(
+          visitor,
+          positionalArgs[0],
+          positionalArgs[1],
+          operation: 'HttpClient.head',
+        );
+        return (target as HttpClient).head(
+          positionalArgs[0] as String,
+          positionalArgs[1] as int,
+          positionalArgs[2] as String,
+        );
+      },
+      'addCredentials': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 3 ||
+            positionalArgs[0] is! Uri ||
+            positionalArgs[1] is! String ||
+            positionalArgs[2] is! HttpClientCredentials) {
+          throw RuntimeD4rtException(
+            'addCredentials requires Uri, realm String, and HttpClientCredentials arguments.',
+          );
+        }
+        (target as HttpClient).addCredentials(
+          positionalArgs[0] as Uri,
+          positionalArgs[1] as String,
+          positionalArgs[2] as HttpClientCredentials,
+        );
+        return null;
+      },
+      'addProxyCredentials': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 4 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! int ||
+            positionalArgs[2] is! String ||
+            positionalArgs[3] is! HttpClientCredentials) {
+          throw RuntimeD4rtException(
+            'addProxyCredentials requires host, port, realm, and HttpClientCredentials arguments.',
+          );
+        }
+        (target as HttpClient).addProxyCredentials(
+          positionalArgs[0] as String,
+          positionalArgs[1] as int,
+          positionalArgs[2] as String,
+          positionalArgs[3] as HttpClientCredentials,
+        );
+        return null;
+      },
+      'close': (visitor, target, positionalArgs, namedArgs, _) {
+        (target as HttpClient).close(
+          force: namedArgs['force'] as bool? ?? false,
+        );
+        return null;
+      },
+    },
+    getters: {
+      'idleTimeout': (visitor, target) => (target as HttpClient).idleTimeout,
+      'connectionTimeout': (visitor, target) =>
+          (target as HttpClient).connectionTimeout,
+      'maxConnectionsPerHost': (visitor, target) =>
+          (target as HttpClient).maxConnectionsPerHost,
+      'autoUncompress': (visitor, target) =>
+          (target as HttpClient).autoUncompress,
+      'userAgent': (visitor, target) => (target as HttpClient).userAgent,
+    },
+    staticGetters: {
+      'defaultHttpPort': (visitor) => HttpClient.defaultHttpPort,
+      'defaultHttpsPort': (visitor) => HttpClient.defaultHttpsPort,
+      'enableTimelineLogging': (visitor) => HttpClient.enableTimelineLogging,
+    },
+    staticSetters: {
+      'enableTimelineLogging': (visitor, value) {
+        HttpClient.enableTimelineLogging = value as bool;
+        return;
+      },
+    },
+    setters: {
+      // Both take a callback the client invokes later, from native code, so
+      // the adapter has to capture the visitor and unwrap what the script
+      // hands back. `null` clears the hook, which is how the SDK spells "go
+      // back to the default behaviour".
+      //
+      // The visitor is nullable on a setter adapter but the deferred call
+      // needs a real one, so it is checked here rather than at invocation
+      // time — a null discovered inside the HTTP client's own callback would
+      // surface as a connection failure with nothing pointing back to here.
+      'authenticateProxy': (visitor, target, value) {
+        final client = target as HttpClient;
+        if (value == null) {
+          client.authenticateProxy = null;
+          return;
+        }
+        final callback = _deferredCallback(
+          visitor,
+          value,
+          'HttpClient.authenticateProxy',
+        );
+        client.authenticateProxy = (host, port, scheme, realm) async =>
+            D4.unwrapAs<bool>(await callback([host, port, scheme, realm]));
+        return;
+      },
+      'connectionFactory': (visitor, target, value) {
+        final client = target as HttpClient;
+        if (value == null) {
+          client.connectionFactory = null;
+          return;
+        }
+        final callback = _deferredCallback(
+          visitor,
+          value,
+          'HttpClient.connectionFactory',
+        );
+        client.connectionFactory = (url, proxyHost, proxyPort) async =>
+            D4.unwrapAs<ConnectionTask<Socket>>(
+              await callback([url, proxyHost, proxyPort]),
+            );
+        return;
+      },
+      'idleTimeout': (visitor, target, value) {
+        (target as HttpClient).idleTimeout = value as Duration;
+        return;
+      },
+      'connectionTimeout': (visitor, target, value) {
+        (target as HttpClient).connectionTimeout = value as Duration?;
+        return;
+      },
+      'maxConnectionsPerHost': (visitor, target, value) {
+        (target as HttpClient).maxConnectionsPerHost = value as int?;
+        return;
+      },
+      'autoUncompress': (visitor, target, value) {
+        (target as HttpClient).autoUncompress = value as bool;
+        return;
+      },
+      'userAgent': (visitor, target, value) {
+        (target as HttpClient).userAgent = value as String?;
+        return;
+      },
+      'authenticate': (visitor, target, value) {
+        if (value != null) {
+          final callback = value as Callable;
+          (target as HttpClient).authenticate =
+              (Uri url, String scheme, String? realm) async {
+                if (visitor == null) {
+                  throw RuntimeD4rtException(
+                    'Visitor cannot be null for authenticate callback',
+                  );
+                }
+                final result = callback.call(visitor, [url, scheme, realm]);
+                return result is Future ? await result : result as bool;
+              };
+        } else {
+          (target as HttpClient).authenticate = null;
+        }
+        return;
+      },
+      'findProxy': (visitor, target, value) {
+        if (value != null) {
+          final callback = value as Callable;
+          (target as HttpClient).findProxy = (Uri url) {
+            if (visitor == null) {
+              throw RuntimeD4rtException(
+                'Visitor cannot be null for findProxy callback',
+              );
+            }
+            final result = callback.call(visitor, [url]);
+            return result as String;
+          };
+        } else {
+          (target as HttpClient).findProxy = null;
+        }
+        return;
+      },
+      'badCertificateCallback': (visitor, target, value) {
+        if (value != null) {
+          final callback = value as Callable;
+          (target as HttpClient).badCertificateCallback = (cert, host, port) {
+            if (visitor == null) {
+              throw RuntimeD4rtException(
+                'Visitor cannot be null for badCertificateCallback',
+              );
+            }
+            final result = callback.call(visitor, [cert, host, port]);
+            return result as bool;
+          };
+        } else {
+          (target as HttpClient).badCertificateCallback = null;
+        }
+        return;
+      },
+      'keyLog': (visitor, target, value) {
+        if (value != null) {
+          final callback = value as Callable;
+          (target as HttpClient).keyLog = (String line) {
+            if (visitor == null) {
+              throw RuntimeD4rtException(
+                'Visitor cannot be null for keyLog callback',
+              );
+            }
+            callback.call(visitor, [line]);
+          };
+        } else {
+          (target as HttpClient).keyLog = null;
+        }
+        return;
+      },
+    },
+  );
+}
+
+class HttpServerIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpServer,
+    name: 'HttpServer',
+    isAssignable: (v) => v is HttpServer,
+    typeParameterCount: 0,
+    constructors: {},
+    staticMethods: {
+      'bind': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 2 || positionalArgs[1] is! int) {
+          throw RuntimeD4rtException(
+            'HttpServer.bind requires address and port arguments.',
+          );
+        }
+        checkNetworkBindPermission(
+          visitor,
+          positionalArgs[0],
+          positionalArgs[1],
+          operation: 'HttpServer.bind',
+        );
+        return HttpServer.bind(
+          positionalArgs[0],
+          positionalArgs[1] as int,
+          backlog: namedArgs['backlog'] as int? ?? 0,
+          v6Only: namedArgs['v6Only'] as bool? ?? false,
+          shared: namedArgs['shared'] as bool? ?? false,
+        );
+      },
+      'bindSecure': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 3 ||
+            positionalArgs[1] is! int ||
+            positionalArgs[2] is! SecurityContext) {
+          throw RuntimeD4rtException(
+            'HttpServer.bindSecure requires address, port, and context arguments.',
+          );
+        }
+        checkNetworkBindPermission(
+          visitor,
+          positionalArgs[0],
+          positionalArgs[1],
+          operation: 'HttpServer.bindSecure',
+        );
+        return HttpServer.bindSecure(
+          positionalArgs[0],
+          positionalArgs[1] as int,
+          positionalArgs[2] as SecurityContext,
+          backlog: namedArgs['backlog'] as int? ?? 0,
+          v6Only: namedArgs['v6Only'] as bool? ?? false,
+          requestClientCertificate:
+              namedArgs['requestClientCertificate'] as bool? ?? false,
+          shared: namedArgs['shared'] as bool? ?? false,
+        );
+      },
+      'listenOn': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! ServerSocket) {
+          throw RuntimeD4rtException(
+            'HttpServer.listenOn requires a ServerSocket argument.',
+          );
+        }
+        checkNetworkListenPermission(
+          visitor,
+          null,
+          null,
+          operation: 'HttpServer.listenOn',
+        );
+        return HttpServer.listenOn(positionalArgs[0] as ServerSocket);
+      },
+    },
+    methods: {
+      'listen': (visitor, target, positionalArgs, namedArgs, _) =>
+          bridgedStreamListen(
+            visitor,
+            target as HttpServer,
+            positionalArgs,
+            namedArgs,
+          ),
+      'close': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpServer).close(
+            force: namedArgs['force'] as bool? ?? false,
+          ),
+      'connectionsInfo': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpServer).connectionsInfo(),
+    },
+    getters: {
+      'port': (visitor, target) => (target as HttpServer).port,
+      'address': (visitor, target) => (target as HttpServer).address,
+      'autoCompress': (visitor, target) => (target as HttpServer).autoCompress,
+      'idleTimeout': (visitor, target) => (target as HttpServer).idleTimeout,
+      'serverHeader': (visitor, target) => (target as HttpServer).serverHeader,
+      'defaultResponseHeaders': (visitor, target) =>
+          (target as HttpServer).defaultResponseHeaders,
+    },
+    setters: {
+      'autoCompress': (visitor, target, value) {
+        (target as HttpServer).autoCompress = value as bool;
+        return;
+      },
+      'idleTimeout': (visitor, target, value) {
+        (target as HttpServer).idleTimeout = value as Duration?;
+        return;
+      },
+      'serverHeader': (visitor, target, value) {
+        (target as HttpServer).serverHeader = value as String?;
+        return;
+      },
+      'sessionTimeout': (visitor, target, value) {
+        (target as HttpServer).sessionTimeout = value as int;
+        return;
+      },
+    },
+  );
+}
+
+/// `HttpRequest` — what the bridged `HttpServer` has been handing to scripts
+/// with no name attached.
+///
+/// `HttpServer` is a `Stream<HttpRequest>` and has been bridged since long
+/// before this class was, so a script could bind a port, accept a connection,
+/// and then do nothing with it: `request.method` raised "Cannot access property
+/// 'method' on target of type _HttpRequest". The server was reachable and
+/// useless in the same breath.
+///
+/// `response` is the load-bearing getter — it is the ONLY way to answer a
+/// request, so bridging `HttpRequest` without also bridging [HttpResponseIo]
+/// would have moved the dead end one hop rather than removing it. The same
+/// argument chains through `session`, `connectionInfo` and (via
+/// `HttpServer.connectionsInfo()`) `HttpConnectionsInfo`, which is why all six
+/// types arrived together.
+class HttpRequestIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpRequest,
+    name: 'HttpRequest',
+    isAssignable: (v) => v is HttpRequest,
+    typeParameterCount: 0,
+    constructors: {},
+    methods: {
+      // `abstract interface class HttpRequest implements Stream<Uint8List>` —
+      // this is how a script reads a POST body. Routed through the shared
+      // helper for the reason its own doc gives: nine hand-written copies of
+      // `listen` had already drifted apart.
+      'listen': (visitor, target, positionalArgs, namedArgs, _) =>
+          bridgedStreamListen(
+            visitor,
+            target as HttpRequest,
+            positionalArgs,
+            namedArgs,
+          ),
+    },
+    getters: {
+      'response': (visitor, target) => (target as HttpRequest).response,
+      'method': (visitor, target) => (target as HttpRequest).method,
+      'uri': (visitor, target) => (target as HttpRequest).uri,
+      'requestedUri': (visitor, target) => (target as HttpRequest).requestedUri,
+      'headers': (visitor, target) => (target as HttpRequest).headers,
+      'cookies': (visitor, target) => (target as HttpRequest).cookies,
+      'contentLength': (visitor, target) =>
+          (target as HttpRequest).contentLength,
+      'protocolVersion': (visitor, target) =>
+          (target as HttpRequest).protocolVersion,
+      'persistentConnection': (visitor, target) =>
+          (target as HttpRequest).persistentConnection,
+      'certificate': (visitor, target) => (target as HttpRequest).certificate,
+      'session': (visitor, target) => (target as HttpRequest).session,
+      'connectionInfo': (visitor, target) =>
+          (target as HttpRequest).connectionInfo,
+    },
+  );
+}
+
+/// `HttpResponse` — the sink half of serving a request.
+///
+/// Bridged with setters and not only getters, which is the point of the class:
+/// `statusCode`, `reasonPhrase`, `contentLength`, `persistentConnection`,
+/// `bufferOutput` and `deadline` are all mutable in the SDK, and a bridge
+/// carrying getters alone would satisfy every name-resolution check while
+/// leaving the response read-only and therefore unanswerable.
+///
+/// `HttpResponse implements IOSink`, so the write surface is the same one
+/// [HttpClientRequestIo] carries. The edge is declared in `IoHierarchyIo`
+/// rather than inferred here: without it, `_filterToMostSpecific` sees a value
+/// matching both this bridge and the `IOSink` one with nothing to order them
+/// by.
+class HttpResponseIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpResponse,
+    name: 'HttpResponse',
+    isAssignable: (v) => v is HttpResponse,
+    typeParameterCount: 0,
+    constructors: {},
+    methods: {
+      'write': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpClient.write', atMost: 1);
+        (target as HttpResponse).write(
+          positionalArgs.isNotEmpty ? positionalArgs[0] : null,
+        );
+        return null;
+      },
+      'writeln': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpClient.writeln', atMost: 1);
+        (target as HttpResponse).writeln(
+          positionalArgs.isNotEmpty ? positionalArgs[0] : '',
+        );
+        return null;
+      },
+      'writeAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpResponse.writeAll', atMost: 2);
+        if (positionalArgs.isEmpty || positionalArgs[0] is! Iterable) {
+          throw RuntimeD4rtException('writeAll requires an Iterable argument.');
+        }
+        (target as HttpResponse).writeAll(
+          positionalArgs[0] as Iterable<dynamic>,
+          positionalArgs.length > 1 ? positionalArgs[1] as String : '',
+        );
+        return null;
+      },
+      'writeCharCode': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpResponse.writeCharCode', atMost: 1);
+        if (positionalArgs.isEmpty || positionalArgs[0] is! int) {
+          throw RuntimeD4rtException('writeCharCode requires an int argument.');
+        }
+        (target as HttpResponse).writeCharCode(positionalArgs[0] as int);
+        return null;
+      },
+      'add': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! List) {
+          throw RuntimeD4rtException('add requires a List<int> argument.');
+        }
+        // `List<int>` and not `List<dynamic>`: a script's list literal is
+        // `List<dynamic>` at runtime, so the cast has to narrow rather than
+        // check. `cast` is lazy and would defer the failure into the socket
+        // write, where it surfaces without a line number.
+        (target as HttpResponse).add(List<int>.from(positionalArgs[0] as List));
+        return null;
+      },
+      'addStream': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'HttpResponse.addStream requires a Stream<List<int>> argument.',
+          );
+        }
+        return (target as HttpResponse).addStream(
+          D4.coerceByteStream(positionalArgs[0], 'HttpResponse.addStream'),
+        );
+      },
+      'addError': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpResponse.addError', atMost: 2);
+        if (positionalArgs.isEmpty) {
+          throw RuntimeD4rtException(
+            'addError requires at least one argument (error).',
+          );
+        }
+        (target as HttpResponse).addError(
+          positionalArgs[0]!,
+          positionalArgs.length > 1 ? positionalArgs[1] as StackTrace? : null,
+        );
+        return null;
+      },
+      'flush': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpResponse).flush(),
+      'close': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpResponse).close(),
+      'redirect': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpResponse.redirect', atMost: 1);
+        if (positionalArgs.isEmpty || positionalArgs[0] is! Uri) {
+          throw RuntimeD4rtException('redirect requires a Uri argument.');
+        }
+        return (target as HttpResponse).redirect(
+          positionalArgs[0] as Uri,
+          status: namedArgs['status'] as int? ?? HttpStatus.movedTemporarily,
+        );
+      },
+      'detachSocket': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpResponse).detachSocket(
+            writeHeaders: namedArgs['writeHeaders'] as bool? ?? true,
+          ),
+    },
+    getters: {
+      'statusCode': (visitor, target) => (target as HttpResponse).statusCode,
+      'reasonPhrase': (visitor, target) =>
+          (target as HttpResponse).reasonPhrase,
+      'contentLength': (visitor, target) =>
+          (target as HttpResponse).contentLength,
+      'persistentConnection': (visitor, target) =>
+          (target as HttpResponse).persistentConnection,
+      'bufferOutput': (visitor, target) =>
+          (target as HttpResponse).bufferOutput,
+      'deadline': (visitor, target) => (target as HttpResponse).deadline,
+      'encoding': (visitor, target) => (target as HttpResponse).encoding,
+      'headers': (visitor, target) => (target as HttpResponse).headers,
+      'cookies': (visitor, target) => (target as HttpResponse).cookies,
+      'connectionInfo': (visitor, target) =>
+          (target as HttpResponse).connectionInfo,
+      'done': (visitor, target) => (target as HttpResponse).done,
+    },
+    setters: {
+      'statusCode': (visitor, target, value) {
+        (target as HttpResponse).statusCode = value as int;
+        return;
+      },
+      'reasonPhrase': (visitor, target, value) {
+        (target as HttpResponse).reasonPhrase = value as String;
+        return;
+      },
+      'contentLength': (visitor, target, value) {
+        (target as HttpResponse).contentLength = value as int;
+        return;
+      },
+      'persistentConnection': (visitor, target, value) {
+        (target as HttpResponse).persistentConnection = value as bool;
+        return;
+      },
+      'bufferOutput': (visitor, target, value) {
+        (target as HttpResponse).bufferOutput = value as bool;
+        return;
+      },
+      'deadline': (visitor, target, value) {
+        (target as HttpResponse).deadline = value as Duration?;
+        return;
+      },
+      'encoding': (visitor, target, value) {
+        (target as HttpResponse).encoding = value as Encoding;
+        return;
+      },
+    },
+  );
+}
+
+/// `HttpSession` — the per-client store hanging off `HttpRequest.session`.
+///
+/// `abstract interface class HttpSession implements Map`, and the SDK declares
+/// only four members of its own on top of that. The Map surface is therefore
+/// most of what the class *is*, and it is spread in from [MapCore] rather than
+/// re-listed: bridge selection resolves `_HttpSession` to this class by the
+/// `_Foo -> Foo` name canonicalization, which runs BEFORE any `isAssignable`
+/// scan, so whatever is not on this bridge is not reachable at all. Copying
+/// forty adapters to say the same thing would guarantee they drift.
+///
+/// Index access (`session['k']`) does not actually come through here — the
+/// interpreter's index paths test `target is Map` before consulting a bridge,
+/// and `_HttpSession` satisfies it. The spread still matters for everything
+/// invoked by NAME (`containsKey`, `remove`, `keys`, `length`), which does go
+/// through the bridge.
+class HttpSessionIo {
+  static BridgedClass get definition {
+    final map = MapCore.definition;
+    return BridgedClass(
+      nativeType: HttpSession,
+      name: 'HttpSession',
+      isAssignable: (v) => v is HttpSession,
+      // Zero, not MapCore's two: the SDK writes `implements Map` bare, so a
+      // script has no type arguments to supply.
+      typeParameterCount: 0,
+      constructors: {},
+      methods: {
+        ...map.methods,
+        'destroy': (visitor, target, positionalArgs, namedArgs, _) {
+          (target as HttpSession).destroy();
+          return null;
+        },
+      },
+      getters: {
+        ...map.getters,
+        'id': (visitor, target) => (target as HttpSession).id,
+        'isNew': (visitor, target) => (target as HttpSession).isNew,
+      },
+      setters: {
+        ...map.setters,
+        'onTimeout': (visitor, target, value) {
+          final callback = value as Callable;
+          // The adapter typedef makes `visitor` nullable, but a setter can only
+          // run while a script is executing, so the null case is unreachable —
+          // and the callback is invoked LATER, when the session times out, so
+          // the visitor has to be captured now either way.
+          final capturedVisitor = visitor!;
+          (target as HttpSession).onTimeout = () =>
+              runAction<void>(capturedVisitor, callback, []);
+          return;
+        },
+      },
+    );
+  }
+}
+
+/// `HttpConnectionInfo` — who is on the other end of a request.
+class HttpConnectionInfoIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpConnectionInfo,
+    name: 'HttpConnectionInfo',
+    isAssignable: (v) => v is HttpConnectionInfo,
+    typeParameterCount: 0,
+    constructors: {},
+    getters: {
+      'remoteAddress': (visitor, target) =>
+          (target as HttpConnectionInfo).remoteAddress,
+      'remotePort': (visitor, target) =>
+          (target as HttpConnectionInfo).remotePort,
+      'localPort': (visitor, target) =>
+          (target as HttpConnectionInfo).localPort,
+    },
+  );
+}
+
+/// `HttpConnectionsInfo` — the counters `HttpServer.connectionsInfo()` returns.
+///
+/// The one type in this group a script can also construct: the SDK declares it
+/// as a plain class with four mutable `int` fields and an implicit default
+/// constructor, which makes it usable as a tally in interpreted code and not
+/// only as a value the server hands back.
+class HttpConnectionsInfoIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpConnectionsInfo,
+    name: 'HttpConnectionsInfo',
+    isAssignable: (v) => v is HttpConnectionsInfo,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) => HttpConnectionsInfo(),
+    },
+    getters: {
+      'total': (visitor, target) => (target as HttpConnectionsInfo).total,
+      'active': (visitor, target) => (target as HttpConnectionsInfo).active,
+      'idle': (visitor, target) => (target as HttpConnectionsInfo).idle,
+      'closing': (visitor, target) => (target as HttpConnectionsInfo).closing,
+    },
+    setters: {
+      'total': (visitor, target, value) {
+        (target as HttpConnectionsInfo).total = value as int;
+        return;
+      },
+      'active': (visitor, target, value) {
+        (target as HttpConnectionsInfo).active = value as int;
+        return;
+      },
+      'idle': (visitor, target, value) {
+        (target as HttpConnectionsInfo).idle = value as int;
+        return;
+      },
+      'closing': (visitor, target, value) {
+        (target as HttpConnectionsInfo).closing = value as int;
+        return;
+      },
+    },
+  );
+}
+
+class HttpClientRequestIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpClientRequest,
+    name: 'HttpClientRequest',
+    isAssignable: (v) => v is HttpClientRequest,
+    typeParameterCount: 0,
+    constructors: {},
+    methods: {
+      'write': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpClient.write', atMost: 1);
+        (target as HttpClientRequest).write(positionalArgs[0]);
+        return null;
+      },
+      'writeln': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpClient.writeln', atMost: 1);
+        (target as HttpClientRequest).writeln(
+          positionalArgs.isNotEmpty ? positionalArgs[0] : '',
+        );
+        return null;
+      },
+      'writeAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpClientRequest.writeAll', atMost: 2);
+        if (positionalArgs.isEmpty || positionalArgs[0] is! Iterable) {
+          throw RuntimeD4rtException('writeAll requires an Iterable argument.');
+        }
+        (target as HttpClientRequest).writeAll(
+          positionalArgs[0] as Iterable<dynamic>,
+          positionalArgs.length > 1 ? positionalArgs[1] as String : '',
+        );
+        return null;
+      },
+      'add': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! List) {
+          throw RuntimeD4rtException('add requires a List<int> argument.');
+        }
+        // SCD70: coerce, not cast — see `Socket.add` in io/socket.dart.
+        (target as HttpClientRequest).add(
+          D4.coerceList<int>(positionalArgs[0], 'bytes'),
+        );
+        return null;
+      },
+      'addStream': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'HttpClientRequest.addStream requires a Stream<List<int>> argument.',
+          );
+        }
+        return (target as HttpClientRequest).addStream(
+          D4.coerceByteStream(positionalArgs[0], 'HttpClientRequest.addStream'),
+        );
+      },
+      'flush': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpClientRequest).flush(),
+      'close': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpClientRequest).close(),
+      'addError': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpClientRequest.addError', atMost: 2);
+        if (positionalArgs.isEmpty) {
+          throw RuntimeD4rtException(
+            'addError requires at least one argument (error).',
+          );
+        }
+        (target as HttpClientRequest).addError(
+          positionalArgs[0]!,
+          positionalArgs.length > 1 ? positionalArgs[1] as StackTrace? : null,
+        );
+        return null;
+      },
+      'abort': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpClient.abort', atMost: 2);
+        (target as HttpClientRequest).abort(
+          positionalArgs.isNotEmpty ? positionalArgs[0] : null,
+          positionalArgs.length > 1 ? positionalArgs[1] as StackTrace? : null,
+        );
+        return null;
+      },
+    },
+    getters: {
+      'persistentConnection': (visitor, target) =>
+          (target as HttpClientRequest).persistentConnection,
+      'followRedirects': (visitor, target) =>
+          (target as HttpClientRequest).followRedirects,
+      'maxRedirects': (visitor, target) =>
+          (target as HttpClientRequest).maxRedirects,
+      'contentLength': (visitor, target) =>
+          (target as HttpClientRequest).contentLength,
+      'encoding': (visitor, target) => (target as HttpClientRequest).encoding,
+      'bufferOutput': (visitor, target) =>
+          (target as HttpClientRequest).bufferOutput,
+      'method': (visitor, target) => (target as HttpClientRequest).method,
+      'uri': (visitor, target) => (target as HttpClientRequest).uri,
+      'headers': (visitor, target) => (target as HttpClientRequest).headers,
+      'cookies': (visitor, target) => (target as HttpClientRequest).cookies,
+      'done': (visitor, target) => (target as HttpClientRequest).done,
+      'connectionInfo': (visitor, target) =>
+          (target as HttpClientRequest).connectionInfo,
+    },
+    setters: {
+      'persistentConnection': (visitor, target, value) {
+        (target as HttpClientRequest).persistentConnection = value as bool;
+        return;
+      },
+      'followRedirects': (visitor, target, value) {
+        (target as HttpClientRequest).followRedirects = value as bool;
+        return;
+      },
+      'maxRedirects': (visitor, target, value) {
+        (target as HttpClientRequest).maxRedirects = value as int;
+        return;
+      },
+      'contentLength': (visitor, target, value) {
+        (target as HttpClientRequest).contentLength = value as int;
+        return;
+      },
+      'encoding': (visitor, target, value) {
+        (target as HttpClientRequest).encoding = value as Encoding;
+        return;
+      },
+      'bufferOutput': (visitor, target, value) {
+        (target as HttpClientRequest).bufferOutput = value as bool;
+        return;
+      },
+    },
+  );
+}
+
+class HttpClientResponseIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpClientResponse,
+    name: 'HttpClientResponse',
+    isAssignable: (v) => v is HttpClientResponse,
+    typeParameterCount: 0,
+    constructors: {},
+    methods: {
+      'listen': (visitor, target, positionalArgs, namedArgs, _) =>
+          bridgedStreamListen(
+            visitor,
+            target as HttpClientResponse,
+            positionalArgs,
+            namedArgs,
+          ),
+      'redirect': (visitor, target, positionalArgs, namedArgs, _) {
+        // SCE110: atMost 3, not 2. The third optional positional is
+        // `followLoops`, which this adapter was reading out of `namedArgs` —
+        // so the bound agreed with the defect rather than with the SDK, and
+        // would have rejected the argument the moment it became readable. The
+        // description named `HttpClient` for a member of `HttpClientResponse`.
+        D4.checkArity(positionalArgs, 'HttpClientResponse.redirect', atMost: 3);
+        final method = positionalArgs.isNotEmpty
+            ? positionalArgs[0] as String?
+            : null;
+        final url = positionalArgs.length > 1
+            ? positionalArgs[1] as Uri?
+            : null;
+        // SCE110: `followLoops` is the THIRD optional positional parameter
+        // of `HttpClientResponse.redirect`, not a named one — its two
+        // neighbours just above were already read positionally.
+        final followLoops = positionalArgs.length > 2
+            ? positionalArgs[2] as bool?
+            : null;
+        return (target as HttpClientResponse).redirect(
+          method,
+          url,
+          followLoops,
+        );
+      },
+      'detachSocket': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpClientResponse).detachSocket(),
+    },
+    getters: {
+      'statusCode': (visitor, target) =>
+          (target as HttpClientResponse).statusCode,
+      'reasonPhrase': (visitor, target) =>
+          (target as HttpClientResponse).reasonPhrase,
+      'contentLength': (visitor, target) =>
+          (target as HttpClientResponse).contentLength,
+      'compressionState': (visitor, target) =>
+          (target as HttpClientResponse).compressionState,
+      'persistentConnection': (visitor, target) =>
+          (target as HttpClientResponse).persistentConnection,
+      'isRedirect': (visitor, target) =>
+          (target as HttpClientResponse).isRedirect,
+      'redirects': (visitor, target) =>
+          (target as HttpClientResponse).redirects,
+      'headers': (visitor, target) => (target as HttpClientResponse).headers,
+      'cookies': (visitor, target) => (target as HttpClientResponse).cookies,
+      'certificate': (visitor, target) =>
+          (target as HttpClientResponse).certificate,
+      'connectionInfo': (visitor, target) =>
+          (target as HttpClientResponse).connectionInfo,
+    },
+  );
+}
+
+class HttpHeadersIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpHeaders,
+    name: 'HttpHeaders',
+    isAssignable: (v) => v is HttpHeaders,
+    typeParameterCount: 0,
+    constructors: {},
+    staticGetters: {
+      // HTTP Header constants
+      'acceptHeader': (visitor) => HttpHeaders.acceptHeader,
+      'acceptCharsetHeader': (visitor) => HttpHeaders.acceptCharsetHeader,
+      'acceptEncodingHeader': (visitor) => HttpHeaders.acceptEncodingHeader,
+      'acceptLanguageHeader': (visitor) => HttpHeaders.acceptLanguageHeader,
+      'authorizationHeader': (visitor) => HttpHeaders.authorizationHeader,
+      'cacheControlHeader': (visitor) => HttpHeaders.cacheControlHeader,
+      'connectionHeader': (visitor) => HttpHeaders.connectionHeader,
+      'contentEncodingHeader': (visitor) => HttpHeaders.contentEncodingHeader,
+      'contentLengthHeader': (visitor) => HttpHeaders.contentLengthHeader,
+      'contentTypeHeader': (visitor) => HttpHeaders.contentTypeHeader,
+      'cookieHeader': (visitor) => HttpHeaders.cookieHeader,
+      'dateHeader': (visitor) => HttpHeaders.dateHeader,
+      'hostHeader': (visitor) => HttpHeaders.hostHeader,
+      'ifModifiedSinceHeader': (visitor) => HttpHeaders.ifModifiedSinceHeader,
+      'locationHeader': (visitor) => HttpHeaders.locationHeader,
+      'setCookieHeader': (visitor) => HttpHeaders.setCookieHeader,
+      'userAgentHeader': (visitor) => HttpHeaders.userAgentHeader,
+      // SCE82: the rest of the constant block. The audit reported 45 of these
+      // as confirmed-unreachable — a script writing
+      // `headers.set(HttpHeaders.acceptRangesHeader, …)` failed while the
+      // seventeen above resolved, which is the worst state to be half in:
+      // the ones that work teach the author to expect the rest.
+      //
+      // Each DELEGATES to the SDK constant rather than repeating its value,
+      // so a wrong name is a compile error here instead of a bridge that
+      // resolves and quietly returns the wrong header.
+      'acceptRangesHeader': (visitor) => HttpHeaders.acceptRangesHeader,
+      'accessControlAllowCredentialsHeader': (visitor) =>
+          HttpHeaders.accessControlAllowCredentialsHeader,
+      'accessControlAllowHeadersHeader': (visitor) =>
+          HttpHeaders.accessControlAllowHeadersHeader,
+      'accessControlAllowMethodsHeader': (visitor) =>
+          HttpHeaders.accessControlAllowMethodsHeader,
+      'accessControlAllowOriginHeader': (visitor) =>
+          HttpHeaders.accessControlAllowOriginHeader,
+      'accessControlExposeHeadersHeader': (visitor) =>
+          HttpHeaders.accessControlExposeHeadersHeader,
+      'accessControlMaxAgeHeader': (visitor) =>
+          HttpHeaders.accessControlMaxAgeHeader,
+      'accessControlRequestHeadersHeader': (visitor) =>
+          HttpHeaders.accessControlRequestHeadersHeader,
+      'accessControlRequestMethodHeader': (visitor) =>
+          HttpHeaders.accessControlRequestMethodHeader,
+      'ageHeader': (visitor) => HttpHeaders.ageHeader,
+      'allowHeader': (visitor) => HttpHeaders.allowHeader,
+      'contentDisposition': (visitor) => HttpHeaders.contentDisposition,
+      'contentLanguageHeader': (visitor) => HttpHeaders.contentLanguageHeader,
+      'contentLocationHeader': (visitor) => HttpHeaders.contentLocationHeader,
+      'contentMD5Header': (visitor) => HttpHeaders.contentMD5Header,
+      'contentRangeHeader': (visitor) => HttpHeaders.contentRangeHeader,
+      'entityHeaders': (visitor) => HttpHeaders.entityHeaders,
+      'etagHeader': (visitor) => HttpHeaders.etagHeader,
+      'expectHeader': (visitor) => HttpHeaders.expectHeader,
+      'expiresHeader': (visitor) => HttpHeaders.expiresHeader,
+      'fromHeader': (visitor) => HttpHeaders.fromHeader,
+      'generalHeaders': (visitor) => HttpHeaders.generalHeaders,
+      'ifMatchHeader': (visitor) => HttpHeaders.ifMatchHeader,
+      'ifNoneMatchHeader': (visitor) => HttpHeaders.ifNoneMatchHeader,
+      'ifRangeHeader': (visitor) => HttpHeaders.ifRangeHeader,
+      'ifUnmodifiedSinceHeader': (visitor) =>
+          HttpHeaders.ifUnmodifiedSinceHeader,
+      'lastModifiedHeader': (visitor) => HttpHeaders.lastModifiedHeader,
+      'maxForwardsHeader': (visitor) => HttpHeaders.maxForwardsHeader,
+      'pragmaHeader': (visitor) => HttpHeaders.pragmaHeader,
+      'proxyAuthenticateHeader': (visitor) =>
+          HttpHeaders.proxyAuthenticateHeader,
+      'proxyAuthorizationHeader': (visitor) =>
+          HttpHeaders.proxyAuthorizationHeader,
+      'rangeHeader': (visitor) => HttpHeaders.rangeHeader,
+      'refererHeader': (visitor) => HttpHeaders.refererHeader,
+      'requestHeaders': (visitor) => HttpHeaders.requestHeaders,
+      'responseHeaders': (visitor) => HttpHeaders.responseHeaders,
+      'retryAfterHeader': (visitor) => HttpHeaders.retryAfterHeader,
+      'serverHeader': (visitor) => HttpHeaders.serverHeader,
+      'teHeader': (visitor) => HttpHeaders.teHeader,
+      'trailerHeader': (visitor) => HttpHeaders.trailerHeader,
+      'transferEncodingHeader': (visitor) => HttpHeaders.transferEncodingHeader,
+      'upgradeHeader': (visitor) => HttpHeaders.upgradeHeader,
+      'varyHeader': (visitor) => HttpHeaders.varyHeader,
+      'viaHeader': (visitor) => HttpHeaders.viaHeader,
+      'warningHeader': (visitor) => HttpHeaders.warningHeader,
+      'wwwAuthenticateHeader': (visitor) => HttpHeaders.wwwAuthenticateHeader,
+    },
+    methods: {
+      'add': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpHeaders.add', atMost: 2);
+        if (positionalArgs.length < 2) {
+          throw RuntimeD4rtException('add requires name and value arguments.');
+        }
+        (target as HttpHeaders).add(
+          positionalArgs[0] as String,
+          positionalArgs[1]!,
+          preserveHeaderCase: namedArgs['preserveHeaderCase'] as bool? ?? false,
+        );
+        return null;
+      },
+      'set': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpHeaders.set', atMost: 2);
+        if (positionalArgs.length < 2) {
+          throw RuntimeD4rtException('set requires name and value arguments.');
+        }
+        (target as HttpHeaders).set(
+          positionalArgs[0] as String,
+          positionalArgs[1]!,
+          preserveHeaderCase: namedArgs['preserveHeaderCase'] as bool? ?? false,
+        );
+        return null;
+      },
+      'remove': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpHeaders.remove', atMost: 2);
+        if (positionalArgs.length < 2) {
+          throw RuntimeD4rtException(
+            'remove requires name and value arguments.',
+          );
+        }
+        (target as HttpHeaders).remove(
+          positionalArgs[0] as String,
+          positionalArgs[1]!,
+        );
+        return null;
+      },
+      'removeAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpHeaders.removeAll', atMost: 1);
+        if (positionalArgs.isEmpty) {
+          throw RuntimeD4rtException('removeAll requires name argument.');
+        }
+        (target as HttpHeaders).removeAll(positionalArgs[0] as String);
+        return null;
+      },
+      'value': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpHeaders.value', atMost: 1);
+        if (positionalArgs.isEmpty) {
+          throw RuntimeD4rtException('value requires name argument.');
+        }
+        return (target as HttpHeaders).value(positionalArgs[0] as String);
+      },
+      'forEach': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpHeaders.forEach', atMost: 1);
+        if (positionalArgs.isEmpty || positionalArgs[0] is! Callable) {
+          throw RuntimeD4rtException('forEach requires a function argument.');
+        }
+        final callback = positionalArgs[0] as Callable;
+        (target as HttpHeaders).forEach((name, values) {
+          callback.call(visitor, [name, values]);
+        });
+        return null;
+      },
+      'noFolding': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HttpHeaders.noFolding', atMost: 1);
+        if (positionalArgs.isEmpty) {
+          throw RuntimeD4rtException('noFolding requires name argument.');
+        }
+        (target as HttpHeaders).noFolding(positionalArgs[0] as String);
+        return null;
+      },
+      'clear': (visitor, target, positionalArgs, namedArgs, _) {
+        (target as HttpHeaders).clear();
+        return null;
+      },
+    },
+    getters: {
+      'date': (visitor, target) => (target as HttpHeaders).date,
+      'expires': (visitor, target) => (target as HttpHeaders).expires,
+      'ifModifiedSince': (visitor, target) =>
+          (target as HttpHeaders).ifModifiedSince,
+      'host': (visitor, target) => (target as HttpHeaders).host,
+      'port': (visitor, target) => (target as HttpHeaders).port,
+      'contentType': (visitor, target) => (target as HttpHeaders).contentType,
+      'contentLength': (visitor, target) =>
+          (target as HttpHeaders).contentLength,
+      'persistentConnection': (visitor, target) =>
+          (target as HttpHeaders).persistentConnection,
+      'chunkedTransferEncoding': (visitor, target) =>
+          (target as HttpHeaders).chunkedTransferEncoding,
+    },
+    setters: {
+      'date': (visitor, target, value) {
+        (target as HttpHeaders).date = value as DateTime?;
+        return;
+      },
+      'expires': (visitor, target, value) {
+        (target as HttpHeaders).expires = value as DateTime?;
+        return;
+      },
+      'ifModifiedSince': (visitor, target, value) {
+        (target as HttpHeaders).ifModifiedSince = value as DateTime?;
+        return;
+      },
+      'host': (visitor, target, value) {
+        (target as HttpHeaders).host = value as String?;
+        return;
+      },
+      'port': (visitor, target, value) {
+        (target as HttpHeaders).port = value as int?;
+        return;
+      },
+      'contentType': (visitor, target, value) {
+        (target as HttpHeaders).contentType = value as ContentType?;
+        return;
+      },
+      'contentLength': (visitor, target, value) {
+        (target as HttpHeaders).contentLength = value as int;
+        return;
+      },
+      'persistentConnection': (visitor, target, value) {
+        (target as HttpHeaders).persistentConnection = value as bool;
+        return;
+      },
+      'chunkedTransferEncoding': (visitor, target, value) {
+        (target as HttpHeaders).chunkedTransferEncoding = value as bool;
+        return;
+      },
+    },
+  );
+}
+
+class ContentTypeIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: ContentType,
+    name: 'ContentType',
+    isAssignable: (v) => v is ContentType,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length < 2 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! String) {
+          throw RuntimeD4rtException(
+            'ContentType constructor requires primaryType and subType arguments.',
+          );
+        }
+        return ContentType(
+          positionalArgs[0] as String,
+          positionalArgs[1] as String,
+          charset: namedArgs['charset'] as String?,
+          parameters:
+              // SCD70: coerce, not cast — see `findProxyFromEnvironment` above.
+              D4.coerceMapOrNull<String, String?>(
+                namedArgs['parameters'],
+                'parameters',
+                visitor,
+              ) ??
+              const {},
+        );
+      },
+    },
+    staticMethods: {
+      'parse': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'ContentType.parse requires a String argument.',
+          );
+        }
+        return ContentType.parse(positionalArgs[0] as String);
+      },
+    },
+    staticGetters: {
+      'text': (visitor) => ContentType.text,
+      'html': (visitor) => ContentType.html,
+      'json': (visitor) => ContentType.json,
+      'binary': (visitor) => ContentType.binary,
+    },
+    getters: {
+      'mimeType': (visitor, target) => (target as ContentType).mimeType,
+      'primaryType': (visitor, target) => (target as ContentType).primaryType,
+      'subType': (visitor, target) => (target as ContentType).subType,
+      'charset': (visitor, target) => (target as ContentType).charset,
+      'value': (visitor, target) => (target as ContentType).value,
+      'parameters': (visitor, target) => (target as ContentType).parameters,
+    },
+    methods: {
+      'toString': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as ContentType).toString(),
+    },
+  );
+}
+
+class CookieIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Cookie,
+    name: 'Cookie',
+    isAssignable: (v) => v is Cookie,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length < 2 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! String) {
+          throw RuntimeD4rtException(
+            'Cookie constructor requires name and value arguments.',
+          );
+        }
+        return Cookie(positionalArgs[0] as String, positionalArgs[1] as String);
+      },
+    },
+    staticMethods: {
+      'fromSetCookieValue': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'Cookie.fromSetCookieValue requires a String argument.',
+          );
+        }
+        return Cookie.fromSetCookieValue(positionalArgs[0] as String);
+      },
+    },
+    getters: {
+      'name': (visitor, target) => (target as Cookie).name,
+      'value': (visitor, target) => (target as Cookie).value,
+      'expires': (visitor, target) => (target as Cookie).expires,
+      'maxAge': (visitor, target) => (target as Cookie).maxAge,
+      'domain': (visitor, target) => (target as Cookie).domain,
+      'path': (visitor, target) => (target as Cookie).path,
+      'secure': (visitor, target) => (target as Cookie).secure,
+      'httpOnly': (visitor, target) => (target as Cookie).httpOnly,
+      'sameSite': (visitor, target) => (target as Cookie).sameSite,
+    },
+    setters: {
+      'name': (visitor, target, value) {
+        (target as Cookie).name = value as String;
+        return;
+      },
+      'value': (visitor, target, value) {
+        (target as Cookie).value = value as String;
+        return;
+      },
+      'expires': (visitor, target, value) {
+        (target as Cookie).expires = value as DateTime?;
+        return;
+      },
+      'maxAge': (visitor, target, value) {
+        (target as Cookie).maxAge = value as int?;
+        return;
+      },
+      'domain': (visitor, target, value) {
+        (target as Cookie).domain = value as String?;
+        return;
+      },
+      'path': (visitor, target, value) {
+        (target as Cookie).path = value as String?;
+        return;
+      },
+      'secure': (visitor, target, value) {
+        (target as Cookie).secure = value as bool;
+        return;
+      },
+      'httpOnly': (visitor, target, value) {
+        (target as Cookie).httpOnly = value as bool;
+        return;
+      },
+      'sameSite': (visitor, target, value) {
+        (target as Cookie).sameSite = value as SameSite?;
+        return;
+      },
+    },
+    methods: {
+      'toString': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as Cookie).toString(),
+    },
+  );
+}
+
+/// `SameSite` — the value `Cookie.sameSite` has always declared it takes.
+///
+/// **It is not an enum**, despite reading like one at every call site.
+/// The SDK declares `final class SameSite` with a private constructor and three
+/// static consts, the same shape as `Endian`. Registering it as a
+/// `BridgedEnumDefinition` would have given it `index`/`values` semantics it
+/// does not have and lost `toString`, which is the wire form (`SameSite=Lax`)
+/// and not a debug string.
+///
+/// `CookieIo` has carried the getter and the setter since before this bridge
+/// existed, which made the property look complete in the bridge listing while
+/// being unusable from a script: the getter returned a value with no name and
+/// the setter accepted nothing but null.
+class SameSiteIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: SameSite,
+    name: 'SameSite',
+    isAssignable: (v) => v is SameSite,
+    typeParameterCount: 0,
+    constructors: {},
+    staticGetters: {
+      'lax': (visitor) => SameSite.lax,
+      'strict': (visitor) => SameSite.strict,
+      'none': (visitor) => SameSite.none,
+      'values': (visitor) => SameSite.values,
+    },
+    getters: {'name': (visitor, target) => (target as SameSite).name},
+    methods: {
+      'toString': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as SameSite).toString(),
+    },
+  );
+}
+
+class HeaderValueIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HeaderValue,
+    name: 'HeaderValue',
+    isAssignable: (v) => v is HeaderValue,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        final value = positionalArgs.isNotEmpty
+            ? positionalArgs[0] as String
+            : '';
+        // SCD70: coerce, not cast — see `findProxyFromEnvironment` above.
+        final parameters = positionalArgs.length > 1
+            ? D4.coerceMap<String, String?>(
+                positionalArgs[1],
+                'parameters',
+                visitor,
+              )
+            : const <String, String?>{};
+        return HeaderValue(value, parameters);
+      },
+    },
+    staticMethods: {
+      'parse': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HeaderValue.parse', atMost: 1);
+        if (positionalArgs.isEmpty || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'HeaderValue.parse requires a String argument.',
+          );
+        }
+        return HeaderValue.parse(
+          positionalArgs[0] as String,
+          parameterSeparator: namedArgs['parameterSeparator'] as String? ?? ';',
+          valueSeparator: namedArgs['valueSeparator'] as String?,
+          preserveBackslash: namedArgs['preserveBackslash'] as bool? ?? false,
+        );
+      },
+    },
+    getters: {
+      'value': (visitor, target) => (target as HeaderValue).value,
+      'parameters': (visitor, target) => (target as HeaderValue).parameters,
+    },
+    methods: {
+      'toString': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HeaderValue).toString(),
+    },
+  );
+}
+
+/// `HttpException` — the error every `HttpClient` / `HttpServer` call can raise.
+///
+/// `isAssignable` is what makes `on HttpException catch` work, and it is not
+/// optional here the way it is on a type a script only ever constructs: an
+/// exception arriving from a native call reaches the catch clause as a native
+/// object, and without the predicate no bridge claims it.
+class HttpExceptionIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpException,
+    name: 'HttpException',
+    isAssignable: (v) => v is HttpException,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        final message = positionalArgs.isNotEmpty
+            ? positionalArgs[0] as String? ?? ''
+            : '';
+        return HttpException(message, uri: namedArgs['uri'] as Uri?);
+      },
+    },
+    methods: {
+      'toString': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpException).toString(),
+    },
+    getters: {
+      'message': (visitor, target) => (target as HttpException).message,
+      'uri': (visitor, target) => (target as HttpException).uri,
+    },
+  );
+}
+
+/// `RedirectException` — `class RedirectException implements HttpException`.
+///
+/// `redirects` is a `List<RedirectInfo>` and `RedirectInfo` is not bridged, so
+/// an empty list is the only one a script can build. The getter is bridged
+/// anyway because a natively-thrown `RedirectException` carries a populated
+/// one, and `uri` reads through it (`redirects.last.location`).
+class RedirectExceptionIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: RedirectException,
+    name: 'RedirectException',
+    isAssignable: (v) => v is RedirectException,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length < 2) {
+          throw RuntimeD4rtException(
+            'RedirectException requires message and redirects arguments.',
+          );
+        }
+        final message = positionalArgs[0] as String? ?? '';
+        final rawRedirects = positionalArgs[1];
+        if (rawRedirects is! List) {
+          throw RuntimeD4rtException(
+            'RedirectException requires a List<RedirectInfo> as its second '
+            'argument.',
+          );
+        }
+        // `List.from` rather than `cast`: cast defers the type error to the
+        // first read, which would surface it from inside `uri` rather than
+        // from the constructor the script actually got wrong.
+        return RedirectException(
+          message,
+          List<RedirectInfo>.from(rawRedirects.toNativeList()),
+        );
+      },
+    },
+    methods: {
+      'toString': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as RedirectException).toString(),
+    },
+    getters: {
+      'message': (visitor, target) => (target as RedirectException).message,
+      'redirects': (visitor, target) => (target as RedirectException).redirects,
+      'uri': (visitor, target) => (target as RedirectException).uri,
+    },
+  );
+}
+
+/// `HttpStatus` — a constants holder, no instances and no constructor.
+///
+/// The screaming-caps aliases the SDK still carries (`HTTP_STATUS_NOT_FOUND`
+/// and friends) are deliberately absent: they are `@Deprecated` upstream and
+/// bridging them would make code that cannot be written against a current SDK
+/// runnable under the interpreter.
+class HttpStatusIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpStatus,
+    name: 'HttpStatus',
+    typeParameterCount: 0,
+    isAbstract: true,
+    staticGetters: {
+      'continue_': (visitor) => HttpStatus.continue_,
+      'switchingProtocols': (visitor) => HttpStatus.switchingProtocols,
+      'processing': (visitor) => HttpStatus.processing,
+      'ok': (visitor) => HttpStatus.ok,
+      'created': (visitor) => HttpStatus.created,
+      'accepted': (visitor) => HttpStatus.accepted,
+      'nonAuthoritativeInformation': (visitor) =>
+          HttpStatus.nonAuthoritativeInformation,
+      'noContent': (visitor) => HttpStatus.noContent,
+      'resetContent': (visitor) => HttpStatus.resetContent,
+      'partialContent': (visitor) => HttpStatus.partialContent,
+      'multiStatus': (visitor) => HttpStatus.multiStatus,
+      'alreadyReported': (visitor) => HttpStatus.alreadyReported,
+      'imUsed': (visitor) => HttpStatus.imUsed,
+      'multipleChoices': (visitor) => HttpStatus.multipleChoices,
+      'movedPermanently': (visitor) => HttpStatus.movedPermanently,
+      'found': (visitor) => HttpStatus.found,
+      'movedTemporarily': (visitor) => HttpStatus.movedTemporarily,
+      'seeOther': (visitor) => HttpStatus.seeOther,
+      'notModified': (visitor) => HttpStatus.notModified,
+      'useProxy': (visitor) => HttpStatus.useProxy,
+      'temporaryRedirect': (visitor) => HttpStatus.temporaryRedirect,
+      'permanentRedirect': (visitor) => HttpStatus.permanentRedirect,
+      'badRequest': (visitor) => HttpStatus.badRequest,
+      'unauthorized': (visitor) => HttpStatus.unauthorized,
+      'paymentRequired': (visitor) => HttpStatus.paymentRequired,
+      'forbidden': (visitor) => HttpStatus.forbidden,
+      'notFound': (visitor) => HttpStatus.notFound,
+      'methodNotAllowed': (visitor) => HttpStatus.methodNotAllowed,
+      'notAcceptable': (visitor) => HttpStatus.notAcceptable,
+      'proxyAuthenticationRequired': (visitor) =>
+          HttpStatus.proxyAuthenticationRequired,
+      'requestTimeout': (visitor) => HttpStatus.requestTimeout,
+      'conflict': (visitor) => HttpStatus.conflict,
+      'gone': (visitor) => HttpStatus.gone,
+      'lengthRequired': (visitor) => HttpStatus.lengthRequired,
+      'preconditionFailed': (visitor) => HttpStatus.preconditionFailed,
+      'requestEntityTooLarge': (visitor) => HttpStatus.requestEntityTooLarge,
+      'requestUriTooLong': (visitor) => HttpStatus.requestUriTooLong,
+      'unsupportedMediaType': (visitor) => HttpStatus.unsupportedMediaType,
+      'requestedRangeNotSatisfiable': (visitor) =>
+          HttpStatus.requestedRangeNotSatisfiable,
+      'expectationFailed': (visitor) => HttpStatus.expectationFailed,
+      'misdirectedRequest': (visitor) => HttpStatus.misdirectedRequest,
+      'unprocessableEntity': (visitor) => HttpStatus.unprocessableEntity,
+      'locked': (visitor) => HttpStatus.locked,
+      'failedDependency': (visitor) => HttpStatus.failedDependency,
+      'upgradeRequired': (visitor) => HttpStatus.upgradeRequired,
+      'preconditionRequired': (visitor) => HttpStatus.preconditionRequired,
+      'tooManyRequests': (visitor) => HttpStatus.tooManyRequests,
+      'requestHeaderFieldsTooLarge': (visitor) =>
+          HttpStatus.requestHeaderFieldsTooLarge,
+      'connectionClosedWithoutResponse': (visitor) =>
+          HttpStatus.connectionClosedWithoutResponse,
+      'unavailableForLegalReasons': (visitor) =>
+          HttpStatus.unavailableForLegalReasons,
+      'clientClosedRequest': (visitor) => HttpStatus.clientClosedRequest,
+      'internalServerError': (visitor) => HttpStatus.internalServerError,
+      'notImplemented': (visitor) => HttpStatus.notImplemented,
+      'badGateway': (visitor) => HttpStatus.badGateway,
+      'serviceUnavailable': (visitor) => HttpStatus.serviceUnavailable,
+      'gatewayTimeout': (visitor) => HttpStatus.gatewayTimeout,
+      'httpVersionNotSupported': (visitor) =>
+          HttpStatus.httpVersionNotSupported,
+      'variantAlsoNegotiates': (visitor) => HttpStatus.variantAlsoNegotiates,
+      'insufficientStorage': (visitor) => HttpStatus.insufficientStorage,
+      'loopDetected': (visitor) => HttpStatus.loopDetected,
+      'notExtended': (visitor) => HttpStatus.notExtended,
+      'networkAuthenticationRequired': (visitor) =>
+          HttpStatus.networkAuthenticationRequired,
+      'networkConnectTimeoutError': (visitor) =>
+          HttpStatus.networkConnectTimeoutError,
+    },
+  );
+}
+
+/// The marker interface `HttpClient.addCredentials` accepts.
+///
+/// `abstract interface class HttpClientCredentials {}` in the SDK — no members
+/// and no factory, so this bridge deliberately declares neither. Its whole job
+/// is to make the name answer `is`: a script that wraps `addCredentials`
+/// behind a `dynamic` parameter has exactly one way to validate what it was
+/// handed, and it is this type.
+///
+/// `nativeNames` claims `_HttpClientCredentials`, the abstract impl base every
+/// concrete form extends. Without it a credentials value coming *back* from a
+/// native API would resolve to no bridge at all and be inert.
+class HttpClientCredentialsIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpClientCredentials,
+    name: 'HttpClientCredentials',
+    nativeNames: const ['_HttpClientCredentials'],
+    isAbstract: true,
+    isAssignable: (v) => v is HttpClientCredentials,
+    typeParameterCount: 0,
+  );
+}
+
+class HttpClientBasicCredentialsIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpClientBasicCredentials,
+    name: 'HttpClientBasicCredentials',
+    nativeNames: const ['_HttpClientBasicCredentials'],
+    isAssignable: (v) => v is HttpClientBasicCredentials,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 2 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! String) {
+          throw RuntimeD4rtException(
+            'HttpClientBasicCredentials requires username and password '
+            'arguments.',
+          );
+        }
+        return HttpClientBasicCredentials(
+          positionalArgs[0] as String,
+          positionalArgs[1] as String,
+        );
+      },
+    },
+  );
+}
+
+class HttpClientDigestCredentialsIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpClientDigestCredentials,
+    name: 'HttpClientDigestCredentials',
+    nativeNames: const ['_HttpClientDigestCredentials'],
+    isAssignable: (v) => v is HttpClientDigestCredentials,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 2 ||
+            positionalArgs[0] is! String ||
+            positionalArgs[1] is! String) {
+          throw RuntimeD4rtException(
+            'HttpClientDigestCredentials requires username and password '
+            'arguments.',
+          );
+        }
+        return HttpClientDigestCredentials(
+          positionalArgs[0] as String,
+          positionalArgs[1] as String,
+        );
+      },
+    },
+  );
+}
+
+class HttpClientBearerCredentialsIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpClientBearerCredentials,
+    name: 'HttpClientBearerCredentials',
+    nativeNames: const ['_HttpClientBearerCredentials'],
+    isAssignable: (v) => v is HttpClientBearerCredentials,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'HttpClientBearerCredentials requires a token argument.',
+          );
+        }
+        return HttpClientBearerCredentials(positionalArgs[0] as String);
+      },
+    },
+  );
+}
+
+/// `HttpDate` — the RFC-1123 date codec, and the whole of it.
+///
+/// `class HttpDate { HttpDate._(); static String format(DateTime); static
+/// DateTime parse(String); }` — every other member is private, so two static
+/// methods and no instances is the complete public surface.
+///
+/// The alternative to bridging it is a script parsing HTTP dates by hand, and
+/// the reason that is worse than tedious is `parse`: the SDK accepts three
+/// formats (RFC-1123, RFC-850 and asctime) because servers emit all three. A
+/// hand-rolled parser handles the first and silently rejects the others, which
+/// looks like a malformed response rather than a missing branch.
+class HttpDateIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpDate,
+    name: 'HttpDate',
+    // The SDK's constructor is private, so nothing a script writes can produce
+    // one — but `isAbstract` is what turns `HttpDate()` from a silent success
+    // into the rejection Dart itself gives.
+    isAbstract: true,
+    isAssignable: (v) => v is HttpDate,
+    typeParameterCount: 0,
+    staticMethods: {
+      'format': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! DateTime) {
+          throw RuntimeD4rtException(
+            'HttpDate.format requires a single DateTime argument.',
+          );
+        }
+        return HttpDate.format(positionalArgs[0] as DateTime);
+      },
+      'parse': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'HttpDate.parse requires a single String argument.',
+          );
+        }
+        // The SDK throws `HttpException` for an unparseable date, and that is
+        // deliberately not caught and rewrapped here: `HttpException` is
+        // bridged, so a script can catch the real thing, and a rewrap would
+        // turn a handleable failure into an interpreter error.
+        return HttpDate.parse(positionalArgs[0] as String);
+      },
+    },
+  );
+}
+
+/// `RedirectInfo` — one hop of a redirect chain.
+///
+/// `abstract interface class RedirectInfo { int get statusCode; String get
+/// method; Uri get location; }`. No constructor, so a script only ever
+/// receives one — from `HttpClientResponse.redirects` or
+/// `RedirectException.redirects`, both of which have been bridged since long
+/// before this type had a name.
+///
+/// That gap is the dead-end shape SCC62 named: the getter resolves, the call
+/// succeeds, and the script holds a list whose elements it cannot read. The
+/// `nativeNames` entry is what closes it — the value arriving from either
+/// getter is an SDK-private `_RedirectInfo`, and without the claim it resolves
+/// to no bridge and is inert.
+class RedirectInfoIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: RedirectInfo,
+    name: 'RedirectInfo',
+    nativeNames: const ['_RedirectInfo'],
+    isAbstract: true,
+    isAssignable: (v) => v is RedirectInfo,
+    typeParameterCount: 0,
+    getters: {
+      'statusCode': (visitor, target) => (target as RedirectInfo).statusCode,
+      'method': (visitor, target) => (target as RedirectInfo).method,
+      'location': (visitor, target) => (target as RedirectInfo).location,
+    },
+  );
+}
+
+/// `HttpClientResponseCompressionState` — what happened to the response body.
+///
+/// The value of `HttpClientResponse.compressionState`, and the second half of
+/// the same dead end `RedirectInfo` above closed.
+///
+/// Unlike `SameSite` and `ProcessStartMode` — the other two constant families
+/// in this stdlib, both of which are final classes with static const instances
+/// — this one is a genuine Dart `enum`, so `name`, `index` and `values` are
+/// real members rather than something a bridge would be synthesising.
+class HttpClientResponseCompressionStateIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HttpClientResponseCompressionState,
+    name: 'HttpClientResponseCompressionState',
+    isAssignable: (v) => v is HttpClientResponseCompressionState,
+    typeParameterCount: 0,
+    staticGetters: {
+      'notCompressed': (visitor) =>
+          HttpClientResponseCompressionState.notCompressed,
+      'decompressed': (visitor) =>
+          HttpClientResponseCompressionState.decompressed,
+      'compressed': (visitor) => HttpClientResponseCompressionState.compressed,
+      'values': (visitor) => HttpClientResponseCompressionState.values,
+    },
+    methods: {
+      'toString': (visitor, target, positionalArgs, namedArgs, _) =>
+          (target as HttpClientResponseCompressionState).toString(),
+    },
+    getters: {
+      'name': (visitor, target) =>
+          (target as HttpClientResponseCompressionState).name,
+      'index': (visitor, target) =>
+          (target as HttpClientResponseCompressionState).index,
+    },
+  );
+}
+
+class IoHttpStdlib {
+  static void register(Environment environment) {
+    environment.defineBridge(HttpClientIo.definition);
+    environment.defineBridge(HttpServerIo.definition);
+    environment.defineBridge(HttpRequestIo.definition);
+    environment.defineBridge(HttpResponseIo.definition);
+    environment.defineBridge(HttpSessionIo.definition);
+    environment.defineBridge(HttpConnectionInfoIo.definition);
+    environment.defineBridge(HttpConnectionsInfoIo.definition);
+    environment.defineBridge(HttpClientRequestIo.definition);
+    environment.defineBridge(HttpClientResponseIo.definition);
+    environment.defineBridge(HttpHeadersIo.definition);
+    environment.defineBridge(ContentTypeIo.definition);
+    environment.defineBridge(CookieIo.definition);
+    environment.defineBridge(SameSiteIo.definition);
+    environment.defineBridge(HeaderValueIo.definition);
+    environment.defineBridge(HttpExceptionIo.definition);
+    environment.defineBridge(RedirectExceptionIo.definition);
+    environment.defineBridge(HttpStatusIo.definition);
+
+    // The WebSocket block (SCC63). Registered from here rather than from its
+    // own registrar because these names arrive through the same `dart:_http`
+    // re-export as everything above — a second registrar would make the import
+    // gate two things to keep in step instead of one.
+    environment.defineBridge(WebSocketIo.definition);
+    environment.defineBridge(WebSocketTransformerIo.definition);
+    environment.defineBridge(WebSocketExceptionIo.definition);
+    environment.defineBridge(WebSocketStatusIo.definition);
+    environment.defineBridge(CompressionOptionsIo.definition);
+
+    // The credentials block (SCC64). These four were registered as bare
+    // `NativeFunction`s — construction worked, but the names were callable
+    // values rather than types, so `x is HttpClientBasicCredentials` did not
+    // ask a type question at all.
+    environment.defineBridge(HttpClientCredentialsIo.definition);
+    environment.defineBridge(HttpClientBasicCredentialsIo.definition);
+    environment.defineBridge(HttpClientDigestCredentialsIo.definition);
+    environment.defineBridge(HttpClientBearerCredentialsIo.definition);
+
+    // The last three re-exports (SCC65). `RedirectInfo` and
+    // `HttpClientResponseCompressionState` are reached only through
+    // `HttpClientResponse` getters that have been bridged all along, so until
+    // now those getters returned values a script could not name or read.
+    environment.defineBridge(HttpDateIo.definition);
+    environment.defineBridge(RedirectInfoIo.definition);
+    environment.defineBridge(HttpClientResponseCompressionStateIo.definition);
+  }
+}

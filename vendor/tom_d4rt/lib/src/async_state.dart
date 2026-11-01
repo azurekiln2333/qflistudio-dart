@@ -1,0 +1,526 @@
+import 'dart:async';
+
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:tom_d4rt/src/environment.dart';
+import 'package:tom_d4rt/src/callable.dart';
+import 'package:tom_d4rt/src/exceptions.dart';
+
+/// Represents the state of an ongoing asynchronous function execution.
+/// This object tracks the progress and context needed for resumption.
+class AsyncExecutionState {
+  /// The unique environment for this specific function call.
+  final Environment environment;
+
+  /// The completer associated with the Future returned to the caller.
+  final Completer<Object?> completer;
+
+  /// Whether this call's state machine is already advancing synchronously.
+  /// A catch/finally transfer requests another pass instead of recursing or
+  /// inserting a microtask before the next real suspension.
+  bool isRunning = false;
+
+  /// A synchronous control transfer selected a new state during the last pass.
+  bool resumeRequested = false;
+
+  /// An identifier for the next block of code (state) to execute.
+  /// This could be an integer index, an AST node reference, etc.
+  /// (Needs further definition based on the state machine implementation).
+  AstNode? nextStateIdentifier;
+
+  /// The result value from the most recently completed Future (from await).
+  ///
+  /// Note this is the *most recent* result, not "the result of the await site
+  /// being resumed" — those coincide only when a statement contains a single
+  /// await. For per-site replay use [resolvedAwaitResults]; this slot remains
+  /// the completion value the state machine falls back to.
+  Object? lastAwaitResult;
+
+  /// Results of the await sites already resolved while resuming the statement
+  /// currently in flight, keyed by the `AwaitExpression` node itself.
+  ///
+  /// SCC40: resuming a statement means re-evaluating it from the top, so every
+  /// await it contains is visited again. With only [lastAwaitResult] to consult,
+  /// each of those visits returned the same value — so `(await a) + (await b)`
+  /// evaluated to `'AA'`, a silent wrong answer rather than a crash. Keying by
+  /// node lets an already-resolved site replay *its own* value while a site that
+  /// has not been reached yet still suspends properly.
+  ///
+  /// Scoped to one evaluation of one statement: [resumingStatementHasMoreAwaits]
+  /// says whether that evaluation is still in progress, and the state machine
+  /// clears this map as soon as it is not. A loop body re-enters the identical
+  /// AST node on every iteration, so a map that outlived the statement would
+  /// replay the previous iteration's value.
+  ///
+  /// Keyed by IDENTITY, matching the `tom_d4rt_ast` twin, where it is load-
+  /// bearing: `SAstNode` overrides `==` with `equals()`, a `toJson()` deep
+  /// diff, so a plain map there would run that diff on every lookup and would
+  /// fuse two await sites whose entire subtrees serialize identically.
+  /// Analyzer nodes already compare by identity; spelling it the same way in
+  /// both keeps the two files diffable.
+  final Map<AstNode, Object?> resolvedAwaitResults =
+      Map<AstNode, Object?>.identity();
+
+  /// What the completed iterations of a suspended collection-literal `for`
+  /// element produced, keyed by the element node (SCF43).
+  ///
+  /// Replay re-evaluates the whole literal, so without this a loop would run
+  /// its earlier iterations again, and [resolvedAwaitResults], keyed by the
+  /// await NODE every iteration shares, would hand the second iteration the
+  /// first one's value. An entry is written only when an iteration SUSPENDS
+  /// and is deleted when the literal completes, so it lives exactly across the
+  /// replay window: a `for` element that never suspends (a sync helper called
+  /// twice in one statement, a loop condition) never records anything.
+  final Map<AstNode, List<Object>> collectionForReplay =
+      Map<AstNode, List<Object>>.identity();
+
+  /// Ends the replay scope of the statement in flight: both per-evaluation
+  /// caches go together, because both describe that one evaluation.
+  void clearStatementReplay() {
+    resolvedAwaitResults.clear();
+    collectionForReplay.clear();
+  }
+
+  /// Set while resuming a statement that still has an unreached await site.
+  ///
+  /// The state machine consults it after `_determineNextNodeAfterAwait` to
+  /// decide whether [resolvedAwaitResults] survives into the next step.
+  bool resumingStatementHasMoreAwaits = false;
+
+  /// The error from the most recently completed Future (if it failed).
+  Object? lastAwaitError;
+
+  /// The stack trace from the most recently completed Future (if it failed).
+  StackTrace? lastAwaitStackTrace;
+
+  /// Optional: Store the iterator for ongoing for-in loops.
+  Iterator<Object?>? currentForInIterator;
+
+  /// Optional: Flag for standard for-loops.
+  bool forLoopInitialized = true;
+
+  /// Optional: Environment for the current standard for-loop scope.
+  Environment? forLoopEnvironment;
+
+  /// The child environment each catch clause's body runs in, by clause.
+  ///
+  /// SCE79. `_handleAsyncError` used to define the exception variable in the
+  /// FUNCTION's environment — its own comment said "can cause collisions" —
+  /// so in an async function the variable outlived its block and, worse,
+  /// silently overwrote a caller's local of the same name. `e` is one of the
+  /// most common names there is, and nothing threw or logged: the value was
+  /// simply wrong from that point on. `visitTryStatement` has always created a
+  /// child environment, which is what Dart requires.
+  ///
+  /// WHY A MAP AND NOT A STACK, which is the design question this posed. A
+  /// stack has to be POPPED, and the state machine resumes at a node rather
+  /// than executing a block — so every exit from a catch block (fallthrough,
+  /// return, rethrow, break, an error) would need to pop, and one missed exit
+  /// leaks the scope again in a way nothing would notice. Keyed by clause, the
+  /// binding is SELECTED structurally instead: a node lexically inside the
+  /// clause gets the environment, a node outside it never asks. There is no
+  /// exit to instrument because there is nothing to undo.
+  ///
+  /// A re-entered clause overwrites its entry, so a try inside a loop gets a
+  /// fresh environment per iteration rather than resuming a stale one.
+  ///
+  /// KEYED BY IDENTITY, and load-bearing in the `tom_d4rt_ast` twin for the
+  /// same reason [doBodiesStarted] records: `SAstNode` overrides `==` with a
+  /// structural `toJson()` comparison, so a plain Map there would treat two
+  /// identical-looking catch clauses as one.
+  final Map<CatchClause, Environment> catchEnvironments =
+      Map<CatchClause, Environment>.identity();
+
+  /// A cascade's target value, memoised for the duration of that cascade.
+  ///
+  /// SCE81, and the reason option (b) was reachable at all. Dart evaluates a
+  /// cascade's target ONCE and then runs its sections in order for their side
+  /// effects. The interpreter drives `await` by REPLAY, so a section that
+  /// suspends means the cascade is re-entered — and without these two maps the
+  /// target would be re-evaluated and every earlier section re-run:
+  /// `sb..write('a')..write(await f())` would write `'a'` twice.
+  ///
+  /// Keyed by the cascade node, so each cascade in flight has its own entry.
+  /// Removed as soon as the cascade completes, which is what lets a cascade
+  /// inside a loop start fresh on the next iteration rather than skipping
+  /// every section it ran last time.
+  ///
+  /// KEYED BY IDENTITY, load-bearing in the `tom_d4rt_ast` twin for the reason
+  /// [doBodiesStarted] records: `SAstNode` overrides `==` with a structural
+  /// `toJson()` comparison, so a plain Map there would treat two
+  /// identical-looking cascades as one.
+  final Map<CascadeExpression, Object?> cascadeTargets =
+      Map<CascadeExpression, Object?>.identity();
+
+  /// The cascade sections that have already run to completion.
+  ///
+  /// SCE81. Replay skips these, which is what stops an earlier section's side
+  /// effect happening twice. Cleared per cascade by [cascadeTargets]'s owner
+  /// when that cascade finishes.
+  final Set<AstNode> completedCascadeSections = Set<AstNode>.identity();
+
+  /// Stack of loop environments for nested loops
+  final List<Environment> loopEnvironmentStack = [];
+
+  /// Stack of initialization flags for nested loops
+  final List<bool> loopInitializedStack = [];
+
+  /// Stack of ForStatement nodes corresponding to the environments
+  final List<ForStatement> loopNodeStack = [];
+
+  /// Map of ForStatement -> Iterator for for-in loops
+  final Map<ForStatement, Iterator<Object?>?> forInIteratorMap = {};
+
+  /// Stack of loop nodes (ForStatement, WhileStatement, etc.) for break/continue.
+  final List<AstNode> loopStack = [];
+
+  /// Flag to indicate that a `continue` is being handled for a `for` loop.
+  bool isHandlingContinue = false;
+
+  /// Optional: A reference back to the function definition might be useful.
+  final InterpretedFunction function;
+
+  /// NEW FLAG
+  bool resumedFromInitializer = false;
+
+  /// Track pending finally block to execute after try/catch
+  Block? pendingFinallyBlock;
+
+  /// Track the error currently being handled (either from await or sync throw)
+  Object? currentError;
+
+  /// Track the stack trace currently being handled (either from await or sync throw)
+  StackTrace? currentStackTrace;
+
+  /// Track the TryStatement we are currently inside or handling
+  TryStatement? activeTryStatement;
+
+  /// Store return value if a return happens inside a try with a finally.
+  Object? returnAfterFinally;
+
+  /// An error that is only *passing through* a `finally` block: it was raised in
+  /// a protected region that has no matching catch clause, so it must be
+  /// re-raised at the enclosing try once the finally has finished.
+  ///
+  /// SCC12: it cannot simply be left in [currentError] while the finally runs.
+  /// The state machine clears [currentError] after every statement that
+  /// completes normally, so an error parked there is erased by the first
+  /// statement of the finally block — which is how an exception thrown inside
+  /// `try { … } finally { … }` inside an async function used to vanish
+  /// altogether, leaving the enclosing `catch` unrun.
+  Object? errorAfterFinally;
+
+  /// The stack trace belonging to [errorAfterFinally].
+  StackTrace? errorAfterFinallyStackTrace;
+
+  /// The `try` whose finally block [errorAfterFinally] is waiting for. Non-null
+  /// exactly while an error is held, and used to recognise the moment the block
+  /// ends — the error must resume at the *enclosing* try, not this one.
+  TryStatement? errorAfterFinallyTry;
+
+  /// Set when the finally block named by [errorAfterFinallyTry] has finished, so
+  /// the next state-machine step re-raises the held error instead of executing
+  /// the statement that follows the try.
+  bool resumeErrorAfterFinally = false;
+
+  /// Flag to indicate if we are currently executing a catch block body.
+  bool isHandlingErrorForRethrow = false;
+
+  /// Store the original exception wrapped for potential rethrow.
+  InternalInterpreterD4rtException? originalErrorForRethrow;
+
+  /// Flag to indicate we are currently executing a rethrow statement
+  /// (as opposed to just being in a catch block)
+  bool isCurrentlyRethrowing = false;
+
+  /// Flag to indicate if we are resuming an invocation with await in arguments
+  /// When true, await expressions should return the last resolved value instead of suspending
+  bool isInvocationResumptionMode = false;
+
+  /// Fields for await for loop processing
+  List<Object?>? currentAwaitForList;
+
+  /// Current index when processing await for loops with stream conversion.
+  /// Used to track position in the converted list from a stream.
+  int? currentAwaitForIndex;
+
+  /// Whether the pending suspension is an `await for`'s `moveNext()`.
+  ///
+  /// SCE16. This used to be `awaitingStreamConversion`, and the name was
+  /// accurate: the loop suspended ONCE on `stream.toList()` and then walked the
+  /// list. That made `await for` eager — every element was produced before the
+  /// body ran once, a `break` could not stop the producer, and a loop over an
+  /// infinite stream never ran its body at all because `toList()` never
+  /// completes. The loop now suspends once per element on
+  /// [StreamIterator.moveNext], which is what `await for` means.
+  bool awaitingStreamMoveNext = false;
+
+  /// Stack of stream iterators for nested await-for loops.
+  ///
+  /// Parallel to [awaitForNodeStack]. Each entry owns a subscription and MUST
+  /// be cancelled when its loop is left — see [truncateLoopStacks].
+  final List<StreamIterator<Object?>> awaitForIteratorStack = [];
+
+  /// Whether each nested await-for loop currently holds an unconsumed element.
+  ///
+  /// Parallel to [awaitForNodeStack]. The loop's handler is re-entered both
+  /// after a `moveNext()` resumption and after its body finishes, and this is
+  /// what tells those apart: with an element in hand it binds and runs the
+  /// body, without one it asks for the next.
+  final List<bool> awaitForHasElementStack = [];
+
+  /// Stack of ForStatement nodes for nested await-for loops
+  /// Used to track which await-for loop we're in
+  final List<ForStatement> awaitForNodeStack = [];
+
+  /// The `do` loops whose body has already been entered.
+  ///
+  /// SCE19. The state machine re-enters a `DoStatement` node for two different
+  /// reasons — arriving at the loop from the statement before it, and coming
+  /// back from the end of its body — and it used to assume the second,
+  /// evaluating the condition every time. So `do { n++; } while (false);`
+  /// never ran its body at all. Loops whose condition is true on entry gave the
+  /// right answer, which is why nothing caught it.
+  ///
+  /// Membership is what tells the two arrivals apart: absent means the body has
+  /// not run yet and must, present means the body has finished and the
+  /// condition decides. `continue` deliberately leaves the entry in place — it
+  /// returns to the loop from INSIDE, and Dart evaluates the condition for it
+  /// (F-SCD4-13 pins that).
+  ///
+  /// Keyed by IDENTITY, and load-bearing in the `tom_d4rt_ast` twin: `SAstNode`
+  /// overrides `==` with a structural `toJson()` comparison, so a plain Set
+  /// there would treat two identical-looking `do` loops as one.
+  final Set<DoStatement> doBodiesStarted = Set<DoStatement>.identity();
+
+  /// How deep each loop stack was when a `for` loop was entered.
+  ///
+  /// WHY. Leaving a loop — at its end, or by `break` / `continue` from inside
+  /// it — must remove exactly what it and the loops nested in it pushed, and
+  /// the stacks cannot answer that themselves: they are not parallel. A for-in
+  /// over an existing variable pushes a node and no environment, a for-in
+  /// that declares one pushes its environment only on the first element, and
+  /// only a classic `for` pushes an initialisation flag. Popping "the last
+  /// entry" of each, which `break` used to do, left the wrong loop whenever
+  /// those shapes were nested. Recording the depths on entry makes the exit
+  /// exact whatever was pushed in between.
+  ///
+  /// Keyed by identity: the node is the loop, not a structurally equal one.
+  final Map<AstNode, LoopStackDepths> loopEntryDepths = Map.identity();
+
+  /// Records that [loop] is being entered, before it pushes anything.
+  void recordLoopEntry(AstNode loop) {
+    loopEntryDepths[loop] = LoopStackDepths(
+      nodes: loopNodeStack.length,
+      environments: loopEnvironmentStack.length,
+      initialized: loopInitializedStack.length,
+      awaitFor: awaitForNodeStack.length,
+    );
+  }
+
+  /// Restores every loop stack to [depths], forgetting the loops that are
+  /// removed — so a loop entered again later starts from scratch instead of
+  /// resuming a stale iterator or list.
+  void truncateLoopStacks(LoopStackDepths depths) {
+    for (final node in loopNodeStack.skip(depths.nodes)) {
+      forInIteratorMap.remove(node);
+      loopEntryDepths.remove(node);
+    }
+    for (final node in awaitForNodeStack.skip(depths.awaitFor)) {
+      loopEntryDepths.remove(node);
+    }
+    // SCE16: an await-for being left owns a live subscription. Cancelling it is
+    // what stops the producer — an `async*` generator resumes at its `yield`
+    // and runs its `finally` blocks, and an infinite stream stops arriving.
+    // Leaving it uncancelled is how a `break` used to mean nothing to the
+    // stream.
+    //
+    // NOT awaited, because every caller of this is a synchronous exit path in
+    // the state machine (break, continue, loop end, an exception unwinding).
+    // The cancel still happens promptly — it is the ORDERING against code after
+    // the loop that is not guaranteed, which is why a test that observes a
+    // generator's `finally` has to await a turn first.
+    for (final iterator in awaitForIteratorStack.skip(depths.awaitFor)) {
+      unawaited(iterator.cancel().catchError((Object _) {}));
+    }
+    _shrink(loopNodeStack, depths.nodes);
+    _shrink(loopEnvironmentStack, depths.environments);
+    _shrink(loopInitializedStack, depths.initialized);
+    _shrink(awaitForNodeStack, depths.awaitFor);
+    _shrink(awaitForIteratorStack, depths.awaitFor);
+    _shrink(awaitForHasElementStack, depths.awaitFor);
+    if (awaitForNodeStack.isEmpty) {
+      currentAwaitForList = null;
+      currentAwaitForIndex = null;
+    }
+  }
+
+  static void _shrink(List<Object?> stack, int depth) {
+    if (stack.length > depth) stack.removeRange(depth, stack.length);
+  }
+
+  /// For async* generators: the stream controller to send yields to
+  StreamController<Object?>? generatorStreamController;
+
+  /// For async* generators: flag indicating this is a generator execution
+  bool get isGenerator => generatorStreamController != null;
+
+  /// A `break` or `continue` waiting for the `finally` blocks it crosses
+  /// (SCF6). Set when the jump leaves a try with a non-empty finally on its
+  /// way to [PendingJump.target]; consulted where each of those finallys ends;
+  /// replaced by a `return`, a `throw` or another jump that leaves the
+  /// running finally, as Dart replaces an abrupt completion.
+  PendingJump? pendingJump;
+
+  /// For async* generators: what the listener has asked for (SCF4). Null
+  /// outside a generator.
+  AsyncGeneratorGate? generatorGate;
+
+  /// Creates a new async execution state.
+  ///
+  /// [environment] The execution environment for the async function.
+  /// [completer] The completer that will complete when the function finishes.
+  /// [nextStateIdentifier] The AST node representing the next state to execute.
+  /// [function] The interpreted function being executed asynchronously.
+  AsyncExecutionState({
+    required this.environment,
+    required this.completer,
+    required this.nextStateIdentifier,
+    required this.function,
+    this.lastAwaitResult,
+    this.lastAwaitError,
+    this.lastAwaitStackTrace,
+    this.currentForInIterator,
+    this.forLoopInitialized = false,
+    this.forLoopEnvironment,
+    this.pendingFinallyBlock,
+    this.currentError,
+    this.currentStackTrace,
+    this.activeTryStatement,
+    this.returnAfterFinally,
+    this.isHandlingErrorForRethrow = false,
+    this.originalErrorForRethrow,
+    this.isHandlingContinue = false,
+    this.generatorStreamController,
+    this.generatorGate,
+  });
+}
+
+/// The link from an `async*` body back to its listener (SCF4).
+///
+/// Without it a generator ran to completion whatever its subscriber did: a
+/// `yield` added its value and suspended on an already-completed future, so
+/// nothing could pause the body and nothing could stop it. The stream's
+/// `onResume` / `onCancel` now reach the body through this object.
+class AsyncGeneratorGate {
+  /// Set by the subscription's `onCancel`; read at every `yield`.
+  bool cancelled = false;
+
+  Completer<void>? _resume;
+  final Completer<void> _done = Completer<void>();
+
+  /// The subscription resumed; a `yield` waiting on a pause continues.
+  void resume() {
+    final resume = _resume;
+    _resume = null;
+    if (resume != null && !resume.isCompleted) resume.complete();
+  }
+
+  /// The subscription was cancelled. A waiting `yield` wakes and unwinds; the
+  /// returned future completes once the body has run its `finally` blocks,
+  /// which is when Dart completes `StreamSubscription.cancel()`.
+  Future<void> cancel() {
+    cancelled = true;
+    resume();
+    return _done.future;
+  }
+
+  /// The body has finished, by any route.
+  void finished() {
+    if (!_done.isCompleted) _done.complete();
+  }
+
+  /// What a `yield` waits on after adding its value.
+  ///
+  /// One microtask first, so the value is delivered and a consumer that pauses
+  /// on receipt — a `StreamIterator`, which is what `await for` uses — has
+  /// done so before the body looks. Then it waits for as long as the
+  /// subscription stays paused, which is what `async*` backpressure is. A
+  /// cancellation, before or during the wait, completes it with
+  /// [GeneratorCancelledSignal].
+  Future<void> afterYield(StreamController<Object?> controller) async {
+    await Future<void>.microtask(() {});
+    while (!cancelled && controller.isPaused) {
+      await (_resume ??= Completer<void>()).future;
+    }
+    if (cancelled) throw const GeneratorCancelledSignal();
+  }
+}
+
+/// The depth of each loop stack at the moment a loop was entered; see
+/// [AsyncExecutionState.loopEntryDepths].
+class LoopStackDepths {
+  const LoopStackDepths({
+    required this.nodes,
+    required this.environments,
+    required this.initialized,
+    required this.awaitFor,
+  });
+
+  final int nodes;
+  final int environments;
+  final int initialized;
+  final int awaitFor;
+}
+
+/// Represents a request to suspend execution and wait for a Future.
+/// This object is returned by visitor methods when an await is encountered.
+class AsyncSuspensionRequest {
+  /// The Future that needs to be awaited.
+  final Future<Object?> future;
+
+  /// The state object associated with the execution that needs suspension.
+  /// This is needed by the scheduler to know which execution to resume later.
+  final AsyncExecutionState asyncState;
+
+  /// Flag indicating if this suspension is from a yield statement
+  final bool isYieldSuspension;
+
+  /// The `await` site that produced this suspension, when there is one.
+  ///
+  /// SCC40: this is what lets the resolved value be filed against its own await
+  /// expression in [AsyncExecutionState.resolvedAwaitResults] instead of a
+  /// single per-frame slot shared by every await in the statement. Null for
+  /// suspensions the state machine raises itself (yield, await-for stream
+  /// conversion), which resume by a different route and need no per-site replay.
+  final AstNode? awaitNode;
+
+  /// Creates a new async suspension request.
+  ///
+  /// [future] The Future that the interpreter should wait for.
+  /// [asyncState] The current execution state that will be resumed after the Future completes.
+  /// [isYieldSuspension] Whether this suspension is from a yield statement.
+  /// [awaitNode] The `await` expression this suspension came from, if any.
+  AsyncSuspensionRequest(
+    this.future,
+    this.asyncState, {
+    this.isYieldSuspension = false,
+    this.awaitNode,
+  });
+}
+
+/// A jump deferred until the finallys between it and its target have run.
+class PendingJump {
+  const PendingJump({
+    required this.from,
+    required this.target,
+    required this.isContinue,
+  });
+
+  /// The `break` / `continue` statement that started the jump.
+  final AstNode from;
+
+  /// The loop (or `switch`) it leaves or restarts.
+  final AstNode target;
+
+  final bool isContinue;
+}

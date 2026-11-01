@@ -1,0 +1,297 @@
+import 'dart:collection';
+
+import 'package:tom_d4rt/d4rt.dart';
+import 'package:tom_d4rt/src/stdlib/collection/map_named_constructors.dart';
+
+/// Bridged HashMap.
+///
+/// IT RE-DECLARES `Map` MEMBERS THAT THE `HashMap -> Map` EDGE WOULD ALREADY
+/// REACH — among them `cast`, `removeWhere`, `update` and `updateAll`, which
+/// `SplayTreeMap` leaves to the walk. That asymmetry is KEPT, as a decision
+/// (SCE203), not an oversight:
+///
+/// - The hazard shadowing carries is drift: two implementations of one member
+///   on one type, with the leaf winning. The SCC51 shadow differential
+///   (F-SCC51-8, widened by SCE185) invokes every such pair on the same object
+///   and fails on any divergence, so that hazard is now measured, not trusted.
+/// - Member PARITY across the map family is measured over REACHABLE members
+///   (`sce203_family_reachable_parity_test.dart`), where shadowing is
+///   invisible; the only difference it records is `SplayTreeMap`'s sorted-map
+///   API, which is the SDK's.
+///
+/// Deleting the copies would change nothing a script can observe, so it is a
+/// clean-up rather than a fix. `ServerSocket`'s 28 were deleted (sce195)
+/// because they were never covered by the differential; these are.
+class HashMapCollection {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: HashMap,
+    name: 'HashMap',
+    isAssignable: (v) => v is HashMap,
+    typeParameterCount: 2,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            "Constructor HashMap() does not take positional arguments.",
+          );
+        }
+        return HashMap<dynamic, dynamic>();
+      },
+      'from': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 1) {
+          throw RuntimeD4rtException(
+            "Constructor HashMap.from(Map other) expects one positional argument.",
+          );
+        }
+        final otherMap = positionalArgs[0];
+        if (otherMap is Map) {
+          return HashMap<dynamic, dynamic>.from(otherMap);
+        }
+        throw RuntimeD4rtException("Argument to HashMap.from must be a Map.");
+      },
+      'of': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 1) {
+          throw RuntimeD4rtException(
+            "Constructor HashMap.of(Map other) expects one positional argument.",
+          );
+        }
+        final otherMap = positionalArgs[0];
+        if (otherMap is Map) {
+          return HashMap<dynamic, dynamic>.of(otherMap);
+        }
+        throw RuntimeD4rtException("Argument to HashMap.of must be a Map.");
+      },
+      'identity': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            "Constructor HashMap.identity() does not take positional arguments.",
+          );
+        }
+        return HashMap<dynamic, dynamic>.identity();
+      },
+      'fromIterable': (visitor, positionalArgs, namedArgs) =>
+          MapNamedConstructors.fromIterable(
+            'HashMap',
+            HashMap<dynamic, dynamic>.new,
+            visitor,
+            positionalArgs,
+            namedArgs,
+          ),
+      'fromIterables': (visitor, positionalArgs, namedArgs) =>
+          MapNamedConstructors.fromIterables(
+            'HashMap',
+            HashMap<dynamic, dynamic>.new,
+            positionalArgs,
+          ),
+      'fromEntries': (visitor, positionalArgs, namedArgs) =>
+          MapNamedConstructors.fromEntries(
+            'HashMap',
+            HashMap<dynamic, dynamic>.new,
+            positionalArgs,
+          ),
+    },
+    methods: {
+      '[]': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is HashMap && positionalArgs.length == 1) {
+          return target[positionalArgs[0]];
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap[] getter");
+      },
+      'addAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.addAll', atMost: 1);
+        if (target is HashMap && positionalArgs.length == 1) {
+          final otherMap = positionalArgs[0];
+          if (otherMap is Map) {
+            target.addAll(otherMap.cast<dynamic, dynamic>());
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to HashMap.addAll must be a Map.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.addAll");
+      },
+      'clear': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is HashMap && positionalArgs.isEmpty && namedArgs.isEmpty) {
+          target.clear();
+          return null;
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.clear");
+      },
+      'containsKey': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.containsKey', atMost: 1);
+        if (target is HashMap && positionalArgs.length == 1) {
+          return target.containsKey(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.containsKey");
+      },
+      'containsValue': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.containsValue', atMost: 1);
+        if (target is HashMap && positionalArgs.length == 1) {
+          return target.containsValue(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for HashMap.containsValue",
+        );
+      },
+      'forEach': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.forEach', atMost: 1);
+        if (target is HashMap && positionalArgs.length == 1) {
+          final action = positionalArgs[0];
+          if (action is Callable) {
+            target.forEach((key, value) {
+              action.call(visitor, [key, value], {});
+            });
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to HashMap.forEach must be a function.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.forEach");
+      },
+      'putIfAbsent': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.putIfAbsent', atMost: 2);
+        if (target is HashMap && positionalArgs.length == 2) {
+          final key = positionalArgs[0];
+          final ifAbsent = positionalArgs[1];
+          if (ifAbsent is Callable) {
+            return target.putIfAbsent(
+              key,
+              () => ifAbsent.call(visitor, [], {}),
+            );
+          }
+          throw RuntimeD4rtException(
+            "Second argument to HashMap.putIfAbsent (ifAbsent) must be a function.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.putIfAbsent");
+      },
+      'remove': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.remove', atMost: 1);
+        if (target is HashMap && positionalArgs.length == 1) {
+          return target.remove(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.remove");
+      },
+      'removeWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.removeWhere', atMost: 1);
+        if (target is HashMap && positionalArgs.length == 1) {
+          final test = positionalArgs[0];
+          if (test is Callable) {
+            target.removeWhere((key, value) {
+              final result = test.call(visitor, [key, value], {});
+              return result is bool && result;
+            });
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to HashMap.removeWhere must be a function.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.removeWhere");
+      },
+      'update': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.update', atMost: 2);
+        if (target is HashMap && positionalArgs.length == 2) {
+          final key = positionalArgs[0];
+          final update = positionalArgs[1];
+          final ifAbsent = namedArgs['ifAbsent'] as Callable?;
+          if (update is Callable) {
+            return target.update(
+              key,
+              (value) => update.call(visitor, [value], {}),
+              ifAbsent: ifAbsent == null
+                  ? null
+                  : () => ifAbsent.call(visitor, [], {}),
+            );
+          }
+          throw RuntimeD4rtException(
+            "Second argument to HashMap.update must be a function.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.update");
+      },
+      'updateAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'HashMap.updateAll', atMost: 1);
+        if (target is HashMap && positionalArgs.length == 1) {
+          final update = positionalArgs[0];
+          if (update is Callable) {
+            target.updateAll(
+              (key, value) => update.call(visitor, [key, value], {}),
+            );
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to HashMap.updateAll must be a function.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.updateAll");
+      },
+      // No `addEntries` here on purpose. It is inherited from `MapCore` via
+      // the `HashMap -> Map` edge in `CollectionHierarchyCollection`, and
+      // that copy is the correct one: it unwraps a `BridgedInstance<MapEntry>`
+      // (which is what interpreted `MapEntry("a", 1)` produces) before
+      // handing the entries to the native map. The copy that used to live
+      // here did `newEntries.cast()`, which does not unwrap, so every
+      // interpreted MapEntry failed with "type 'BridgedInstance<Object>' is
+      // not a subtype of type 'MapEntry'". `SplayTreeMap` never had a local
+      // copy and was therefore already correct — that asymmetry is what
+      // identified this as shadowing rather than a missing feature.
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is HashMap) {
+          return target.cast<dynamic, dynamic>();
+        }
+        throw RuntimeD4rtException("Invalid arguments for HashMap.cast");
+      },
+    },
+    getters: {
+      'length': (visitor, target) {
+        if (target is HashMap) return target.length;
+        throw RuntimeD4rtException(
+          "Target is not a HashMap for getter 'length'",
+        );
+      },
+      'isEmpty': (visitor, target) {
+        if (target is HashMap) return target.isEmpty;
+        throw RuntimeD4rtException(
+          "Target is not a HashMap for getter 'isEmpty'",
+        );
+      },
+      'isNotEmpty': (visitor, target) {
+        if (target is HashMap) return target.isNotEmpty;
+        throw RuntimeD4rtException(
+          "Target is not a HashMap for getter 'isNotEmpty'",
+        );
+      },
+      'keys': (visitor, target) {
+        if (target is HashMap) return target.keys;
+        throw RuntimeD4rtException("Target is not a HashMap for getter 'keys'");
+      },
+      'values': (visitor, target) {
+        if (target is HashMap) return target.values;
+        throw RuntimeD4rtException(
+          "Target is not a HashMap for getter 'values'",
+        );
+      },
+      'entries': (visitor, target) {
+        if (target is HashMap) return target.entries;
+        throw RuntimeD4rtException(
+          "Target is not a HashMap for getter 'entries'",
+        );
+      },
+      'hashCode': (visitor, target) {
+        if (target is HashMap) return target.hashCode;
+        throw RuntimeD4rtException(
+          "Target is not a HashMap for getter 'hashCode'",
+        );
+      },
+      'runtimeType': (visitor, target) {
+        if (target is HashMap) return target.runtimeType;
+        throw RuntimeD4rtException(
+          "Target is not a HashMap for getter 'runtimeType'",
+        );
+      },
+    },
+  );
+}

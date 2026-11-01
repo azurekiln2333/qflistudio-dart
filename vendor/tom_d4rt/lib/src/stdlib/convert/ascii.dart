@@ -1,0 +1,207 @@
+import 'dart:convert';
+import 'package:tom_d4rt/d4rt.dart';
+import 'fuse_argument.dart';
+
+class AsciiCodecConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: AsciiCodec,
+    name: 'AsciiCodec',
+    isAssignable: (v) => v is AsciiCodec,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        final allowInvalid = namedArgs['allowInvalid'] as bool? ?? false;
+        return AsciiCodec(allowInvalid: allowInvalid);
+      },
+    },
+    methods: {
+      'encode': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'AsciiCodec.encode requires a String argument.',
+          );
+        }
+        return (target as AsciiCodec).encode(positionalArgs[0] as String);
+      },
+      'decode': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! List) {
+          throw RuntimeD4rtException(
+            'AsciiCodec.decode requires a List argument.',
+          );
+        }
+        final allowInvalid = namedArgs['allowInvalid'] as bool?;
+        return (target as AsciiCodec).decode(
+          (positionalArgs[0] as List).cast(),
+          allowInvalid: allowInvalid,
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Codec<List<int>, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'AsciiCodec.fuse',
+              'Codec<List<int>, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as AsciiCodec).fuse(
+          positionalArgs[0] as Codec<List<int>, dynamic>,
+        );
+      },
+    },
+    getters: {
+      'name': (visitor, target) => (target as AsciiCodec).name,
+      'encoder': (visitor, target) => (target as AsciiCodec).encoder,
+      'decoder': (visitor, target) => (target as AsciiCodec).decoder,
+      'inverted': (visitor, target) => (target as AsciiCodec).inverted,
+      'hashCode': (visitor, target) => (target as AsciiCodec).hashCode,
+      'runtimeType': (visitor, target) => (target as AsciiCodec).runtimeType,
+    },
+  );
+}
+
+class AsciiEncoderConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: AsciiEncoder,
+    name: 'AsciiEncoder',
+    isAssignable: (v) => v is AsciiEncoder,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty || namedArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            'AsciiEncoder constructor takes no arguments.',
+          );
+        }
+        return AsciiEncoder();
+      },
+    },
+    methods: {
+      'convert': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'AsciiEncoder.convert requires a String argument.',
+          );
+        }
+        return (target as AsciiEncoder).convert(positionalArgs[0] as String);
+      },
+      'startChunkedConversion':
+          (visitor, target, positionalArgs, namedArgs, _) {
+            if (positionalArgs.length != 1 || positionalArgs[0] is! Sink) {
+              throw RuntimeD4rtException(
+                'startChunkedConversion requires a Sink<List<int>> argument.',
+              );
+            }
+            return (target as AsciiEncoder).startChunkedConversion(
+              D4.adaptSink<List<int>>(positionalArgs[0], 'sink'),
+            );
+          },
+      'bind': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'AsciiEncoder.bind requires a Stream<String> argument.',
+          );
+        }
+        return (target as AsciiEncoder).bind(
+          D4.coerceStream<String>(positionalArgs[0], 'AsciiEncoder.bind'),
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Converter<List<int>, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'AsciiEncoder.fuse',
+              'Converter<List<int>, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as AsciiEncoder).fuse(
+          positionalArgs[0] as Converter<List<int>, dynamic>,
+        );
+      },
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as AsciiEncoder).cast<String, List<int>>();
+      },
+    },
+    getters: {
+      'hashCode': (visitor, target) => (target as AsciiEncoder).hashCode,
+      'runtimeType': (visitor, target) => (target as AsciiEncoder).runtimeType,
+    },
+  );
+}
+
+class AsciiDecoderConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: AsciiDecoder,
+    name: 'AsciiDecoder',
+    isAssignable: (v) => v is AsciiDecoder,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        final allowInvalid = namedArgs['allowInvalid'] as bool? ?? false;
+        return namedArgs.isEmpty
+            ? AsciiDecoder()
+            : AsciiDecoder(allowInvalid: allowInvalid);
+      },
+    },
+    methods: {
+      'convert': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! List) {
+          throw RuntimeD4rtException(
+            'AsciiDecoder.convert requires a List argument.',
+          );
+        }
+        return (target as AsciiDecoder).convert(
+          (positionalArgs[0] as List).cast(),
+        );
+      },
+      'startChunkedConversion':
+          (visitor, target, positionalArgs, namedArgs, _) {
+            if (positionalArgs.length != 1 || positionalArgs[0] is! Sink) {
+              throw RuntimeD4rtException(
+                'startChunkedConversion requires a Sink<String> argument.',
+              );
+            }
+            return (target as AsciiDecoder).startChunkedConversion(
+              D4.adaptSink<String>(positionalArgs[0], 'sink'),
+            );
+          },
+      'bind': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'AsciiDecoder.bind requires a Stream<List<int>> argument.',
+          );
+        }
+        return (target as AsciiDecoder).bind(
+          D4.coerceByteStream(positionalArgs[0], 'AsciiDecoder.bind'),
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Converter<String, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'AsciiDecoder.fuse',
+              'Converter<String, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as AsciiDecoder).fuse(
+          positionalArgs[0] as Converter<String, dynamic>,
+        );
+      },
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as AsciiDecoder).cast<List<int>, String>();
+      },
+    },
+    getters: {
+      'hashCode': (visitor, target) => (target as AsciiDecoder).hashCode,
+      'runtimeType': (visitor, target) => (target as AsciiDecoder).runtimeType,
+    },
+  );
+}

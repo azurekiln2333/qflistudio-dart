@@ -1,0 +1,8 @@
+name: tom_d4rt
+version: 1.229.0+qfli.1
+publish_to: none
+environment:
+  sdk: ^3.11.5
+dependencies:
+  analyzer: 8.4.1
+  pub_semver: ^2.2.0

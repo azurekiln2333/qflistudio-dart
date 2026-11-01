@@ -1,0 +1,240 @@
+import 'dart:convert';
+import 'package:tom_d4rt/d4rt.dart';
+import 'fuse_argument.dart';
+
+class Base64CodecConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Base64Codec,
+    name: 'Base64Codec',
+    isAssignable: (v) => v is Base64Codec,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty || namedArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            'Base64Codec constructor takes no arguments.',
+          );
+        }
+        return Base64Codec();
+      },
+      'urlSafe': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty || namedArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            'Base64Codec.urlSafe constructor takes no arguments.',
+          );
+        }
+        return Base64Codec.urlSafe();
+      },
+    },
+    methods: {
+      'encode': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! List) {
+          throw RuntimeD4rtException(
+            'Base64Codec.encode requires a List argument.',
+          );
+        }
+        return (target as Base64Codec).encode(
+          (positionalArgs[0] as List).cast(),
+        );
+      },
+      'decode': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'Base64Codec.decode requires a String argument.',
+          );
+        }
+        return (target as Base64Codec).decode(positionalArgs[0] as String);
+      },
+      'normalize': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'Base64Codec.normalize requires a String argument.',
+          );
+        }
+        final start = positionalArgs.get<int>(1) ?? 0;
+        final end = positionalArgs.get<int?>(2);
+        return (target as Base64Codec).normalize(
+          positionalArgs[0] as String,
+          start,
+          end,
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Codec<String, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'Base64Codec.fuse',
+              'Codec<String, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as Base64Codec).fuse(
+          positionalArgs[0] as Codec<String, dynamic>,
+        );
+      },
+    },
+    getters: {
+      'decoder': (visitor, target) => (target as Base64Codec).decoder,
+      'encoder': (visitor, target) => (target as Base64Codec).encoder,
+      'inverted': (visitor, target) => (target as Base64Codec).inverted,
+      'hashCode': (visitor, target) => (target as Base64Codec).hashCode,
+      'runtimeType': (visitor, target) => (target as Base64Codec).runtimeType,
+    },
+  );
+}
+
+class Base64EncoderConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Base64Encoder,
+    name: 'Base64Encoder',
+    isAssignable: (v) => v is Base64Encoder,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty || namedArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            'Base64Encoder constructor takes no arguments.',
+          );
+        }
+        return Base64Encoder();
+      },
+      'urlSafe': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty || namedArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            'Base64Encoder.urlSafe factory constructor takes no arguments.',
+          );
+        }
+        return Base64Encoder.urlSafe();
+      },
+    },
+    methods: {
+      'convert': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! List) {
+          throw RuntimeD4rtException(
+            'Base64Encoder.convert requires a List argument.',
+          );
+        }
+        return (target as Base64Encoder).convert(
+          (positionalArgs[0] as List).cast(),
+        );
+      },
+      'startChunkedConversion':
+          (visitor, target, positionalArgs, namedArgs, _) {
+            if (positionalArgs.length != 1 || positionalArgs[0] is! Sink) {
+              throw RuntimeD4rtException(
+                'startChunkedConversion requires a Sink<String> argument.',
+              );
+            }
+            return (target as Base64Encoder).startChunkedConversion(
+              D4.adaptSink<String>(positionalArgs[0], 'sink'),
+            );
+          },
+      'bind': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'Base64Encoder.bind requires a Stream<List<int>> argument.',
+          );
+        }
+        return (target as Base64Encoder).bind(
+          D4.coerceByteStream(positionalArgs[0], 'Base64Encoder.bind'),
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Converter<String, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'Base64Encoder.fuse',
+              'Converter<String, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as Base64Encoder).fuse(
+          positionalArgs[0] as Converter<String, dynamic>,
+        );
+      },
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as Base64Encoder).cast<List<int>, String>();
+      },
+    },
+    getters: {
+      'hashCode': (visitor, target) => (target as Base64Encoder).hashCode,
+      'runtimeType': (visitor, target) => (target as Base64Encoder).runtimeType,
+    },
+  );
+}
+
+class Base64DecoderConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Base64Decoder,
+    name: 'Base64Decoder',
+    isAssignable: (v) => v is Base64Decoder,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty || namedArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            'Base64Decoder constructor takes no arguments.',
+          );
+        }
+        return Base64Decoder();
+      },
+    },
+    methods: {
+      'convert': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'Base64Decoder.convert requires a String argument.',
+          );
+        }
+        return (target as Base64Decoder).convert(positionalArgs[0] as String);
+      },
+      'startChunkedConversion':
+          (visitor, target, positionalArgs, namedArgs, _) {
+            if (positionalArgs.length != 1 || positionalArgs[0] is! Sink) {
+              throw RuntimeD4rtException(
+                'startChunkedConversion requires a Sink<List<int>> argument.',
+              );
+            }
+            return (target as Base64Decoder).startChunkedConversion(
+              D4.adaptSink<List<int>>(positionalArgs[0], 'sink'),
+            );
+          },
+      'bind': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'Base64Decoder.bind requires a Stream<String> argument.',
+          );
+        }
+        return (target as Base64Decoder).bind(
+          D4.coerceStream<String>(positionalArgs[0], 'Base64Decoder.bind'),
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Converter<List<int>, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'Base64Decoder.fuse',
+              'Converter<List<int>, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as Base64Decoder).fuse(
+          positionalArgs[0] as Converter<List<int>, dynamic>,
+        );
+      },
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as Base64Decoder).cast<String, List<int>>();
+      },
+    },
+    getters: {
+      'hashCode': (visitor, target) => (target as Base64Decoder).hashCode,
+      'runtimeType': (visitor, target) => (target as Base64Decoder).runtimeType,
+    },
+  );
+}

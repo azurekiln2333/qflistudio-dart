@@ -1,0 +1,217 @@
+import 'dart:typed_data';
+import 'package:tom_d4rt/d4rt.dart';
+
+import 'inherited_list_methods.dart';
+
+class Uint8ClampedListTypedData {
+  static BridgedClass get definition => BridgedClass(
+    name: 'Uint8ClampedList',
+    nativeType: Uint8ClampedList,
+    isAssignable: (v) => v is Uint8ClampedList,
+    typeParameterCount: 0,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length == 1 && positionalArgs[0] is int) {
+          return Uint8ClampedList(positionalArgs[0] as int);
+        }
+        throw RuntimeD4rtException(
+          "Uint8ClampedList constructor expects one int argument (length).",
+        );
+      },
+      'fromList': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length == 1 && positionalArgs[0] is List) {
+          final sourceList = positionalArgs[0] as List;
+          final intList = sourceList.toNativeList().map((e) {
+            if (e is int) return e;
+            throw RuntimeD4rtException(
+              "Uint8ClampedList.fromList expects a List<int>.",
+            );
+          }).toList();
+          return Uint8ClampedList.fromList(intList);
+        }
+        throw RuntimeD4rtException(
+          "Uint8ClampedList.fromList expects one List<int> argument.",
+        );
+      },
+      'view': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty && positionalArgs[0] is ByteBuffer) {
+          final buffer = positionalArgs[0] as ByteBuffer;
+          final offsetInBytes = positionalArgs.length > 1
+              ? positionalArgs[1] as int? ?? 0
+              : 0;
+          final length = positionalArgs.length > 2
+              ? positionalArgs[2] as int?
+              : null;
+          return Uint8ClampedList.view(buffer, offsetInBytes, length);
+        }
+        throw RuntimeD4rtException(
+          "Uint8ClampedList.view expects ByteBuffer and optional offset/length arguments.",
+        );
+      },
+      'sublistView': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty && positionalArgs[0] is TypedData) {
+          final data = positionalArgs[0] as TypedData;
+          final start = positionalArgs.length > 1
+              ? positionalArgs[1] as int? ?? 0
+              : 0;
+          final end = positionalArgs.length > 2
+              ? positionalArgs[2] as int?
+              : null;
+          return Uint8ClampedList.sublistView(data, start, end);
+        }
+        throw RuntimeD4rtException(
+          "Uint8ClampedList.sublistView expects TypedData and optional start/end arguments.",
+        );
+      },
+    },
+    methods: {
+      // Index operators
+      '[]': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is Uint8ClampedList &&
+            positionalArgs.length == 1 &&
+            positionalArgs[0] is int) {
+          return target[positionalArgs[0] as int];
+        }
+        throw RuntimeD4rtException(
+          "Uint8ClampedList[index] expects an int index.",
+        );
+      },
+      '[]=': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is Uint8ClampedList &&
+            positionalArgs.length == 2 &&
+            positionalArgs[0] is int &&
+            positionalArgs[1] is int) {
+          final index = positionalArgs[0] as int;
+          final value = positionalArgs[1] as int;
+          target[index] = value;
+          // SCE185: void, like the SDK operator. The interpreter never reads
+          // this — an index assignment evaluates to the assigned value itself.
+          return null;
+        }
+        throw RuntimeD4rtException(
+          "Uint8ClampedList[index] = value expects int index and int value.",
+        );
+      },
+
+      // List methods
+      'sublist': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Uint8ClampedList.sublist', atMost: 2);
+        final start = positionalArgs.isNotEmpty ? positionalArgs[0] as int : 0;
+        final end = positionalArgs.length > 1
+            ? positionalArgs[1] as int?
+            : null;
+        return (target as Uint8ClampedList).sublist(start, end);
+      },
+      'getRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Uint8ClampedList.getRange', atMost: 2);
+        final start = positionalArgs[0] as int;
+        final end = positionalArgs[1] as int;
+        return (target as Uint8ClampedList).getRange(start, end);
+      },
+      'setRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Uint8ClampedList.setRange', atMost: 4);
+        final start = positionalArgs[0] as int;
+        final end = positionalArgs[1] as int;
+        final iterable = coerceElements<int>(
+          positionalArgs[2],
+          'Uint8ClampedList.setRange',
+        );
+        final skipCount = positionalArgs.length > 3
+            ? positionalArgs[3] as int
+            : 0;
+        (target as Uint8ClampedList).setRange(start, end, iterable, skipCount);
+        return null;
+      },
+      'setAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Uint8ClampedList.setAll', atMost: 2);
+        final at = positionalArgs[0] as int;
+        final iterable = coerceElements<int>(
+          positionalArgs[1],
+          'Uint8ClampedList.setAll',
+        );
+        (target as Uint8ClampedList).setAll(at, iterable);
+        return null;
+      },
+      'fillRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Uint8ClampedList.fillRange', atMost: 3);
+        final start = positionalArgs[0] as int;
+        final end = positionalArgs[1] as int;
+        final fill = positionalArgs.length > 2
+            ? positionalArgs[2] as int?
+            : null;
+        (target as Uint8ClampedList).fillRange(start, end, fill);
+        return null;
+      },
+
+      // SCD27: `buffer` was registered HERE as well as in `getters`,
+      // so `l.buffer()` resolved. In the SDK it is a getter inherited
+      // from `TypedData` and that call does not compile as Dart — the
+      // widening shape, where a script is green here and invalid there.
+      // The getter registration below is the correct one and stays.
+      // Absence pinned by F-SCD27-*.
+      // NOT AN SDK MEMBER, and deliberately so. No typed list declares
+      // `asUint8ListView`: `dart analyze` on a native one answers "The method
+      // 'asUint8ListView' isn't defined". It is a convenience over
+      // `buffer.asUint8List(offsetInBytes, lengthInBytes)`, and it is the
+      // WIDENING SHAPE — a script using it is green in this interpreter and
+      // does not compile as real Dart, so the error surfaces only when the
+      // script leaves here.
+      //
+      // KEPT, and that is a decision rather than an inheritance (sce65). The
+      // gap audit accepts it, all eleven variants are pinned present by
+      // `F-SCC60-3-*`, and nothing in this workspace calls it — so removing it
+      // would be a breaking interpreter change bought for no reader. The
+      // precedent for deletion is scd24's four `InternetAddressType` members
+      // and it does not apply: those were wired to unrelated `Object` members
+      // and returned wrong answers, while this returns what its name says.
+      // `FileSystemEvent`'s four `is*` getters are the same accepted
+      // category, and were already commented this way — which is the whole
+      // defect sce65 names: the acceptance existed, in a document, and not
+      // where a reader meets the member.
+      // See `tom_d4rt/doc/stdlib_sdk_gap_audit.md`.
+      'asUint8ListView': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(
+          positionalArgs,
+          'Uint8ClampedList.asUint8ListView',
+          atMost: 2,
+        );
+        final offsetInBytes = positionalArgs.isNotEmpty
+            ? positionalArgs[0] as int?
+            : null;
+        final length = positionalArgs.length > 1
+            ? positionalArgs[1] as int?
+            : null;
+        return (target as Uint8ClampedList).buffer.asUint8List(
+          offsetInBytes ?? 0,
+          length,
+        );
+      },
+
+      // Standard methods
+      'toString': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as Uint8ClampedList).toString();
+      },
+      '==': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Uint8ClampedList.==', atMost: 1);
+        return (target as Uint8ClampedList) == positionalArgs[0];
+      },
+
+      // Inherited Iterable<int> / List<int> read-only methods.
+      // See inherited_list_methods.dart — these are declared per variant
+      // because the element type has to be reified at the native boundary,
+      // which the generic `List` bridge cannot do. The supertype walk does
+      // reach `List`, so pruning this spread looks safe and is not.
+      ...inheritedListMethods<int>(
+        (t) => t as Uint8ClampedList,
+        className: 'Uint8ClampedList',
+        unmodifiableView: (t) => (t as Uint8ClampedList).asUnmodifiableView(),
+      ),
+    },
+    staticGetters: typedListStaticGetters(Uint8ClampedList.bytesPerElement),
+    setters: inheritedListSetters<int>((t) => t as Uint8ClampedList),
+    getters: {
+      ...typedListGetters<int>((t) => t as Uint8ClampedList),
+      ...inheritedListGetters<int>((t) => t as Uint8ClampedList),
+    },
+  );
+}

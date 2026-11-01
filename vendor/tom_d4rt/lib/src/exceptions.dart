@@ -1,0 +1,916 @@
+import 'bridge/bridged_types.dart';
+
+/// Lightweight, always-on interpreter instrumentation counters.
+///
+/// These are plain integer increments on the hottest interpreter paths — no
+/// allocation, no stack capture — so they are safe to leave compiled in. They
+/// exist to diagnose pathological per-frame cost in embeddings (e.g. the
+/// `particle_field` Flutter sample freeze): a harness reads [callCount] /
+/// [maxDepth] before and after a unit of work to see whether a spike is driven
+/// by call volume or interpreter recursion depth (the latter is what makes
+/// exception-based `return` unwinding expensive — see the perf analysis).
+class D4rtDiag {
+  /// Monotonic count of interpreted function-call entries (`_callImpl`).
+  static int callCount = 0;
+
+  /// Current synchronous interpreter call-nesting depth.
+  static int depth = 0;
+
+  /// High-water mark of [depth] since the last [reset].
+  static int maxDepth = 0;
+
+  /// Per-window allocation counters for the prime per-rebuild garbage
+  /// suspects. The `particle_field` freeze is a stop-the-world major GC of
+  /// ~2.2GB old-gen garbage accumulated at ~22MB/frame; these counters localize
+  /// which interpreter allocation dominates a single interpreted rebuild.
+  static int envAllocs = 0;
+
+  /// Count of interpreted-closure objects materialized in the window.
+  static int closureAllocs = 0;
+
+  /// Count of `InterpretedInstance` objects constructed in the window.
+  static int instanceAllocs = 0;
+
+  /// Count of `BridgedInstance` objects constructed in the window.
+  static int bridgedAllocs = 0;
+
+  /// Resets the windowed counters ([callCount], [maxDepth], and the allocation
+  /// counters). [depth] is the live nesting level and is intentionally left
+  /// untouched.
+  static void reset() {
+    callCount = 0;
+    maxDepth = 0;
+    envAllocs = 0;
+    closureAllocs = 0;
+    instanceAllocs = 0;
+    bridgedAllocs = 0;
+  }
+
+  /// Records entry into an interpreted call frame.
+  static void enterCall() {
+    callCount++;
+    depth++;
+    if (depth > maxDepth) maxDepth = depth;
+  }
+
+  /// Records exit from an interpreted call frame.
+  static void exitCall() {
+    depth--;
+  }
+}
+
+/// Static error reporter that tracks all created [D4rtException]s.
+///
+/// This is used primarily in test modes to detect errors that occurred
+/// during script execution.
+///
+/// Errors can be revoked if they are caught and handled gracefully,
+/// preventing them from causing test failures.
+class ErrorReporter {
+  /// Identity set of tracked errors.
+  ///
+  /// An identity [Set] makes [revokeError] an O(1) `remove` instead of the
+  /// O(n) linear scan a `List.remove` performed — that scan was the dominant
+  /// interpreter CPU cost (see the perf analysis). Exceptions are unique
+  /// objects, so identity membership matches the prior list semantics exactly.
+  /// Insertion order is preserved (identity sets are linked), so [report]
+  /// ordering is unchanged.
+  static final Set<D4rtException> _errors = Set<D4rtException>.identity();
+
+  /// Tracking is **off by default**. It is an opt-in debugging/test aid:
+  /// capturing `StackTrace.current` plus bookkeeping on every exception during
+  /// normal execution is pure overhead. Test harnesses and the REPL call
+  /// [enableTracking] when they need the report.
+  static bool _trackingEnabled = false;
+
+  /// Reports an error to the reporter (only if tracking is enabled).
+  ///
+  /// This is called automatically by the [D4rtException] constructor. The stack
+  /// trace is stored on the exception instance itself (not in a side map), so
+  /// no parallel `Map.remove` is needed on revoke.
+  static void reportError(D4rtException error, [StackTrace? stackTrace]) {
+    if (_trackingEnabled) {
+      _errors.add(error);
+      error.trackedStackTrace = stackTrace ?? StackTrace.current;
+    }
+  }
+
+  /// Temporarily disables error tracking.
+  ///
+  /// This is useful during speculative operations (like trying to parse as expression
+  /// before falling back to statement) where errors are expected and should not be tracked.
+  static void disableTracking() {
+    _trackingEnabled = false;
+  }
+
+  /// Enables error tracking. Off by default; opt in from tests/REPL.
+  static void enableTracking() {
+    _trackingEnabled = true;
+  }
+
+  /// Whether error tracking is currently enabled.
+  static bool get isTrackingEnabled => _trackingEnabled;
+
+  /// Revokes (removes) an error from the reporter.
+  ///
+  /// This should be called when an exception has been caught and handled
+  /// gracefully, and should not count as a test failure.
+  ///
+  /// Returns true if the error was found and removed, false otherwise.
+  static bool revokeError(D4rtException error) {
+    error.trackedStackTrace = null;
+    return _errors.remove(error);
+  }
+
+  /// Revokes all currently tracked errors.
+  ///
+  /// This is useful when a batch of errors occurred during a failed attempt
+  /// (like trying to parse as expression before falling back to statement),
+  /// and all those errors should be discarded.
+  static void revokeAll() {
+    _errors.clear();
+  }
+
+  /// Returns an unmodifiable list of all reported errors.
+  static List<D4rtException> get errors => List.unmodifiable(_errors);
+
+  /// Clears all reported errors.
+  static void clear() {
+    _errors.clear();
+  }
+
+  /// Returns true if any errors have been reported.
+  static bool get hasErrors => _errors.isNotEmpty;
+
+  /// Returns a formatted string with all reported errors.
+  static String get report {
+    if (_errors.isEmpty) return 'No errors reported.';
+    return _errors
+        .map((e) {
+          final stackTrace = e.trackedStackTrace;
+          if (stackTrace != null) {
+            return '$e\nStack trace:\n$stackTrace';
+          }
+          return e.toString();
+        })
+        .join('\n\n');
+  }
+
+  /// Returns a formatted string with all reported errors (without stack traces).
+  static String get reportShort {
+    if (_errors.isEmpty) return 'No errors reported.';
+    return _errors.map((e) => e.toString()).join('\n');
+  }
+}
+
+/// Base class for all D4rt-specific exceptions that should be tracked.
+///
+/// All exceptions are automatically registered with [ErrorReporter] on creation.
+/// If an exception is caught and handled gracefully, call [revoke()] to prevent
+/// it from causing test failures.
+abstract class D4rtException implements Exception {
+  /// The error message.
+  final String message;
+
+  /// Stack trace captured by [ErrorReporter] when tracking is enabled.
+  ///
+  /// Stored on the instance (rather than in a side map) so revoking an error
+  /// is a single O(1) set removal with no parallel map bookkeeping. Null when
+  /// tracking was off at construction time or after the error was revoked.
+  StackTrace? trackedStackTrace;
+
+  /// Whether [message] already names which module failed to load which target.
+  ///
+  /// DFUB13. `loadModule` recurses, so every frame on the way out could prepend
+  /// its own "Failed to load ..." prefix to the same underlying error. Only the
+  /// innermost frame knows the file that actually contains the bad directive,
+  /// so [wrapDirectiveError] sets this when it adds context and consults it to
+  /// stay silent on every outer frame.
+  ///
+  /// It lives on the base class rather than on one subtype because the two
+  /// module loaders report a missing module with *different* exception types —
+  /// the filesystem loader raises [SourceCodeD4rtException], the bundle loader
+  /// raises [RuntimeD4rtException] — and both need the same once-only rule.
+  bool hasDirectiveContext = false;
+
+  /// Creates a [D4rtException] and registers it with the [ErrorReporter].
+  D4rtException(this.message) {
+    ErrorReporter.reportError(this);
+  }
+
+  /// Revokes this error from the ErrorReporter.
+  ///
+  /// Call this when the exception has been caught and handled gracefully,
+  /// and should not count as a test failure.
+  ///
+  /// Returns true if the error was successfully revoked, false if it was
+  /// not found in the reporter (possibly already revoked).
+  ///
+  /// Example:
+  /// ```dart
+  /// try {
+  ///   // Some code that might fail
+  ///   d4rt.eval('badCode');
+  /// } catch (e) {
+  ///   if (e is SourceCodeException) {
+  ///     // Handle the error gracefully
+  ///     print('Handled parse error');
+  ///     e.revoke(); // Don't count this as a test failure
+  ///   }
+  /// }
+  /// ```
+  bool revoke() {
+    return ErrorReporter.revokeError(this);
+  }
+
+  @override
+  String toString();
+}
+
+/// Custom exception for runtime errors during interpretation.
+///
+/// This exception is thrown when the interpreter encounters an error
+/// during code execution, such as accessing undefined variables,
+/// calling non-existent methods, or type mismatches.
+class RuntimeD4rtException extends D4rtException {
+  /// When this runtime error wraps a *native* exception thrown from a bridged
+  /// adapter (method, static method, getter, setter, operator, constructor),
+  /// the original exception object is preserved here. This lets a typed
+  /// `on NativeType` / bare `catch` clause in interpreted code dispatch against
+  /// the real exception type rather than this `RuntimeError` wrapper.
+  /// (OPEN B.5 — U13/U24.)
+  final Object? originalException;
+
+  /// The stack trace that accompanied [originalException] at the point the
+  /// bridged adapter threw it.
+  ///
+  /// Recovering the *value* was never enough on its own. The wrapper is
+  /// constructed in the interpreter's own `catch` block, so an interpreted
+  /// `catch (e, st)` used to receive the trace of the wrap site rather than of
+  /// the throw — which makes `Error.throwWithStackTrace` inert, since preserving
+  /// an earlier trace is the only thing that member does. Carrying the trace
+  /// alongside the value lets `visitTryStatement` hand the script what actually
+  /// happened.
+  final StackTrace? originalStackTrace;
+
+  /// Creates a new runtime error with the given message. When
+  /// [originalException] is supplied, the wrapped native exception stays
+  /// catchable by type; supply [originalStackTrace] from the same `catch`
+  /// clause so the trace survives the wrapping too.
+  RuntimeD4rtException(
+    super.message, {
+    this.originalException,
+    this.originalStackTrace,
+  }) : isResolutionFailure = false;
+
+  /// Whether this error means A NAME DID NOT RESOLVE — a member, operator,
+  /// constructor or variable that the receiver does not have — as opposed to
+  /// something failing inside a member that was found.
+  ///
+  /// SCE77. The gap audit decides whether a member exists by classifying the
+  /// error the interpreter produced, and it did that by MATCHING THE TEXT
+  /// against a hand-written list of wordings. Nothing connected that list to
+  /// the places the interpreter throws from, so a wording the list did not
+  /// know made a whole column silently unfalsifiable: the probe ran, the error
+  /// arrived, and it was scored as *reachable*. That happened twice in
+  /// consecutive todos — SCD36's `Cannot access property 'x' on target of type
+  /// _Foo` left the return-type pass reporting 0 of 411 while blind to every
+  /// gap it existed to find, and SCD39's operator wording did the same to the
+  /// operator column. Both were found by planting a defect; no passing test
+  /// could have found either.
+  ///
+  /// This flag is the tie. It is set by [RuntimeD4rtException.resolutionFailure]
+  /// at the throw site, so the set of resolution failures is STRUCTURAL rather
+  /// than textual and a reworded message cannot silently leave it.
+  ///
+  /// WHY A FLAG AND A NAMED CONSTRUCTOR RATHER THAN A SUBTYPE. Every `catch`
+  /// clause and every `is RuntimeD4rtException` test in both trees keeps
+  /// working unchanged, which SCE67 established is load-bearing: the supertype
+  /// there was ADDED, not swapped, precisely because the hierarchy is consulted
+  /// for control flow in eight places per visitor. A new subtype would have
+  /// changed what those sites see.
+  final bool isResolutionFailure;
+
+  /// A runtime error meaning THE NAME DID NOT RESOLVE.
+  ///
+  /// Use this only where the failure is that a member, operator, constructor or
+  /// variable is ABSENT. Do NOT use it where the name resolved and the
+  /// operation then failed for another reason — an ill-typed operand, a null
+  /// receiver, an unsupported target type. The audit reads this flag as
+  /// "confirmed missing", so a mis-tagged site makes the tool invent gaps,
+  /// which is the one direction it must never move in.
+  RuntimeD4rtException.resolutionFailure(
+    super.message, {
+    this.originalException,
+    this.originalStackTrace,
+  }) : isResolutionFailure = true;
+
+  @override
+  String toString() => 'Runtime Error: $message';
+}
+
+/// Thrown when a member lookup finds no member of that name on the receiver.
+///
+/// **This is a control-flow signal, and that is the reason it exists.** Eight
+/// sites in each mirrored visitor have to distinguish "the member is genuinely
+/// absent, so try extension-method resolution" from "the member was found and
+/// something inside it failed, so propagate that". Before SCC28 they made that
+/// decision with `e.message.contains("Undefined property '$name'")` — a
+/// formatted, human-readable diagnostic used as a branch condition. The wording
+/// was therefore load-bearing: rewording it, in either tree, silently disabled
+/// extension methods for every receiver kind routed through the edited site,
+/// with no analyzer error and a *wrong answer* rather than a crash as the
+/// symptom.
+///
+/// [memberName] carries what the message used to spell, so the message is free
+/// to change. It is compared exactly (`e.memberName == name`) where the old code
+/// asked for a substring, which also removes the case where a member whose name
+/// merely *appeared* in an unrelated diagnostic took the extension branch.
+///
+/// **A subtype of [RuntimeD4rtException], deliberately.** Between a raise site
+/// and the site that inspects it sit roughly forty `on RuntimeD4rtException`
+/// clauses, most of which only re-wrap and re-throw. Making this a sibling type
+/// would have required changing all of them in one commit; making it a subtype
+/// let the conversion land raise site by raise site, with every intermediate
+/// state working. `toString()` is inherited too, so the diagnostics are
+/// unchanged to the byte and no message assertion needed rewriting.
+///
+/// Not to be confused with [D4rtNoSuchMethodError], which the *final* lookup
+/// failures raise — the ones reached after extension resolution and any user
+/// `noSuchMethod` have had their chance. This type marks the intermediate
+/// failures, the ones that are still a question rather than an answer.
+/// **Catchable as `NoSuchMethodError`, like [D4rtNoSuchMethodError] (sce67).**
+/// Asking a receiver for a member it does not have used to report two ways
+/// decided by the member KIND rather than by anything a script can see: a
+/// missing METHOD raised [D4rtNoSuchMethodError] and was catchable as the SDK
+/// type, a missing GETTER raised this and was not. So
+/// `try { ... } on NoSuchMethodError catch (_)` handled one half of the same
+/// failure and missed the other. F-SCC8-5's reasoning — "a missing member is
+/// the same failure real Dart reports at runtime, and asserting the SDK
+/// supertype means a script can catch it the way it would catch the real one"
+/// — does not stop applying at getters.
+///
+/// The supertype is ADDED, not swapped: this stays a [RuntimeD4rtException],
+/// so every existing `on RuntimeD4rtException` clause and every internal
+/// `is UndefinedMemberD4rtException` test is unaffected. Those internal tests
+/// are why the intermediate/final distinction below still holds — they select
+/// on this exact type, never on the SDK supertype.
+///
+/// **STATIC member absence is deliberately NOT given this supertype**, and nor
+/// is [UndefinedNameD4rtException] (scc31). Real Dart rejects `Klass.missing`
+/// and a bare undefined name at COMPILE time, so there is no runtime
+/// `NoSuchMethodError` for a script to catch; inventing one would make d4rt
+/// strictly more catchable than the platform, which is the mistake
+/// [D4rtRangeError] records for `IndexError`. Instance access is different:
+/// d4rt receivers are effectively dynamic, and dynamic access to a missing
+/// member IS a runtime `NoSuchMethodError` in real Dart.
+class UndefinedMemberD4rtException extends RuntimeD4rtException
+    implements NoSuchMethodError {
+  /// The stack trace `Error` requires, sourced from the tracking field this
+  /// type already carries. Null when tracking was off, which is what the SDK
+  /// reports for an error that was never thrown through a zone that captured
+  /// one.
+  @override
+  StackTrace? get stackTrace => trackedStackTrace;
+
+  /// The member that was not found. Compared by equality, never parsed.
+  final String memberName;
+
+  /// The object whose lookup failed, compared by IDENTITY at the decision sites.
+  ///
+  /// SCD87. [memberName] alone cannot separate "this receiver has no such
+  /// member" from "a member that does exist ran, and something *inside it*
+  /// failed to find the same name on a different object". Both are genuine
+  /// `UndefinedMemberD4rtException`s carrying the same name, so the caller's
+  /// extension-lookup branch used to answer for the second — swallowing a real
+  /// error and returning an unrelated value, with nothing logged.
+  ///
+  /// **Identity, not a description.** Two instances of the same class describe
+  /// identically, so a receiver *string* could not separate the failure raised
+  /// for the object in hand from one raised for a different object of the same
+  /// class deeper in the stack. `identical` can.
+  ///
+  /// **Null where no receiver object exists** — a static or prefix lookup. A
+  /// null receiver must never match: `identical(null, target)` is false for any
+  /// real target, so the branch is not taken and the failure propagates, which
+  /// is the conservative direction.
+  final Object? receiver;
+
+  UndefinedMemberD4rtException(
+    super.message, {
+    required this.memberName,
+    this.receiver,
+  });
+}
+
+/// Thrown when a STATIC member lookup fails on a class, enum, bridged class or
+/// extension.
+///
+/// SCD86. Sibling of [UndefinedMemberD4rtException] and deliberately NOT the
+/// same type, because the two failures answer different questions: instance-member
+/// absence gates extension-method lookup, static-member absence gates the
+/// compound-assignment fallback in `visitAssignmentExpression`. Collapsing them
+/// would let one branch answer for the other — the same class of defect SCC28
+/// removed when it stopped those branches reading diagnostic text.
+///
+/// What it replaced was the last message test SCC28 left standing:
+///
+/// ```dart
+/// e.message.contains("Undefined static member")
+/// ```
+///
+/// That line was less fragile than the ones SCC28 converted — it carried no name
+/// check, so no rename could break it — but it was fragile in a way the source
+/// scan could not see. F-SCC28-1 matched on "Undefined property", so the static
+/// wording passed the scan, and a seventh raise site phrased differently would
+/// have passed it too while silently never taking this branch. The six existing
+/// sites compose four different sentences (`on class`, `on enum`, `on bridged
+/// class`, `on extension`) and every one had to keep starting with those three
+/// words.
+///
+/// [memberName] carries what the message spells, so the message is free to
+/// change. **The decision site does not read it**, and that is deliberate: the
+/// condition it replaced had no name check, so using one here would have
+/// narrowed the branch rather than typed it. It is carried for parity with
+/// [UndefinedMemberD4rtException] and so that any future site can ask by
+/// equality instead of by substring.
+///
+/// A subtype of [RuntimeD4rtException] for the reason
+/// [UndefinedMemberD4rtException] documents: the `on RuntimeD4rtException`
+/// clauses between raise and inspection stay working, so the conversion could
+/// land site by site.
+///
+/// **NOT a `NoSuchMethodError`, and that is a decision (sce67).**
+/// [UndefinedMemberD4rtException] was given that SDK supertype so a script can
+/// catch a missing INSTANCE member the way it catches real Dart's. This one
+/// was deliberately left out: real Dart rejects `Klass.missing` at COMPILE
+/// time, so no runtime `NoSuchMethodError` exists for a script to catch, and
+/// adding one would make d4rt strictly more catchable than the platform — the
+/// mistake `D4rtRangeError` records for `IndexError`. Same reasoning as
+/// [UndefinedNameD4rtException], different from the instance case because a
+/// d4rt receiver is effectively dynamic and dynamic member access really does
+/// raise at runtime.
+class UndefinedStaticMemberD4rtException extends RuntimeD4rtException {
+  /// The static member that was not found. Compared by equality, never parsed.
+  final String memberName;
+
+  UndefinedStaticMemberD4rtException(super.message, {required this.memberName});
+}
+
+/// Thrown when a name a script reads resolves to no declaration at all.
+///
+/// **No interpreted `catch` clause may claim this.** In real Dart an undefined
+/// identifier is a compile-time error: the program never runs, so there is no
+/// frame in which a handler could execute. D4rt discovers the same defect later,
+/// during execution, and used to raise a plain [RuntimeD4rtException] — which a
+/// bare `catch (e)` in the script caught like any ordinary runtime condition.
+/// A typo therefore did not fail; it took whichever branch the handler wrote,
+/// and the script continued on a value the author never intended. That is the
+/// one error class where d4rt was *more* permissive than Dart in a way that
+/// hides bugs instead of surfacing them.
+///
+/// Both catch-dispatch sites — `visitTryStatement` and the async state
+/// machine's `_handleAsyncError` — check for this type and decline to match any
+/// clause, so the error unwinds past every handler to the host. `finally` blocks
+/// still run: the property wanted is "no *catch clause* can swallow it", not
+/// "no cleanup happens".
+///
+/// **A subtype of [RuntimeD4rtException], deliberately** — the same reasoning
+/// spelled out on [UndefinedMemberD4rtException]. `Environment.get` throws on
+/// every miss and is called *speculatively* all over the interpreter and the
+/// module loader, each such caller catching [RuntimeD4rtException] to try the
+/// next lookup strategy. A sibling type would have made all of those stop
+/// catching, turning ordinary resolution fallbacks into hard failures.
+///
+/// [name] carries what the message spells, so that code branching on this
+/// failure compares a field rather than parsing a diagnostic.
+class UndefinedNameD4rtException extends RuntimeD4rtException {
+  /// The identifier that resolved to nothing. Compared by equality, never
+  /// parsed.
+  final String name;
+
+  UndefinedNameD4rtException(super.message, {required this.name});
+}
+
+/// Re-wraps [e] under a new [message], keeping the "member absent" signal when
+/// [e] carries one.
+///
+/// Several sites add context to a member-lookup failure on the way out
+/// ("… (accessing property via PropertyAccess 'x')"). Before SCC28 those
+/// preserved the signal *by accident*: they concatenated the original message
+/// into the new one, so an outer `contains("Undefined property 'x'")` still
+/// matched straight through the wrap. Now that the signal is a type, preserving
+/// it has to be deliberate — a plain [RuntimeD4rtException] here would leave the
+/// next frame out unable to tell an absent member from a failed one, which is
+/// precisely the extension-method regression SCC28 exists to prevent.
+///
+/// The original [UndefinedMemberD4rtException.memberName] is carried over rather
+/// than replaced with the wrapping site's own name: the failure being described
+/// is still the inner one, and that is what the substring used to say too.
+RuntimeD4rtException rewrapPreservingMemberSignal(
+  RuntimeD4rtException e,
+  String message,
+) => e is UndefinedMemberD4rtException
+    ? UndefinedMemberD4rtException(
+        message,
+        memberName: e.memberName,
+        // SCD87 — the receiver travels with the signal, or the rewrap would
+        // erase the discriminator and every wrapped failure would look like a
+        // plain absence again.
+        receiver: e.receiver,
+      )
+    : RuntimeD4rtException(message);
+
+/// Thrown when a script names a bridged class by its simple name and two
+/// different libraries in scope declare a class under that name.
+///
+/// This mirrors Dart's own ambiguous-import rule. Once
+/// `package:tom_doc_scanner/…` and `package:tom_md2latex/…` are both imported
+/// unprefixed, the bare name `MarkdownParser` designates nothing in
+/// particular; Dart rejects the reference and asks for a prefix. D4rt does the
+/// same, because the alternative — binding the name to whichever bridge
+/// happened to register last — silently picks a class the author never named,
+/// and the script then fails somewhere else (or, worse, succeeds against the
+/// wrong implementation).
+///
+/// [candidatesByQualifier] maps each qualifier a script can use (the package
+/// name of the declaring library) to the source URI that qualifier resolves
+/// to. Writing `tom_doc_scanner.MarkdownParser` selects one unambiguously.
+class AmbiguousBridgedNameException extends D4rtException {
+  /// The simple name that resolves to more than one bridged class.
+  final String name;
+
+  /// Qualifier → source URI, for every candidate reachable by qualification.
+  final Map<String, String> candidatesByQualifier;
+
+  /// Creates the ambiguity error for [name] over [candidatesByQualifier].
+  AmbiguousBridgedNameException(this.name, this.candidatesByQualifier)
+    : super(_buildMessage(name, candidatesByQualifier));
+
+  static String _buildMessage(
+    String name,
+    Map<String, String> candidatesByQualifier,
+  ) {
+    final buffer = StringBuffer()
+      ..write(
+        "The name '$name' is declared by more than one library in "
+        "scope, so it cannot be used unqualified. Candidates:",
+      );
+    candidatesByQualifier.forEach((qualifier, sourceUri) {
+      buffer.write("\n  $qualifier.$name  ($sourceUri)");
+    });
+    buffer.write(
+      "\nQualify the reference with the package name shown above, "
+      "e.g. '${candidatesByQualifier.keys.first}.$name'.",
+    );
+    return buffer.toString();
+  }
+
+  @override
+  String toString() => 'Ambiguous Name Error: $message';
+}
+
+/// Exception for state-related errors in D4rt components.
+class StateD4rtException extends D4rtException {
+  /// Creates a new state error with the given message.
+  StateD4rtException(super.message);
+
+  @override
+  String toString() => 'State Error: $message';
+}
+
+/// Exception for argument-related errors in D4rt components.
+class ArgumentD4rtException extends D4rtException {
+  /// Creates a new argument error with the given message.
+  ArgumentD4rtException(super.message);
+
+  @override
+  String toString() => 'Argument Error: $message';
+}
+
+/// Exception for range-related errors in D4rt components.
+class Ranged4rtException extends D4rtException {
+  /// Creates a new range error with the given message.
+  Ranged4rtException(super.message);
+
+  @override
+  String toString() => 'Range Error: $message';
+}
+
+/// Exception for unsupported operations in D4rt components.
+class UnsupportedD4rtException extends D4rtException {
+  /// Creates a new unsupported error with the given message.
+  UnsupportedD4rtException(super.message);
+
+  @override
+  String toString() => 'Unsupported Error: $message';
+}
+
+/// Exception for unimplemented features in D4rt components.
+class UnimplementedD4rtException extends D4rtException {
+  /// Creates a new unimplemented error with the given message.
+  UnimplementedD4rtException(super.message);
+
+  @override
+  String toString() => 'Unimplemented Error: $message';
+}
+
+/// Internal exception used to unwind the stack during a 'return' statement.
+///
+/// This exception is used internally by the interpreter to implement
+/// return statement control flow. It carries the return value up the call stack.
+class ReturnException implements Exception {
+  /// The value being returned from the function.
+  final Object? value;
+
+  /// Creates a new return exception with the given return value.
+  const ReturnException(this.value);
+}
+
+/// Internal exception used to unwind the stack during a 'break' statement.
+///
+/// This exception is used internally by the interpreter to implement
+/// break statement control flow in loops and switch statements.
+class BreakException implements Exception {
+  /// Optional label for labeled break statements.
+  final String? label;
+
+  /// Creates a new break exception, optionally with a label.
+  const BreakException([this.label]);
+
+  @override
+  String toString() => 'BreakException(label: $label)';
+}
+
+/// Internal exception used to unwind the stack during a 'continue' statement.
+///
+/// This exception is used internally by the interpreter to implement
+/// continue statement control flow in loops.
+class ContinueException implements Exception {
+  /// Optional label for labeled continue statements.
+  final String? label;
+
+  /// Creates a new continue exception, optionally with a label.
+  const ContinueException([this.label]);
+
+  @override
+  String toString() => 'ContinueException(label: $label)';
+}
+
+/// Internal exception for continue-to-label in switch statements.
+/// This is used to signal the switch handler to restart from a specific labeled case.
+class ContinueSwitchLabel implements Exception {
+  const ContinueSwitchLabel();
+}
+
+/// Whether [e] is one of the exceptions the interpreter uses to unwind its own
+/// stack, rather than a failure a script or a native callee produced.
+///
+/// These four `implement Exception` because that is how a Dart exception
+/// travels, not because a host was ever meant to see one. `execute()`'s
+/// boundary lets every other `Error` and `Exception` out unchanged, so a caller
+/// can `catch` by the type the script actually raised; these are the exception
+/// to that rule. One arriving at a host means the interpreter lost track of a
+/// `return`, `break` or `continue` — an interpreter bug, which is the case the
+/// "Unexpected error" wording was written for.
+///
+/// [InternalInterpreterD4rtException] is deliberately absent. It carries a
+/// value interpreted code threw rather than a jump, and the boundary unwraps it
+/// one clause earlier so the host receives that value itself.
+bool isInterpreterControlFlowSignal(Object e) =>
+    e is ReturnException ||
+    e is BreakException ||
+    e is ContinueException ||
+    e is ContinueSwitchLabel;
+
+/// Rethrows [e] in the shape a host calling `execute()` should receive, so that
+/// a `catch` clause outside the interpreter can name the same type a `catch`
+/// clause inside the script can.
+///
+/// Two transformations, and the pair is what makes the boundary symmetric with
+/// the interpreter's own `visitTryStatement`:
+///
+///  * **Unwrap.** A native callee's error reaches here inside a
+///    [RuntimeD4rtException] built by the bridged-call sites, which carry the
+///    thrown value in [RuntimeD4rtException.originalException]. `visitTryStatement`
+///    already recovers it so interpreted `on FormatException` matches; without
+///    the same recovery here the host saw the wrapper instead, and the same
+///    failure was catchable by type inside a script but not outside it.
+///  * **Classify.** Anything that is an `Error` or an `Exception` then escapes
+///    as itself. What does not is a thrown value in neither hierarchy — the
+///    host has no type to name, so a diagnostic beats a bare `toString()` — and
+///    an escaped control-flow signal, which is an interpreter fault.
+///
+/// The wrapper's own message ("Native error during bridged method call …") is
+/// discarded with it. That context is not lost: the bridged-call sites log it
+/// at warn level as they wrap. It is the same trade the script side made, and
+/// making the two sides trade differently is what produced the asymmetry.
+///
+/// [s] is the trace of the `catch` that called this. It is used only when the
+/// wrapper carries no [RuntimeD4rtException.originalStackTrace] — preferring
+/// the recorded one keeps `Error.throwWithStackTrace` meaningful across the
+/// boundary, exactly as it is across an interpreted `catch (e, st)`.
+Never throwAsHostFacingError(Object e, StackTrace s) {
+  // A `throw` in interpreted code arrives inside this carrier, and the host
+  // receives whatever the script threw — including a value in neither error
+  // hierarchy, which real Dart also permits a script to throw.
+  if (e is InternalInterpreterD4rtException) {
+    final thrown = e.originalThrownValue!;
+    // SCD96: TWO peels, not one. A *bridged* exception holds its native object
+    // one level further in, so peeling only the carrier hands the host a
+    // `BridgedInstance` shell it cannot `catch` on — `throw
+    // FormatException('boom')` reached a caller of `execute` / `executeBundle`
+    // as `BridgedInstance<Object>`, and `on FormatException` around the call
+    // did not match. `unwrapScriptError` has documented this pair since SCD73
+    // ("a host that peeled only the first would get a `BridgedInstance` it
+    // cannot `catch` on") and the zone-callback route already did both, which
+    // is why the ASYNC path was right and the synchronous one was not.
+    throw thrown is BridgedInstance ? thrown.nativeObject : thrown;
+  }
+  final value = e is RuntimeD4rtException && e.originalException != null
+      ? e.originalException!
+      : e;
+  if ((value is Error || value is Exception) &&
+      !isInterpreterControlFlowSignal(value)) {
+    Error.throwWithStackTrace(
+      value,
+      (e is RuntimeD4rtException ? e.originalStackTrace : null) ?? s,
+    );
+  }
+  throw RuntimeD4rtException('Unexpected error: $value');
+}
+
+/// Exception thrown when there's an issue with the source code itself,
+/// like parsing errors or missing files.
+///
+/// This exception indicates problems with the Dart source code being
+/// interpreted, such as syntax errors, missing imports, or invalid URIs.
+class SourceCodeD4rtException extends D4rtException {
+  /// The optional problematic code that caused the exception.
+  final String? problematicCode;
+
+  /// Creates a new source code exception with the given message and optional code.
+  SourceCodeD4rtException(super.message, [this.problematicCode]);
+
+  @override
+  String toString() {
+    if (problematicCode != null) {
+      return 'SourceCodeException: $message\nProblematic code: [$problematicCode]';
+    }
+    return 'SourceCodeException: $message';
+  }
+}
+
+/// DFUB13 — names the module that ASKED for a target that failed to load.
+///
+/// The loader's own diagnostic names the module it could not find. That is the
+/// symptom; the file the user has to edit is the one holding the directive, and
+/// in a barrel chain those are rarely the same file. [directiveType] is
+/// `'import'` or `'export'`, [ownerUri] the module containing the directive,
+/// [targetUri] the module it pointed at.
+///
+/// The concrete exception type is preserved so existing `on ...` clauses keep
+/// matching — only the message gains a prefix. A type this function cannot
+/// reconstruct is returned unchanged rather than downgraded to a base type.
+///
+/// Returns [error] unchanged when it already carries context (see
+/// [D4rtException.hasDirectiveContext]) so a deep import chain yields one
+/// prefix rather than one per frame.
+D4rtException wrapDirectiveError(
+  String directiveType,
+  Uri ownerUri,
+  Uri targetUri,
+  D4rtException error,
+) {
+  if (error.hasDirectiveContext) return error;
+  final message =
+      'Failed to load $directiveType "$targetUri" from module "$ownerUri": '
+      '${error.message}';
+  final D4rtException? wrapped = switch (error) {
+    SourceCodeD4rtException e => SourceCodeD4rtException(
+      message,
+      e.problematicCode,
+    ),
+    // The trace is forwarded alongside the value: this function reconstructs
+    // the exception rather than mutating it, so anything it forgets to copy is
+    // silently lost, and a bridged throw inside an imported module is exactly
+    // the case where the trace is worth most.
+    RuntimeD4rtException e => RuntimeD4rtException(
+      message,
+      originalException: e.originalException,
+      originalStackTrace: e.originalStackTrace,
+    ),
+    _ => null,
+  };
+  // An unreconstructable type is returned untouched AND unflagged, so an outer
+  // frame that can wrap is still free to do so.
+  if (wrapped == null) return error;
+  wrapped.hasDirectiveContext = true;
+  return wrapped;
+}
+
+/// Internal exception wrapper for user-thrown exceptions.
+///
+/// This helps distinguish between user 'throw x' exceptions and internal
+/// interpreter control flow exceptions like Return/Break/Continue.
+/// It wraps the original thrown value for proper exception handling.
+class InternalInterpreterD4rtException extends D4rtException {
+  /// The original value that was thrown by user code.
+  final Object? originalThrownValue;
+  // StackTrace could be stored here if needed directly,
+  // but catch in visitTryStatement already gets it.
+
+  /// Creates a new internal interpreter exception wrapping the original thrown value.
+  InternalInterpreterD4rtException(this.originalThrownValue)
+    : super('External error caught by interpreter');
+
+  @override
+  String toString() {
+    // Provide a meaningful representation if needed,
+    // but primarily used internally.
+    return 'InternalInterpreterException(originalThrownValue: $originalThrownValue)';
+  }
+}
+
+/// Exception specifically for pattern matching failures.
+///
+/// This exception is thrown when pattern matching operations fail
+/// to match the expected pattern against the actual value.
+class PatternMatchD4rtException extends D4rtException {
+  /// Creates a new pattern match exception with the given message.
+  PatternMatchD4rtException(super.message);
+
+  @override
+  String toString() => "PatternMatchException: $message";
+}
+
+/// Exception thrown by [D4.unwrapAs] when an interpreter result cannot be
+/// converted to the requested native type [T].
+///
+/// Carries enough context (the requested type description, the actual runtime
+/// type, and an optional source description) to make the failure actionable
+/// for embedders that translate interpreter results to native Dart values.
+///
+/// Example:
+/// ```dart
+/// try {
+///   final widget = D4.unwrapAs<Widget>(result, visitor: visitor);
+/// } on D4UnwrapException catch (e) {
+///   print(e); // -> Expected Widget but got String (from raw value)
+/// }
+/// ```
+class D4UnwrapException extends D4rtException {
+  /// String description of the expected type (typically `T.toString()`).
+  final String expectedType;
+
+  /// String description of the value's actual runtime type.
+  final String actualType;
+
+  /// Optional human-readable description of where the value came from
+  /// (e.g. `BridgedInstance<Widget>` or `InterpretedInstance(MyClass)`).
+  final String? source;
+
+  /// Creates a new unwrap exception.
+  D4UnwrapException({
+    required this.expectedType,
+    required this.actualType,
+    this.source,
+    String? extra,
+  }) : super(_buildMessage(expectedType, actualType, source, extra));
+
+  static String _buildMessage(
+    String expectedType,
+    String actualType,
+    String? source,
+    String? extra,
+  ) {
+    final base = source == null
+        ? 'Expected $expectedType but got $actualType'
+        : 'Expected $expectedType but got $actualType (from $source)';
+    return extra == null ? base : '$base — $extra';
+  }
+
+  @override
+  String toString() => 'D4UnwrapException: $message';
+}
+
+/// SCF4: the unwind that ends an `async*` body whose subscription was
+/// cancelled.
+///
+/// Dart finishes a cancelled generator as if by `return` at the pending
+/// `yield`: its `finally` blocks run, its `catch` clauses do not, and nothing
+/// after the yield executes. The state machine has one route that already
+/// behaves that way — the SCC31 "no clause may claim it" route — so this rides
+/// it: [InterpreterVisitor.selectCatchClause] and the synchronous try path
+/// decline to match it, `finally` still runs, and the generator's stream
+/// drops it rather than reporting it, since nobody is listening.
+///
+/// Not a [RuntimeD4rtException]: nothing may treat it as an ordinary runtime
+/// condition and try the next strategy, which is exactly what that type is
+/// caught for.
+class GeneratorCancelledSignal {
+  const GeneratorCancelledSignal();
+
+  @override
+  String toString() => 'GeneratorCancelledSignal';
+}

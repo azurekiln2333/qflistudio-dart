@@ -1,0 +1,89 @@
+import 'dart:convert';
+
+import 'package:tom_d4rt/d4rt.dart';
+import 'fuse_argument.dart';
+
+class EncodingConvert {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Encoding,
+    name: 'Encoding',
+    // SCE233 KEEP. Partly reached (scc24 SCD197 pins the fraction), and fully
+    // reached for `systemEncoding`, whose class has no bridge of its own.
+    typeParameterCount: 0,
+    staticMethods: {
+      'getByName': (visitor, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'Encoding.getByName requires one String argument (name).',
+          );
+        }
+        return Encoding.getByName(positionalArgs[0] as String);
+      },
+    },
+    methods: {
+      'encode': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! String) {
+          throw RuntimeD4rtException(
+            'Encoding.encode requires one String argument.',
+          );
+        }
+        return (target as Encoding).encode(positionalArgs[0] as String);
+      },
+      'decode': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! List) {
+          throw RuntimeD4rtException(
+            'Encoding.decode requires one List<int> argument.',
+          );
+        }
+        return (target as Encoding).decode((positionalArgs[0] as List).cast());
+      },
+      // SCB23: the one member of this bridge that the three character
+      // encodings cannot declare for themselves — the SDK puts it on
+      // `Encoding` only. It is reachable on `utf8`/`ascii`/`latin1` through
+      // the supertype walk, which is why the edges in
+      // `ConvertHierarchyConvert` and this adapter are one change.
+      'decodeStream': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Stream) {
+          throw RuntimeD4rtException(
+            'Encoding.decodeStream requires one Stream<List<int>> argument.',
+          );
+        }
+        return (target as Encoding).decodeStream(
+          D4.coerceByteStream(positionalArgs[0], 'Encoding.decodeStream'),
+        );
+      },
+      'fuse': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.length != 1 ||
+            positionalArgs[0] is! Codec<List<int>, dynamic>) {
+          throw RuntimeD4rtException(
+            fuseArgumentMessage(
+              'Encoding.fuse',
+              'Codec<List<int>, dynamic>',
+              positionalArgs.isEmpty ? null : positionalArgs[0],
+            ),
+          );
+        }
+        return (target as Encoding).fuse(
+          positionalArgs[0] as Codec<List<int>, dynamic>,
+        );
+      },
+    },
+    getters: {
+      'name': (visitor, target) {
+        return (target as Encoding).name;
+      },
+      'decoder': (visitor, target) {
+        return (target as Encoding).decoder;
+      },
+      'encoder': (visitor, target) {
+        return (target as Encoding).encoder;
+      },
+      'hashCode': (visitor, target) {
+        return (target as Encoding).hashCode;
+      },
+      'runtimeType': (visitor, target) {
+        return (target as Encoding).runtimeType;
+      },
+    },
+  );
+}

@@ -1,0 +1,205 @@
+import 'package:tom_d4rt/d4rt.dart';
+import 'package:tom_d4rt/src/stdlib/core/comparable.dart';
+import 'package:tom_d4rt/src/stdlib/core/core_hierarchy.dart';
+import 'package:tom_d4rt/src/stdlib/core/double.dart';
+import 'package:tom_d4rt/src/stdlib/core/error.dart';
+import 'package:tom_d4rt/src/stdlib/core/exceptions.dart';
+import 'package:tom_d4rt/src/stdlib/core/invocation.dart';
+import 'package:tom_d4rt/src/stdlib/core/never.dart';
+import 'package:tom_d4rt/src/stdlib/core/int.dart';
+import 'package:tom_d4rt/src/stdlib/core/iterable.dart';
+import 'package:tom_d4rt/src/stdlib/core/list.dart';
+import 'package:tom_d4rt/src/stdlib/core/map.dart';
+import 'package:tom_d4rt/src/stdlib/core/null.dart';
+import 'package:tom_d4rt/src/stdlib/core/num.dart';
+import 'package:tom_d4rt/src/stdlib/core/object.dart';
+import 'package:tom_d4rt/src/stdlib/core/patern.dart';
+import 'package:tom_d4rt/src/stdlib/core/set.dart';
+import 'package:tom_d4rt/src/stdlib/core/sink.dart';
+import 'package:tom_d4rt/src/stdlib/core/string.dart';
+import 'package:tom_d4rt/src/stdlib/core/runes.dart';
+import 'package:tom_d4rt/src/stdlib/core/string_buffer.dart';
+import 'package:tom_d4rt/src/stdlib/core/string_sink.dart';
+import 'package:tom_d4rt/src/stdlib/core/symbol.dart';
+import 'package:tom_d4rt/src/stdlib/core/bigint.dart';
+import 'package:tom_d4rt/src/stdlib/core/bool.dart';
+import 'package:tom_d4rt/src/stdlib/core/iterator.dart';
+import 'package:tom_d4rt/src/stdlib/core/date_time.dart';
+import 'package:tom_d4rt/src/stdlib/core/duration.dart';
+import 'package:tom_d4rt/src/stdlib/core/enum.dart';
+import 'package:tom_d4rt/src/stdlib/core/type.dart';
+import 'package:tom_d4rt/src/stdlib/core/uri.dart';
+import 'package:tom_d4rt/src/stdlib/core/stopwatch.dart';
+import 'package:tom_d4rt/src/stdlib/core/uri_data.dart';
+import 'package:tom_d4rt/src/stdlib/core/stack_trace.dart';
+import 'package:tom_d4rt/src/stdlib/core/regexp.dart';
+import 'package:tom_d4rt/src/stdlib/core/function.dart';
+
+export 'package:tom_d4rt/src/environment.dart';
+export 'package:tom_d4rt/src/stdlib/core/double.dart';
+export 'package:tom_d4rt/src/stdlib/core/int.dart';
+export 'package:tom_d4rt/src/stdlib/core/iterable.dart';
+export 'package:tom_d4rt/src/stdlib/core/list.dart';
+export 'package:tom_d4rt/src/stdlib/core/map.dart';
+export 'package:tom_d4rt/src/stdlib/core/num.dart';
+export 'package:tom_d4rt/src/stdlib/core/patern.dart';
+export 'package:tom_d4rt/src/stdlib/core/set.dart';
+export 'package:tom_d4rt/src/stdlib/core/sink.dart';
+export 'package:tom_d4rt/src/stdlib/core/string.dart';
+export 'package:tom_d4rt/src/stdlib/core/runes.dart';
+export 'package:tom_d4rt/src/stdlib/core/string_buffer.dart';
+export 'package:tom_d4rt/src/stdlib/core/string_sink.dart';
+export 'package:tom_d4rt/src/stdlib/core/bigint.dart';
+export 'package:tom_d4rt/src/stdlib/core/bool.dart';
+export 'package:tom_d4rt/src/stdlib/core/iterator.dart';
+export 'package:tom_d4rt/src/stdlib/core/date_time.dart';
+export 'package:tom_d4rt/src/stdlib/core/duration.dart';
+export 'package:tom_d4rt/src/stdlib/core/uri.dart';
+export 'package:tom_d4rt/src/stdlib/core/stopwatch.dart';
+export 'package:tom_d4rt/src/stdlib/core/uri_data.dart';
+export 'package:tom_d4rt/src/stdlib/core/stack_trace.dart';
+export 'package:tom_d4rt/src/stdlib/core/regexp.dart';
+export 'package:tom_d4rt/src/stdlib/core/function.dart';
+export 'package:tom_d4rt/src/stdlib/core/exceptions.dart';
+
+class CoreStdlib {
+  static void register(Environment environment) {
+    environment.defineBridge(DoubleCore.definition);
+    environment.defineBridge(IntCore.definition);
+    environment.defineBridge(IterableCore.definition);
+    environment.defineBridge(ListCore.definition);
+    environment.defineBridge(MapCore.definition);
+    environment.defineBridge(MapEntryCore.definition);
+    environment.defineBridge(NumCore.definition);
+    environment.defineBridge(PatternCore.definition);
+    environment.defineBridge(MatchCore.definition);
+    environment.defineBridge(SetCore.definition);
+    environment.defineBridge(SinkCore.definition);
+    environment.defineBridge(StringCore.definition);
+    environment.defineBridge(RunesCore.definition);
+    environment.defineBridge(StringBufferCore.definition);
+    environment.defineBridge(StringSinkCore.definition);
+    environment.defineBridge(BigIntCore.definition);
+    environment.defineBridge(BoolCore.definition);
+    environment.defineBridge(IteratorCore.definition);
+    environment.defineBridge(DateTimeCore.definition);
+    environment.defineBridge(DurationCore.definition);
+    environment.defineBridge(UriCore.definition);
+    environment.defineBridge(StopwatchCore.definition);
+    environment.defineBridge(UriDataCore.definition);
+    environment.defineBridge(StackTraceCore.definition);
+    environment.defineBridge(RegExpCore.definition);
+    environment.defineBridge(RegExpMatchCore.definition);
+    environment.defineBridge(FunctionCore.definition);
+    environment.defineBridge(FormatExceptionCore.definition);
+    environment.defineBridge(ExceptionCore.definition);
+    environment.defineBridge(ObjectCore.definition);
+    environment.defineBridge(TypeCore.definition);
+    environment.defineBridge(NullCore.definition);
+    environment.defineBridge(ComparableCore.definition);
+    environment.defineBridge(EnumCore.definition);
+    environment.defineBridge(NeverCore.definition);
+    environment.defineBridge(SymbolCore.definition);
+    environment.defineBridge(ErrorCore.definition);
+    environment.defineBridge(StateErrorCore.definition);
+    environment.defineBridge(ArgumentErrorCore.definition);
+    environment.defineBridge(RangeErrorCore.definition);
+    environment.defineBridge(UnsupportedErrorCore.definition);
+    environment.defineBridge(IntegerDivisionByZeroExceptionCore.definition);
+    environment.defineBridge(UnimplementedErrorCore.definition);
+    environment.defineBridge(NoSuchMethodErrorCore.definition);
+    environment.defineBridge(ConcurrentModificationErrorCore.definition);
+    environment.defineBridge(IndexErrorCore.definition);
+    environment.defineBridge(TypeErrorCore.definition);
+    environment.defineBridge(AssertionErrorCore.definition);
+    environment.defineBridge(StackOverflowErrorCore.definition);
+    environment.defineBridge(OutOfMemoryErrorCore.definition);
+    ErrorHierarchyCore.register();
+    ExceptionHierarchyCore.register();
+    environment.defineBridge(InvocationCore.definition); // Bug-78 FIX
+    environment.define(
+      'dynamic',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          return dynamic;
+        },
+        arity: 0,
+        name: 'dynamic',
+      ),
+    );
+    environment.define(
+      'print',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          print(arguments[0]);
+          return null;
+        },
+        arity: 1,
+        name: 'print',
+      ),
+    );
+    environment.define(
+      'identical',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          if (arguments.length != 2) {
+            throw RuntimeD4rtException('identical requires two arguments.');
+          }
+          // A native proxy and the interpreted instance behind it are one
+          // object to a script — `list.first` may arrive as the proxy while
+          // the script still holds the instance it added.
+          return identical(
+            _identityCarrier(arguments[0]),
+            _identityCarrier(arguments[1]),
+          );
+        },
+        arity: 2,
+        name: 'identical',
+      ),
+    );
+    environment.define(
+      'identityHashCode',
+      NativeFunction(
+        (visitor, arguments, namedArguments, typeArguments) {
+          if (arguments.length != 1) {
+            throw RuntimeD4rtException(
+              'identityHashCode requires one argument.',
+            );
+          }
+          // Same carrier rule as `identical` above: two carriers of one
+          // object must not hash differently, or a script's identity set
+          // holds both.
+          return identityHashCode(_identityCarrier(arguments[0]));
+        },
+        arity: 1,
+        name: 'identityHashCode',
+      ),
+    );
+    // Last, so that every name the block refers to has been defined above it.
+    // The registry keys on name rather than on the bridge object, so this is a
+    // readability constraint rather than a correctness one — but a block that
+    // reads bottom-up is one nobody has to check the ordering of.
+    CoreHierarchyCore.register();
+  }
+}
+
+/// The object `identical` and `identityHashCode` compare, for a value that
+/// reaches the interpreter through more than one carrier.
+///
+/// A native proxy and the interpreted instance behind it are one object to a
+/// script, so the instance answers for both.
+///
+/// A bare bridged CLASS NAME and the native `Type` it denotes are one object
+/// too (SCE234). `String` evaluates to its `BridgedClass`, and
+/// `'x'.runtimeType` is the native `Type`. Dart answers
+/// `identical(String, 'x'.runtimeType)` true. SCD198 made the two compare equal
+/// and hash alike; this makes them one identity, by answering with the native
+/// `Type`, which the VM canonicalises. An interpreted class needs nothing
+/// here, because its name and an instance's `runtimeType` are already the same
+/// `InterpretedClass`.
+Object? _identityCarrier(Object? value) {
+  final behind = D4.interpretedBehind(value);
+  if (behind != null) return behind;
+  if (value is BridgedClass) return value.nativeType;
+  return value;
+}

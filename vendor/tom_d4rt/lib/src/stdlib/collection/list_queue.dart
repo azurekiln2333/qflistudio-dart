@@ -1,0 +1,202 @@
+import 'dart:collection';
+import 'package:tom_d4rt/d4rt.dart';
+
+class ListQueueCollection {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: ListQueue,
+    name: 'ListQueue',
+    isAssignable: (v) => v is ListQueue,
+    typeParameterCount: 1,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length > 1) {
+          throw RuntimeD4rtException(
+            "Constructor ListQueue() takes at most one positional argument for initialCapacity.",
+          );
+        }
+        int? initialCapacity;
+        if (positionalArgs.isNotEmpty) {
+          if (positionalArgs[0] is int) {
+            initialCapacity = positionalArgs[0] as int;
+          } else if (positionalArgs[0] != null) {
+            throw RuntimeD4rtException(
+              "initialCapacity for ListQueue() must be an int.",
+            );
+          }
+        }
+        return ListQueue<dynamic>(initialCapacity);
+      },
+      'from': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 1) {
+          throw RuntimeD4rtException(
+            "Constructor ListQueue.from(Iterable elements) expects one positional argument.",
+          );
+        }
+        final elements = positionalArgs[0];
+        if (elements is Iterable) {
+          return ListQueue<dynamic>.from(elements);
+        }
+        throw RuntimeD4rtException(
+          "Argument to ListQueue.from must be an Iterable.",
+        );
+      },
+      'of': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 1 || positionalArgs[0] is! Iterable) {
+          throw RuntimeD4rtException(
+            'Constructor ListQueue.of(Iterable elements) expects one Iterable.',
+          );
+        }
+        return ListQueue<dynamic>.of(positionalArgs[0] as Iterable);
+      },
+    },
+    methods: {
+      'add': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'ListQueue.add', atMost: 1);
+        if (target is ListQueue && positionalArgs.length == 1) {
+          target.add(positionalArgs[0]);
+          return null;
+        }
+        throw RuntimeD4rtException("Invalid arguments for ListQueue.add");
+      },
+      'addFirst': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'ListQueue.addFirst', atMost: 1);
+        if (target is ListQueue && positionalArgs.length == 1) {
+          target.addFirst(positionalArgs[0]);
+          return null;
+        }
+        throw RuntimeD4rtException("Invalid arguments for ListQueue.addFirst");
+      },
+      'addLast': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'ListQueue.addLast', atMost: 1);
+        if (target is ListQueue && positionalArgs.length == 1) {
+          target.addLast(positionalArgs[0]);
+          return null;
+        }
+        throw RuntimeD4rtException("Invalid arguments for ListQueue.addLast");
+      },
+      'addAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'ListQueue.addAll', atMost: 1);
+        if (target is ListQueue && positionalArgs.length == 1) {
+          final elements = positionalArgs[0];
+          if (elements is Iterable) {
+            target.addAll(elements);
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to ListQueue.addAll must be an Iterable.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for ListQueue.addAll");
+      },
+      'clear': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is ListQueue &&
+            positionalArgs.isEmpty &&
+            namedArgs.isEmpty) {
+          target.clear();
+          return null;
+        }
+        throw RuntimeD4rtException("Invalid arguments for ListQueue.clear");
+      },
+      'removeFirst': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is ListQueue &&
+            positionalArgs.isEmpty &&
+            namedArgs.isEmpty) {
+          // SCD30: the empty-queue guard that used to sit here threw a
+          // RuntimeD4rtException with prose of its own invention, so the
+          // idiomatic `try { q.removeFirst(); } on StateError { … }` did not
+          // catch and the script's recovery path never ran. The native call
+          // raises the SDK's own `StateError: Bad state: No element` unaided,
+          // so the guard needed removing rather than correcting.
+          return target.removeFirst();
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for ListQueue.removeFirst",
+        );
+      },
+      'removeLast': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is ListQueue &&
+            positionalArgs.isEmpty &&
+            namedArgs.isEmpty) {
+          // SCD30: the empty-queue guard that used to sit here threw a
+          // RuntimeD4rtException with prose of its own invention, so the
+          // idiomatic `try { q.removeLast(); } on StateError { … }` did not
+          // catch and the script's recovery path never ran. The native call
+          // raises the SDK's own `StateError: Bad state: No element` unaided,
+          // so the guard needed removing rather than correcting.
+          return target.removeLast();
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for ListQueue.removeLast",
+        );
+      },
+      'remove': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'ListQueue.remove', atMost: 1);
+        if (target is ListQueue && positionalArgs.length == 1) {
+          return target.remove(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException("Invalid arguments for ListQueue.remove");
+      },
+      'forEach': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'ListQueue.forEach', atMost: 1);
+        if (target is ListQueue && positionalArgs.length == 1) {
+          final action = positionalArgs[0];
+          if (action is Callable) {
+            for (var element in target) {
+              action.call(visitor, [element]);
+            }
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to ListQueue.forEach must be a function.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for ListQueue.forEach");
+      },
+      'toList': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is ListQueue && positionalArgs.isEmpty) {
+          bool growable = namedArgs['growable'] as bool? ?? true;
+          return target.toList(growable: growable);
+        }
+        throw RuntimeD4rtException("Invalid arguments for ListQueue.toList");
+      },
+    },
+    getters: {
+      'length': (visitor, target) {
+        if (target is ListQueue) return target.length;
+        throw RuntimeD4rtException(
+          "Target is not a ListQueue for getter 'length'",
+        );
+      },
+      'isEmpty': (visitor, target) {
+        if (target is ListQueue) return target.isEmpty;
+        throw RuntimeD4rtException(
+          "Target is not a ListQueue for getter 'isEmpty'",
+        );
+      },
+      'isNotEmpty': (visitor, target) {
+        if (target is ListQueue) return target.isNotEmpty;
+        throw RuntimeD4rtException(
+          "Target is not a ListQueue for getter 'isNotEmpty'",
+        );
+      },
+      'iterator': (visitor, target) {
+        if (target is ListQueue) return target.iterator;
+        throw RuntimeD4rtException(
+          "Target is not a ListQueue for getter 'iterator'",
+        );
+      },
+      'hashCode': (visitor, target) {
+        if (target is ListQueue) return target.hashCode;
+        throw RuntimeD4rtException(
+          "Target is not a ListQueue for getter 'hashCode'",
+        );
+      },
+      'runtimeType': (visitor, target) {
+        if (target is ListQueue) return target.runtimeType;
+        throw RuntimeD4rtException(
+          "Target is not a ListQueue for getter 'runtimeType'",
+        );
+      },
+    },
+  );
+}

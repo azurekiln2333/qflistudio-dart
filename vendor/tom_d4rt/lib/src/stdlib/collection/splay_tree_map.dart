@@ -1,0 +1,306 @@
+import 'dart:collection';
+import 'package:tom_d4rt/d4rt.dart';
+import 'package:tom_d4rt/src/stdlib/collection/map_named_constructors.dart';
+
+class SplayTreeMapCollection {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: SplayTreeMap,
+    name: 'SplayTreeMap',
+    isAssignable: (v) => v is SplayTreeMap,
+    typeParameterCount: 2,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length > 1) {
+          throw RuntimeD4rtException(
+            "Constructor SplayTreeMap() takes at most one positional argument for compare function.",
+          );
+        }
+
+        Callable? compareFn;
+        if (positionalArgs.isNotEmpty && positionalArgs[0] != null) {
+          if (positionalArgs[0] is Callable) {
+            compareFn = positionalArgs[0] as Callable;
+          } else {
+            throw RuntimeD4rtException(
+              "The 'compare' argument must be a function.",
+            );
+          }
+        }
+
+        int Function(dynamic, dynamic)? actualCompare;
+        if (compareFn != null) {
+          actualCompare = (k1, k2) {
+            final result = compareFn!.call(visitor, [k1, k2]);
+            if (result is int) {
+              return result;
+            }
+            throw RuntimeD4rtException("Compare function must return an int.");
+          };
+        }
+        return SplayTreeMap<dynamic, dynamic>(actualCompare);
+      },
+      'from': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isEmpty || positionalArgs.length > 2) {
+          throw RuntimeD4rtException(
+            "Constructor SplayTreeMap.from() expects one or two positional arguments (otherMap, [compare]).",
+          );
+        }
+        final otherMap = positionalArgs[0];
+        if (otherMap is! Map) {
+          throw RuntimeD4rtException(
+            "First argument to SplayTreeMap.from must be a Map.",
+          );
+        }
+
+        Callable? compareFn;
+        if (positionalArgs.length > 1 && positionalArgs[1] != null) {
+          if (positionalArgs[1] is Callable) {
+            compareFn = positionalArgs[1] as Callable;
+          } else {
+            throw RuntimeD4rtException(
+              "The 'compare' argument must be a function.",
+            );
+          }
+        }
+        int Function(dynamic, dynamic)? actualCompare;
+        if (compareFn != null) {
+          actualCompare = (k1, k2) {
+            final result = compareFn!.call(visitor, [k1, k2]);
+            if (result is int) return result;
+            throw RuntimeD4rtException("Compare function must return an int.");
+          };
+        }
+        return SplayTreeMap<dynamic, dynamic>.from(otherMap, actualCompare);
+      },
+      'of': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isEmpty || positionalArgs.length > 2) {
+          throw RuntimeD4rtException(
+            "Constructor SplayTreeMap.of() expects one or two positional arguments (otherMap, [compare]).",
+          );
+        }
+        final otherMap = positionalArgs[0];
+        if (otherMap is! Map) {
+          throw RuntimeD4rtException(
+            "First argument to SplayTreeMap.of must be a Map.",
+          );
+        }
+        Callable? compareFn;
+        if (positionalArgs.length > 1 && positionalArgs[1] != null) {
+          if (positionalArgs[1] is Callable) {
+            compareFn = positionalArgs[1] as Callable;
+          } else {
+            throw RuntimeD4rtException(
+              "The 'compare' argument must be a function.",
+            );
+          }
+        }
+        int Function(dynamic, dynamic)? actualCompare;
+        if (compareFn != null) {
+          actualCompare = (k1, k2) {
+            final result = compareFn!.call(visitor, [k1, k2]);
+            if (result is int) return result;
+            throw RuntimeD4rtException("Compare function must return an int.");
+          };
+        }
+        return SplayTreeMap<dynamic, dynamic>.of(
+          otherMap.cast<dynamic, dynamic>(),
+          actualCompare,
+        );
+      },
+      'fromIterable': (visitor, positionalArgs, namedArgs) =>
+          MapNamedConstructors.fromIterable(
+            'SplayTreeMap',
+            SplayTreeMap<dynamic, dynamic>.new,
+            visitor,
+            positionalArgs,
+            namedArgs,
+          ),
+      'fromIterables': (visitor, positionalArgs, namedArgs) =>
+          MapNamedConstructors.fromIterables(
+            'SplayTreeMap',
+            SplayTreeMap<dynamic, dynamic>.new,
+            positionalArgs,
+          ),
+    },
+    methods: {
+      '[]': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is SplayTreeMap && positionalArgs.length == 1) {
+          return target[positionalArgs[0]];
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap[] getter",
+        );
+      },
+      'addAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'SplayTreeMap.addAll', atMost: 1);
+        if (target is SplayTreeMap && positionalArgs.length == 1) {
+          final otherMap = positionalArgs[0];
+          if (otherMap is Map) {
+            target.addAll(otherMap.cast<dynamic, dynamic>());
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to SplayTreeMap.addAll must be a Map.",
+          );
+        }
+        throw RuntimeD4rtException("Invalid arguments for SplayTreeMap.addAll");
+      },
+      'clear': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is SplayTreeMap &&
+            positionalArgs.isEmpty &&
+            namedArgs.isEmpty) {
+          target.clear();
+          return null;
+        }
+        throw RuntimeD4rtException("Invalid arguments for SplayTreeMap.clear");
+      },
+      'containsKey': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'SplayTreeMap.containsKey', atMost: 1);
+        if (target is SplayTreeMap && positionalArgs.length == 1) {
+          return target.containsKey(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap.containsKey",
+        );
+      },
+      'containsValue': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'SplayTreeMap.containsValue', atMost: 1);
+        if (target is SplayTreeMap && positionalArgs.length == 1) {
+          return target.containsValue(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap.containsValue",
+        );
+      },
+      'forEach': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'SplayTreeMap.forEach', atMost: 1);
+        if (target is SplayTreeMap && positionalArgs.length == 1) {
+          final action = positionalArgs[0];
+          if (action is Callable) {
+            for (var entry in target.entries) {
+              action.call(visitor, [entry.key, entry.value]);
+            }
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to SplayTreeMap.forEach must be a function.",
+          );
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap.forEach",
+        );
+      },
+      'putIfAbsent': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'SplayTreeMap.putIfAbsent', atMost: 2);
+        if (target is SplayTreeMap && positionalArgs.length == 2) {
+          final key = positionalArgs[0];
+          final ifAbsent = positionalArgs[1];
+          if (ifAbsent is Callable) {
+            return target.putIfAbsent(key, () => ifAbsent.call(visitor, []));
+          }
+          throw RuntimeD4rtException(
+            "Second argument to SplayTreeMap.putIfAbsent (ifAbsent) must be a function.",
+          );
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap.putIfAbsent",
+        );
+      },
+      'remove': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'SplayTreeMap.remove', atMost: 1);
+        if (target is SplayTreeMap && positionalArgs.length == 1) {
+          return target.remove(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException("Invalid arguments for SplayTreeMap.remove");
+      },
+      // All four key-navigation members are declared `K?` in the SDK and
+      // return null when there is no such key — an empty map for
+      // firstKey/lastKey, no greater/lesser key for the other two. No guard
+      // belongs here: throwing instead would refuse what Dart accepts.
+      'firstKey': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is SplayTreeMap && positionalArgs.isEmpty) {
+          return target.firstKey();
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap.firstKey",
+        );
+      },
+      'lastKey': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is SplayTreeMap && positionalArgs.isEmpty) {
+          return target.lastKey();
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap.lastKey",
+        );
+      },
+      'firstKeyAfter': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'SplayTreeMap.firstKeyAfter', atMost: 1);
+        if (target is SplayTreeMap && positionalArgs.length == 1) {
+          return target.firstKeyAfter(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap.firstKeyAfter",
+        );
+      },
+      'lastKeyBefore': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'SplayTreeMap.lastKeyBefore', atMost: 1);
+        if (target is SplayTreeMap && positionalArgs.length == 1) {
+          return target.lastKeyBefore(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for SplayTreeMap.lastKeyBefore",
+        );
+      },
+    },
+    getters: {
+      'length': (visitor, target) {
+        if (target is SplayTreeMap) return target.length;
+        throw RuntimeD4rtException(
+          "Target is not a SplayTreeMap for getter 'length'",
+        );
+      },
+      'isEmpty': (visitor, target) {
+        if (target is SplayTreeMap) return target.isEmpty;
+        throw RuntimeD4rtException(
+          "Target is not a SplayTreeMap for getter 'isEmpty'",
+        );
+      },
+      'isNotEmpty': (visitor, target) {
+        if (target is SplayTreeMap) return target.isNotEmpty;
+        throw RuntimeD4rtException(
+          "Target is not a SplayTreeMap for getter 'isNotEmpty'",
+        );
+      },
+      'keys': (visitor, target) {
+        if (target is SplayTreeMap) return target.keys;
+        throw RuntimeD4rtException(
+          "Target is not a SplayTreeMap for getter 'keys'",
+        );
+      },
+      'values': (visitor, target) {
+        if (target is SplayTreeMap) return target.values;
+        throw RuntimeD4rtException(
+          "Target is not a SplayTreeMap for getter 'values'",
+        );
+      },
+      'entries': (visitor, target) {
+        if (target is SplayTreeMap) return target.entries;
+        throw RuntimeD4rtException(
+          "Target is not a SplayTreeMap for getter 'entries'",
+        );
+      },
+      'hashCode': (visitor, target) {
+        if (target is SplayTreeMap) return target.hashCode;
+        throw RuntimeD4rtException(
+          "Target is not a SplayTreeMap for getter 'hashCode'",
+        );
+      },
+      'runtimeType': (visitor, target) {
+        if (target is SplayTreeMap) return target.runtimeType;
+        throw RuntimeD4rtException(
+          "Target is not a SplayTreeMap for getter 'runtimeType'",
+        );
+      },
+    },
+  );
+}

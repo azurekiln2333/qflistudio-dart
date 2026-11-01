@@ -1,0 +1,241 @@
+import 'package:tom_d4rt/d4rt.dart';
+
+class StringCore {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: String,
+    name: 'String',
+    isAssignable: (v) => v is String,
+    typeParameterCount: 0,
+    staticMethods: {
+      'fromCharCode': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.fromCharCode', atMost: 1);
+        return String.fromCharCode(positionalArgs[0] as int);
+      },
+      'fromCharCodes': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.fromCharCodes', atMost: 3);
+        // SCE126: `Iterable`, not `List`. The SDK signature is
+        // `String.fromCharCodes(Iterable<int> charCodes, [int start, int? end])`,
+        // and casting to `List` narrowed the domain — a `Set`, a `.map(…)` or a
+        // `.where(…)` raised `_TypeError` where real Dart returns the string.
+        // The only one of the twenty-six Iterable- and Pattern-taking members
+        // swept that disagreed; the cast stays a cast, because a non-Iterable
+        // argument raises the same `_TypeError` the SDK does.
+        return String.fromCharCodes(
+          (positionalArgs[0] as Iterable).cast<int>(),
+          positionalArgs.length > 1 ? positionalArgs[1] as int? ?? 0 : 0,
+          positionalArgs.length > 2 ? positionalArgs[2] as int? : null,
+        );
+      },
+      'fromEnvironment': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.fromEnvironment', atMost: 1);
+        return String.fromEnvironment(
+          positionalArgs[0] as String,
+          defaultValue: namedArgs['defaultValue'] as String? ?? '',
+        );
+      },
+    },
+    methods: {
+      '[]': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.[]', atMost: 1);
+        // SCD93: no `is! int` test. Both operands are already native, so the
+        // cast raises the SDK's own `TypeError` for a non-int index and
+        // `String.[]` raises the SDK's own `RangeError` out of range — where
+        // the guard raised a `RuntimeD4rtException` no `on` clause could name.
+        // The LIST arm of `visitIndexExpression` had the same defect; this is
+        // the same fix on the other half of the operator.
+        return (target as String)[positionalArgs[0] as int];
+      },
+      'substring': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.substring', atMost: 2);
+        return (target as String).substring(
+          positionalArgs[0] as int,
+          positionalArgs.length > 1 ? positionalArgs[1] as int? : null,
+        );
+      },
+      'toUpperCase': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as String).toUpperCase();
+      },
+      'toLowerCase': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as String).toLowerCase();
+      },
+      'contains': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.contains', atMost: 2);
+        return (target as String).contains(
+          positionalArgs[0] as Pattern,
+          positionalArgs.length > 1 ? positionalArgs[1] as int? ?? 0 : 0,
+        );
+      },
+      // `Pattern.matchAsPrefix(String string, [int start])` — the receiver
+      // is the *pattern* and the string being searched is the *argument*.
+      // Reading it the other way round produces a bridge that compiles and
+      // matches nothing.
+      'matchAsPrefix': (visitor, target, positionalArgs, namedArgs, _) {
+        if (positionalArgs.isEmpty ||
+            positionalArgs.length > 2 ||
+            namedArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            'String.matchAsPrefix(string, [start]) expects one or two '
+            'positional arguments.',
+          );
+        }
+        final string = positionalArgs[0];
+        if (string is! String) {
+          throw RuntimeD4rtException(
+            'The first argument to String.matchAsPrefix must be a '
+            'String.',
+          );
+        }
+        return (target as String).matchAsPrefix(
+          string,
+          positionalArgs.length > 1 ? positionalArgs[1] as int : 0,
+        );
+      },
+      'startsWith': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.startsWith', atMost: 2);
+        return (target as String).startsWith(
+          positionalArgs[0] as Pattern,
+          positionalArgs.length > 1 ? positionalArgs[1] as int? ?? 0 : 0,
+        );
+      },
+      'endsWith': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.endsWith', atMost: 1);
+        return (target as String).endsWith(positionalArgs[0] as String);
+      },
+      'indexOf': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.indexOf', atMost: 2);
+        return (target as String).indexOf(
+          positionalArgs[0] as Pattern,
+          positionalArgs.length > 1 ? positionalArgs[1] as int? ?? 0 : 0,
+        );
+      },
+      'lastIndexOf': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.lastIndexOf', atMost: 2);
+        return (target as String).lastIndexOf(
+          positionalArgs[0] as Pattern,
+          positionalArgs.length > 1 ? positionalArgs[1] as int? : null,
+        );
+      },
+      'trim': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as String).trim();
+      },
+      'trimLeft': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as String).trimLeft();
+      },
+      'trimRight': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as String).trimRight();
+      },
+      'replaceAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.replaceAll', atMost: 2);
+        return (target as String).replaceAll(
+          positionalArgs[0] as Pattern,
+          positionalArgs[1] as String,
+        );
+      },
+      'split': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.split', atMost: 1);
+        return (target as String).split(positionalArgs[0] as Pattern);
+      },
+      'splitMapJoin': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.splitMapJoin', atMost: 1);
+        final pattern = positionalArgs[0] as Pattern;
+        final onMatch = namedArgs['onMatch'] as Callable?;
+        final onNonMatch = namedArgs['onNonMatch'] as Callable?;
+        return (target as String).splitMapJoin(
+          pattern,
+          onMatch: onMatch == null
+              ? null
+              : (Match m) => onMatch.call(visitor, [m]) as String,
+          onNonMatch: onNonMatch == null
+              ? null
+              : (String s) => onNonMatch.call(visitor, [s]) as String,
+        );
+      },
+      'padLeft': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.padLeft', atMost: 2);
+        return (target as String).padLeft(
+          positionalArgs[0] as int,
+          positionalArgs.length > 1 ? positionalArgs[1] as String? ?? ' ' : ' ',
+        );
+      },
+      'padRight': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.padRight', atMost: 2);
+        return (target as String).padRight(
+          positionalArgs[0] as int,
+          positionalArgs.length > 1 ? positionalArgs[1] as String? ?? ' ' : ' ',
+        );
+      },
+      'replaceFirst': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.replaceFirst', atMost: 3);
+        return (target as String).replaceFirst(
+          positionalArgs[0] as Pattern,
+          positionalArgs[1] as String,
+          positionalArgs.length > 2 ? positionalArgs[2] as int? ?? 0 : 0,
+        );
+      },
+      'replaceRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.replaceRange', atMost: 3);
+        return (target as String).replaceRange(
+          positionalArgs[0] as int,
+          positionalArgs.length > 1 ? positionalArgs[1] as int? : null,
+          positionalArgs[2] as String,
+        );
+      },
+      'codeUnitAt': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.codeUnitAt', atMost: 1);
+        return (target as String).codeUnitAt(positionalArgs[0] as int);
+      },
+      'toString': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as String).toString();
+      },
+      'compareTo': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.compareTo', atMost: 1);
+        return (target as String).compareTo(positionalArgs[0] as String);
+      },
+      'allMatches': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.allMatches', atMost: 2);
+        return (target as String).allMatches(
+          positionalArgs[0] as String,
+          positionalArgs.length > 1 ? positionalArgs[1] as int? ?? 0 : 0,
+        );
+      },
+      'replaceAllMapped': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.replaceAllMapped', atMost: 2);
+        final pattern = positionalArgs[0] as Pattern;
+        final replace = positionalArgs[1];
+        if (replace is! Callable) {
+          throw RuntimeD4rtException(
+            'Expected a function for replaceAllMapped',
+          );
+        }
+        return (target as String).replaceAllMapped(pattern, (match) {
+          return replace.call(visitor, [match]) as String;
+        });
+      },
+      'replaceFirstMapped': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'String.replaceFirstMapped', atMost: 3);
+        final pattern = positionalArgs[0] as Pattern;
+        final replace = positionalArgs[1];
+        if (replace is! Callable) {
+          throw RuntimeD4rtException(
+            'Expected a function for replaceFirstMapped',
+          );
+        }
+        final startIndex = positionalArgs.length > 2
+            ? positionalArgs[2] as int? ?? 0
+            : 0;
+        return (target as String).replaceFirstMapped(pattern, (match) {
+          return replace.call(visitor, [match]) as String;
+        }, startIndex);
+      },
+    },
+    getters: {
+      'isEmpty': (visitor, target) => (target as String).isEmpty,
+      'runtimeType': (visitor, target) => (target as String).runtimeType,
+      'isNotEmpty': (visitor, target) => (target as String).isNotEmpty,
+      'length': (visitor, target) => (target as String).length,
+      'codeUnits': (visitor, target) => (target as String).codeUnits,
+      'runes': (visitor, target) => (target as String).runes,
+      'hashCode': (visitor, target) => (target as String).hashCode,
+    },
+  );
+}

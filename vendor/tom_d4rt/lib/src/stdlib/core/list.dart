@@ -1,0 +1,626 @@
+import 'dart:math' show Random;
+
+import 'package:tom_d4rt/d4rt.dart';
+
+class ListCore {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: List,
+    name: 'List',
+    // GEN-C3d: match any List subtype, including private impls like
+    // `CodeUnits` (returned by `String.codeUnits`),
+    // `UnmodifiableListView`, `_GrowableList`, etc. Without this,
+    // `String.codeUnits.length` failed because `toBridgedInstance` could
+    // not bridge the private `CodeUnits` runtime type. Mirrors the
+    // pattern already used by the `Set` bridge.
+    isAssignable: (v) => v is List,
+    typeParameterCount: 1,
+    constructors: {
+      'empty': (visitor, positionalArgs, namedArgs) {
+        return List<dynamic>.empty(
+          growable: namedArgs['growable'] as bool? ?? false,
+        );
+      },
+      'filled': (visitor, positionalArgs, namedArgs) {
+        return List.filled(
+          positionalArgs[0] as int,
+          positionalArgs[1],
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'from': (visitor, positionalArgs, namedArgs) {
+        return List<dynamic>.from(
+          positionalArgs[0] as Iterable,
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'of': (visitor, positionalArgs, namedArgs) {
+        return List.of(
+          positionalArgs[0] as Iterable,
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'generate': (visitor, positionalArgs, namedArgs) {
+        final generator = positionalArgs[1];
+        if (generator is! Callable) {
+          throw RuntimeD4rtException('Expected a function for generate');
+        }
+        return List<dynamic>.generate(
+          positionalArgs[0] as int,
+          (i) => generator.call(visitor, [i]),
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'unmodifiable': (visitor, positionalArgs, namedArgs) {
+        return List<dynamic>.unmodifiable(positionalArgs[0] as Iterable);
+      },
+    },
+    staticMethods: {
+      'castFrom': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.castFrom', atMost: 1);
+        return List.castFrom<dynamic, dynamic>(positionalArgs[0] as List);
+      },
+      'from': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.from', atMost: 1);
+        return List<dynamic>.from(
+          positionalArgs[0] as Iterable,
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'empty': (visitor, positionalArgs, namedArgs, _) {
+        return List<dynamic>.empty(
+          growable: namedArgs['growable'] as bool? ?? false,
+        );
+      },
+      'generate': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.generate', atMost: 2);
+        final generator = positionalArgs[1];
+        if (generator is! Callable) {
+          throw RuntimeD4rtException('Expected a function for generate');
+        }
+        return List<dynamic>.generate(
+          positionalArgs[0] as int,
+          (i) => generator.call(visitor, [i]),
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'copyRange': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.copyRange', atMost: 5);
+        List.copyRange(
+          positionalArgs[0] as List,
+          positionalArgs[1] as int,
+          positionalArgs[2] as List,
+          positionalArgs.length > 3 ? positionalArgs[3] as int? : null,
+          positionalArgs.length > 4 ? positionalArgs[4] as int? : null,
+        );
+        return null;
+      },
+      'filled': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.filled', atMost: 2);
+        return List.filled(
+          positionalArgs[0] as int,
+          positionalArgs[1],
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'of': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.of', atMost: 1);
+        return List.of(
+          positionalArgs[0] as Iterable,
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'unmodifiable': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.unmodifiable', atMost: 1);
+        return List<dynamic>.unmodifiable(positionalArgs[0] as Iterable);
+      },
+      'writeIterable': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.writeIterable', atMost: 3);
+        List.writeIterable(
+          positionalArgs[0] as List,
+          positionalArgs[1] as int,
+          positionalArgs[2] as Iterable,
+        );
+        return null;
+      },
+    },
+    methods: {
+      '[]': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.[]', atMost: 1);
+        return (target as List)[positionalArgs[0] as int];
+      },
+      '[]=': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.[]=', atMost: 2);
+        (target as List)[positionalArgs[0] as int] = positionalArgs[1];
+        return null;
+      },
+      'add': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.add', atMost: 1);
+        (target as List).add(positionalArgs[0]);
+        return null;
+      },
+      'addAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.addAll', atMost: 1);
+        final list = target as List;
+        for (final e in positionalArgs[0] as Iterable) {
+          final value = e is BridgedInstance ? e.nativeObject : e;
+          list.add(value);
+        }
+        return null;
+      },
+      'remove': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.remove', atMost: 1);
+        return (target as List).remove(positionalArgs[0]);
+      },
+      'removeAt': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.removeAt', atMost: 1);
+        return (target as List).removeAt(positionalArgs[0] as int);
+      },
+      'removeLast': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as List).removeLast();
+      },
+      'clear': (visitor, target, positionalArgs, namedArgs, _) {
+        (target as List).clear();
+        return null;
+      },
+      'contains': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.contains', atMost: 1);
+        return (target as List).contains(positionalArgs[0]);
+      },
+      'indexOf': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.indexOf', atMost: 2);
+        int start = positionalArgs.length == 2 ? positionalArgs[1] as int : 0;
+        return (target as List).indexOf(positionalArgs[0], start);
+      },
+      'lastIndexOf': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.lastIndexOf', atMost: 2);
+        int? start = positionalArgs.length == 2
+            ? positionalArgs[1] as int?
+            : null;
+        return (target as List).lastIndexOf(positionalArgs[0], start);
+      },
+      'indexWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.indexWhere', atMost: 2);
+        final test = positionalArgs[0] as Callable;
+        int start = positionalArgs.length > 1 ? positionalArgs[1] as int : 0;
+        return (target as List).indexWhere(
+          (element) => test.call(visitor, [element], {}) as bool,
+          start,
+        );
+      },
+      'lastIndexWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.lastIndexWhere', atMost: 2);
+        final test = positionalArgs[0] as Callable;
+        int? start = positionalArgs.length > 1
+            ? positionalArgs[1] as int?
+            : null;
+        return (target as List).lastIndexWhere(
+          (element) => test.call(visitor, [element], {}) as bool,
+          start,
+        );
+      },
+      'sublist': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.sublist', atMost: 2);
+        int? end = positionalArgs.length == 2
+            ? positionalArgs[1] as int?
+            : null;
+        return (target as List).sublist(positionalArgs[0] as int, end);
+      },
+      'forEach': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.forEach', atMost: 1);
+        final callback = positionalArgs[0];
+        // Bug-95 FIX: Accept both InterpretedFunction/Callable and native
+        // Dart Function tear-offs (like `print`).
+        for (final element in target as List) {
+          if (callback is Callable) {
+            callback.call(visitor, [element], {});
+          } else if (callback is Function) {
+            callback(element);
+          } else {
+            throw RuntimeD4rtException(
+              'Expected a function for forEach, got ${callback.runtimeType}',
+            );
+          }
+        }
+        return null;
+      },
+      'any': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.any', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        return (target as List).any(
+          (element) => test.call(visitor, [element], {}) as bool,
+        );
+      },
+      'every': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.every', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        return (target as List).every(
+          (element) => test.call(visitor, [element], {}) as bool,
+        );
+      },
+      'map': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.map', atMost: 1);
+        final toElement = positionalArgs[0] as Callable;
+        return (target as List).map(
+          (element) => toElement.call(visitor, [element], {}),
+        );
+      },
+      'where': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.where', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        return (target as List).where(
+          (element) => test.call(visitor, [element], {}) as bool,
+        );
+      },
+      'whereType': (visitor, target, positionalArgs, namedArgs, _) {
+        // Mirrors the Iterable bridge: returns the list contents
+        // unfiltered (Iterable<dynamic>); the per-call type argument is
+        // not used yet. Adding this entry stops scripts that call
+        // `someList.whereType<Widget>()` from failing the bridge lookup.
+        return (target as List).whereType();
+      },
+      'expand': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.expand', atMost: 1);
+        final toElements = positionalArgs[0] as Callable;
+        return (target as List).expand(
+          (element) => toElements.call(visitor, [element], {}) as Iterable,
+        );
+      },
+      'reduce': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.reduce', atMost: 1);
+        final combine = positionalArgs[0] as Callable;
+        // SCE185: through a `cast<Object?>()` view — see `Iterable.reduce`.
+        return (target as List).cast<Object?>().reduce(
+          (value, element) => combine.call(visitor, [value, element], {}),
+        );
+      },
+      'fold': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.fold', atMost: 2);
+        final initialValue = positionalArgs[0];
+        final combine = positionalArgs[1] as Callable;
+        return (target as List).fold(
+          initialValue,
+          (previousValue, element) =>
+              combine.call(visitor, [previousValue, element], {}),
+        );
+      },
+      'join': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.join', atMost: 1);
+        final separator = positionalArgs.isNotEmpty
+            ? positionalArgs[0] as String
+            : '';
+        return (target as List).join(separator);
+      },
+      'take': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.take', atMost: 1);
+        return (target as List).take(positionalArgs[0] as int);
+      },
+      'takeWhile': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.takeWhile', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        return (target as List).takeWhile(
+          (value) => test.call(visitor, [value], {}) as bool,
+        );
+      },
+      'skip': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.skip', atMost: 1);
+        return (target as List).skip(positionalArgs[0] as int);
+      },
+      'skipWhile': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.skipWhile', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        return (target as List).skipWhile(
+          (value) => test.call(visitor, [value], {}) as bool,
+        );
+      },
+      'toList': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as List).toList(
+          growable: namedArgs['growable'] as bool? ?? true,
+        );
+      },
+      'toSet': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as List).toSet();
+      },
+      'firstWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.firstWhere', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        final orElse = namedArgs['orElse'] as Callable?;
+        // SCE109: delegated, like `lastWhere` and `singleWhere` immediately
+        // below. This was a hand-rolled loop whose no-match branch threw
+        // `RuntimeD4rtException('No element found matching the test
+        // condition')` — an invented contract that is not an `Error`, so
+        // `on StateError` did not catch it and the idiomatic recovery path
+        // was dead. The SDK raises `StateError: No element`.
+        //
+        // The comment it replaces read "implémentation manuelle pour éviter
+        // les problèmes de types génériques". Its two neighbours delegate and
+        // have no such problem, which is what made the claim checkable: the
+        // callback is wrapped the same way in all three.
+        // SCE109: `cast<Object?>()` is what makes the delegation legal.
+        // The native `orElse` is typed `() => E`, so handing it a callback
+        // that returns `Object?` fails on any list whose element type is not
+        // `Object?` — `E.values.firstWhere(…, orElse: …)` threw
+        // "type '() => Object?' is not a subtype of type
+        // '(() => InterpretedEnumValue)?'". The cast view's element type IS
+        // `Object?`, so the callback fits and the SDK still owns the no-match
+        // behaviour.
+        //
+        // That defect was present in this adapter before SCE109 and unmeasured,
+        // because nothing passed `orElse` to it on a typed list. The
+        // hand-rolled loop `firstWhere` carried — whose comment said it existed
+        // "pour éviter les problèmes de types génériques" — was avoiding
+        // exactly this, and was right about it; what it got wrong was throwing
+        // an invented `RuntimeD4rtException` instead of the SDK's `StateError`
+        // when there was no match.
+        return (target as List).cast<Object?>().firstWhere(
+          (element) => test.call(visitor, [element], {}) as bool,
+          orElse: orElse == null ? null : () => orElse.call(visitor, [], {}),
+        );
+      },
+      'lastWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.lastWhere', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        final orElse = namedArgs['orElse'] as Callable?;
+        // SCE109: cast for the same reason as `firstWhere` above.
+        return (target as List).cast<Object?>().lastWhere(
+          (element) => test.call(visitor, [element], {}) as bool,
+          orElse: orElse == null ? null : () => orElse.call(visitor, [], {}),
+        );
+      },
+      'singleWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.singleWhere', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        final orElse = namedArgs['orElse'] as Callable?;
+        // SCE109: cast for the same reason as `firstWhere` above.
+        return (target as List).cast<Object?>().singleWhere(
+          (element) => test.call(visitor, [element], {}) as bool,
+          orElse: orElse == null ? null : () => orElse.call(visitor, [], {}),
+        );
+      },
+      'insert': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.insert', atMost: 2);
+        (target as List).insert(positionalArgs[0] as int, positionalArgs[1]);
+        return null;
+      },
+      'insertAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.insertAll', atMost: 2);
+        final list = target as List;
+        var index = positionalArgs[0] as int;
+        for (final e in positionalArgs[1] as Iterable) {
+          final value = e is BridgedInstance ? e.nativeObject : e;
+          list.insert(index++, value);
+        }
+        return null;
+      },
+      'setAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.setAll', atMost: 2);
+        final list = target as List;
+        var index = positionalArgs[0] as int;
+        for (final e in positionalArgs[1] as Iterable) {
+          final value = e is BridgedInstance ? e.nativeObject : e;
+          list[index++] = value;
+        }
+        return null;
+      },
+      'fillRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.fillRange', atMost: 3);
+        (target as List).fillRange(
+          positionalArgs[0] as int,
+          positionalArgs[1] as int,
+          positionalArgs.length > 2 ? positionalArgs[2] : null,
+        );
+        return null;
+      },
+      'replaceRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.replaceRange', atMost: 3);
+        final list = target as List;
+        final start = positionalArgs[0] as int;
+        final end = positionalArgs[1] as int;
+        final iterable = positionalArgs[2] as Iterable;
+        // Remove the range first
+        list.removeRange(start, end);
+        // Insert new elements one by one (dynamic values are implicitly cast)
+        var index = start;
+        for (final e in iterable) {
+          final value = e is BridgedInstance ? e.nativeObject : e;
+          list.insert(index++, value);
+        }
+        return null;
+      },
+      'removeRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.removeRange', atMost: 2);
+        (target as List).removeRange(
+          positionalArgs[0] as int,
+          positionalArgs[1] as int,
+        );
+        return null;
+      },
+      'retainWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.retainWhere', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        (target as List).retainWhere(
+          (element) => test.call(visitor, [element], {}) as bool,
+        );
+        return null;
+      },
+      'removeWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.removeWhere', atMost: 1);
+        final test = positionalArgs[0] as Callable;
+        (target as List).removeWhere(
+          (element) => test.call(visitor, [element], {}) as bool,
+        );
+        return null;
+      },
+      'sort': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.sort', atMost: 1);
+        if (positionalArgs.isEmpty) {
+          final list = target as List;
+          if (list.isEmpty) return null;
+
+          final first = list.first;
+
+          // Check if elements are InterpretedInstances that implement Comparable
+          if (first is InterpretedInstance) {
+            // Use interpreted compareTo method
+            list.sort((a, b) {
+              if (a is InterpretedInstance && b is InterpretedInstance) {
+                final compareToMethod = a.klass.findInstanceMethod('compareTo');
+                if (compareToMethod != null) {
+                  final boundMethod = compareToMethod.bind(a);
+                  final result = boundMethod.call(visitor, [b], {});
+                  if (result is int) {
+                    return result;
+                  }
+                  throw RuntimeD4rtException(
+                    "compareTo must return an int, got ${result?.runtimeType}",
+                  );
+                }
+                throw RuntimeD4rtException(
+                  "Class '${a.klass.name}' does not implement compareTo for sorting",
+                );
+              }
+              // Fall back to native Comparable
+              return (a as Comparable).compareTo(b);
+            });
+          } else if (first is BridgedInstance) {
+            // BridgedInstance - use native compareTo on unwrapped objects
+            list.sort((a, b) {
+              final aObj = a is BridgedInstance ? a.nativeObject : a;
+              final bObj = b is BridgedInstance ? b.nativeObject : b;
+              return (aObj as Comparable).compareTo(bObj);
+            });
+          } else {
+            list.sort();
+          }
+        } else {
+          final compare = positionalArgs[0] as Callable;
+          (target as List).sort(
+            (a, b) => compare.call(visitor, [a, b], {}) as int,
+          );
+        }
+        return null;
+      },
+      'shuffle': (visitor, target, positionalArgs, namedArgs, _) {
+        // SCE185: the `Random` was dropped, so `list.shuffle(Random(seed))`
+        // was not reproducible — while every typed list honoured it.
+        D4.checkArity(positionalArgs, 'List.shuffle', atMost: 1);
+        final random = positionalArgs.isNotEmpty ? positionalArgs[0] : null;
+        (target as List).shuffle(
+          (random is BridgedInstance ? random.nativeObject : random) as Random?,
+        );
+        return null;
+      },
+      'asMap': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as List).asMap();
+      },
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as List).cast<dynamic>();
+      },
+      'followedBy': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.followedBy', atMost: 1);
+        // SCE185: through a `cast<Object?>()` view — see `Iterable.followedBy`.
+        return (target as List).cast<Object?>().followedBy(
+          positionalArgs[0] as Iterable,
+        );
+      },
+      'elementAt': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.elementAt', atMost: 1);
+        return (target as List).elementAt(positionalArgs[0] as int);
+      },
+      'elementAtOrNull': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.elementAtOrNull', atMost: 1);
+        return (target as List).elementAtOrNull(positionalArgs[0] as int);
+      },
+      'byName': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.byName', atMost: 1);
+        // byName is used on List<Enum>.values to find enum by name
+        // For interpreted enums, elements are InterpretedEnumValue
+        final name = positionalArgs[0] as String;
+        final list = target as List;
+        for (final element in list) {
+          if (element is InterpretedEnumValue && element.name == name) {
+            return element;
+          }
+          // Try dynamic access for bridged enum values
+          try {
+            final dynamic dynElement = element;
+            if (dynElement.name == name) {
+              return element;
+            }
+          } catch (_) {
+            // Element doesn't have a name property, skip
+          }
+        }
+        throw RuntimeD4rtException(
+          'No enum value with name "$name" in ${list.map((e) => e is InterpretedEnumValue ? e.name : e.toString()).toList()}',
+        );
+      },
+      'setRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.setRange', atMost: 4);
+        int skipCount = positionalArgs.length > 3
+            ? positionalArgs[3] as int? ?? 0
+            : 0;
+        // SCE185: copied element by element, as `setAll` already was. A
+        // script's list literal is `List<Object?>`, which a natively typed
+        // receiver (`List<int>`, `Int8List`) refuses as its `Iterable<E>`
+        // argument before copying anything. The source is snapshotted first,
+        // so a range copied within one list reads the values it started with,
+        // as the SDK guarantees.
+        final list = target as List;
+        final start = positionalArgs[0] as int;
+        final end = positionalArgs[1] as int;
+        RangeError.checkValidRange(start, end, list.length);
+        RangeError.checkNotNegative(skipCount, 'skipCount');
+        final source = (positionalArgs[2] as Iterable)
+            .skip(skipCount)
+            .take(end - start)
+            .map((e) => e is BridgedInstance ? e.nativeObject : e)
+            .toList();
+        if (source.length < end - start) {
+          throw StateError('Too few elements');
+        }
+        for (var i = 0; i < source.length; i++) {
+          list[start + i] = source[i];
+        }
+        return null;
+      },
+      'getRange': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'List.getRange', atMost: 2);
+        return (target as List).getRange(
+          positionalArgs[0] as int,
+          positionalArgs[1] as int,
+        );
+      },
+    },
+    getters: {
+      'length': (visitor, target) => (target as List).length,
+      'isEmpty': (visitor, target) => (target as List).isEmpty,
+      'isNotEmpty': (visitor, target) => (target as List).isNotEmpty,
+      'first': (visitor, target) => (target as List).first,
+      'last': (visitor, target) => (target as List).last,
+      'single': (visitor, target) => (target as List).single,
+      'reversed': (visitor, target) => (target as List).reversed,
+      'iterator': (visitor, target) => (target as List).iterator,
+      'runtimeType': (visitor, target) => (target as List).runtimeType,
+      'hashCode': (visitor, target) => (target as List).hashCode,
+      'firstOrNull': (visitor, target) => (target as List).firstOrNull,
+      'lastOrNull': (visitor, target) => (target as List).lastOrNull,
+      'singleOrNull': (visitor, target) => (target as List).singleOrNull,
+      // Dart 3 IndexedIterable extension: returns Iterable<(int, E)>.
+      // The List bridge has its own getters map (no Iterable
+      // inheritance), so the getter must be exposed here too — the
+      // lookup hits the List bridge first.
+      'indexed': (visitor, target) => (target as List).indexed,
+    },
+    setters: {
+      'length': (visitor, target, value) {
+        (target as List).length = value as int;
+      },
+      'first': (visitor, target, value) {
+        (target as List).first = value;
+      },
+      'last': (visitor, target, value) {
+        (target as List).last = value;
+      },
+    },
+  );
+}

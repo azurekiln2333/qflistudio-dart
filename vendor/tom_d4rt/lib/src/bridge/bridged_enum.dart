@@ -1,0 +1,284 @@
+import 'package:tom_d4rt/d4rt.dart';
+
+/// Represents an enum type defined in the host Dart environment and bridged into the interpreter.
+/// It holds the definition and provides access to its values.
+class BridgedEnum implements RuntimeType {
+  /// The name of the enum.
+  @override
+  final String name;
+
+  /// A map of the enum's value names to their corresponding BridgedEnumValue instances.
+  final Map<String, BridgedEnumValue> values;
+
+  /// Instance getter adapters (shared by all values).
+  Map<String, BridgedInstanceGetterAdapter> getters = {};
+
+  /// Instance method adapters (shared by all values).
+  Map<String, BridgedMethodAdapter> methods = {};
+
+  /// Static getter adapters for non-constant static members.
+  /// E.g. `WidgetState.any` which returns a `WidgetStatesConstraint`.
+  Map<String, Object? Function()> staticGetters = {};
+
+  /// Static method adapters for static factory/helper members.
+  /// E.g. `PageFormat.fromString(name)`, invoked as `EnumType.method(args)`.
+  Map<String, BridgedStaticMethodAdapter> staticMethods = {};
+
+  /// Creates a definition for a bridged enum.
+  BridgedEnum(this.name, this.values);
+
+  /// Resolves a static method adapter by [methodName], or `null` if the enum
+  /// declares no such static method.
+  BridgedStaticMethodAdapter? findStaticMethodAdapter(String methodName) =>
+      staticMethods[methodName];
+
+  @override
+  String toString() => 'BridgedEnum($name)';
+
+  @override
+  bool isSubtypeOf(RuntimeType other, {Object? value}) {
+    if (other.name == 'Object' || other == this) return true;
+    // Allow runtime hierarchy checks for interfaces/superclasses the native
+    // enum implements (e.g. WidgetState implements WidgetStatesConstraint).
+    // We delegate to BridgedClass.isAssignable using the underlying native
+    // enum value, which mirrors how BridgedClass.isSubtypeOf handles
+    // BridgedInstance values.
+    if (other is BridgedClass && other.isAssignable != null) {
+      final nativeValue = value is BridgedEnumValue ? value.nativeValue : value;
+      if (nativeValue != null && other.isAssignable!(nativeValue)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Retrieves an enum value by its name, or handles built-in static
+  /// properties like `values`.
+  ///
+  /// Returns a [BridgedEnumValue] for named values, a `List<BridgedEnumValue>`
+  /// for `values`, or `null` if not found.
+  Object? getValue(String valueName) {
+    // GEN-044: Handle built-in enum static getters.
+    if (valueName == 'values') {
+      return enumValues;
+    }
+    // Check enum constants first
+    final enumValue = values[valueName];
+    if (enumValue != null) return enumValue;
+    // RC-8: Check static getters (e.g. WidgetState.any)
+    final staticGetter = staticGetters[valueName];
+    if (staticGetter != null) return staticGetter();
+    // RC-8: Fallback to runtime-registered static getters (via D4.registerEnumStaticGetter)
+    final runtimeGetter = D4.findEnumStaticGetter(name, valueName);
+    if (runtimeGetter != null) return runtimeGetter();
+    return null;
+  }
+
+  /// Returns the list of all values for this enum.
+  List<BridgedEnumValue> get enumValues => values.values.toList();
+}
+
+/// Represents a specific value of a [BridgedEnum].
+/// It holds the value's name, index, and the original native enum value.
+class BridgedEnumValue implements RuntimeValue {
+  /// The [BridgedEnum] definition this value belongs to.
+  final BridgedEnum enumType;
+
+  /// The name of the enum value (e.g., 'red' for Color.red).
+  final String name;
+
+  /// The index of the enum value in its definition order.
+  final int index;
+
+  /// The original native Dart enum value.
+  final Object nativeValue;
+
+  /// Instance getter adapters (potentially specific to this value if needed in the future,
+  /// but currently shared via BridgedEnum).
+  final Map<String, BridgedInstanceGetterAdapter> _getters;
+
+  /// Instance method adapters.
+  final Map<String, BridgedMethodAdapter> _methods;
+
+  BridgedEnumValue(
+    this.enumType,
+    this.name,
+    this.index,
+    this.nativeValue, {
+    Map<String, BridgedInstanceGetterAdapter>? getters, // Rendre optionnels ici
+    Map<String, BridgedMethodAdapter>? methods,
+  }) : _getters = getters ?? {},
+       _methods = methods ?? {};
+
+  // Implement the required getter from RuntimeValue
+  @override
+  RuntimeType get valueType => enumType;
+
+  @override
+  Object? get(String identifier) {
+    // Access standard enum properties
+    switch (identifier) {
+      case 'index':
+        return index;
+      case 'name':
+        return name;
+      // RC-4: Object-level properties that all objects support
+      case 'hashCode':
+        return nativeValue.hashCode;
+      case 'runtimeType':
+        return enumType;
+      default:
+        // 1. Check for custom instance getters
+        final getterAdapter =
+            _getters[identifier] ?? enumType.getters[identifier];
+        if (getterAdapter != null) {
+          try {
+            // Note: The visitor is null here because get() has no visitor context.
+            // If the adapter needs the visitor, the interface will need to be revised.
+            return getterAdapter(null, nativeValue);
+          } catch (e) {
+            throw RuntimeD4rtException(
+              'Error executing bridged getter "$identifier" on ${enumType.name}.$name: $e',
+            );
+          }
+        }
+
+        // 2. Check for instance methods (for cases like .toString() called as a getter)
+        // Or to return a callable function representing the method.
+        final methodAdapter =
+            _methods[identifier] ?? enumType.methods[identifier];
+        if (methodAdapter != null) {
+          // Return a function that wraps the bridged method call
+          // (or handle directly if it's a getter disguised as a method, like toString)
+          if (identifier == 'toString') {
+            // Special case for toString() via get
+            // We could call the toString adapter if it exists, otherwise fallback
+            try {
+              // Try to call the toString adapter (which should not need args)
+              final env = Environment();
+              return methodAdapter(
+                InterpreterVisitor(
+                  globalEnvironment: env,
+                  moduleLoader: ModuleLoader(env, {}, {}, {}),
+                ),
+                nativeValue,
+                [],
+                {},
+                null,
+              );
+            } catch (_) {
+              // Fallback if the adapter does not exist or fails
+              return '${enumType.name}.$name';
+            }
+          }
+          // For other methods, we could return a callable function here if needed.
+          // For now, throw an error if trying to access a method via get.
+          throw RuntimeD4rtException(
+            'Cannot access method "$identifier" as a property on enum value ${enumType.name}.$name. Use call syntax ().',
+          );
+        }
+
+        // 3. If it's neither a standard property, nor a custom getter/method
+        throw RuntimeD4rtException(
+          'Property "$identifier" not found on enum value ${enumType.name}.$name',
+        );
+    }
+  }
+
+  @override
+  void set(String identifier, Object? value) {
+    // Enum values are typically immutable
+    throw RuntimeD4rtException(
+      'Cannot set property "$identifier" on enum value ${enumType.name}.$name',
+    );
+  }
+
+  /// Whether this enum value defines a bridged instance method (or operator)
+  /// named [method]. Mirrors the lookup order used by [invoke] so callers (e.g.
+  /// the interpreter's binary/unary operator dispatch) can probe for a bridged
+  /// operator method — such as the `&`, `|`, `~` overloads on Flutter's
+  /// `WidgetState` — before falling back to the built-in operator handling.
+  bool hasMethod(String method) =>
+      _methods.containsKey(method) || enumType.methods.containsKey(method);
+
+  Object? invoke(
+    InterpreterVisitor visitor,
+    String method,
+    List<Object?> args,
+    Map<String, Object?> namedArgs,
+  ) {
+    final methodAdapter = _methods[method] ?? enumType.methods[method];
+    if (methodAdapter == null) {
+      // Special case: if calling .toString() and there is no specific adapter,
+      // return the standard representation.
+      if (method == 'toString' && args.isEmpty && namedArgs.isEmpty) {
+        return '${enumType.name}.$name';
+      }
+      throw RuntimeD4rtException(
+        'Method "$method" not found on enum value ${enumType.name}.$name',
+      );
+    }
+
+    try {
+      // Call the bridged method adapter
+      return methodAdapter(
+        visitor, // Pass the visitor
+        nativeValue, // The native enum object is the target
+        args, // Interpreted positional arguments
+        namedArgs, // Interpreted named arguments (if supported by the adapter)
+        null, // Type arguments (not needed for enum methods)
+      );
+    } catch (e) {
+      throw RuntimeD4rtException(
+        'Error executing bridged method "$method" on ${enumType.name}.$name: $e',
+      );
+    }
+  }
+
+  @override
+  String toString() {
+    // Try to call the toString() adapter if it exists
+    final toStringAdapter =
+        _methods['toString'] ?? enumType.methods['toString'];
+    if (toStringAdapter != null) {
+      try {
+        // Call without specific visitor or argument here, as it's just for representation
+        final env = Environment();
+        return toStringAdapter(
+          InterpreterVisitor(
+            globalEnvironment: env,
+            moduleLoader: ModuleLoader(env, {}, {}, {}),
+          ),
+          nativeValue,
+          [],
+          {},
+          null,
+        ).toString();
+      } catch (_) {
+        // Fallback if the adapter fails
+        return '${enumType.name}.$name (native toString failed)';
+      }
+    }
+    // Provide a default representation if no toString adapter is provided
+    return '${enumType.name}.$name';
+  }
+
+  // Cross-type-boundary equality: BridgedEnumValue can equal its nativeValue
+  // so that Map lookups work regardless of wrapper direction.
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is BridgedEnumValue) {
+      return enumType.name == other.enumType.name &&
+          index == other.index &&
+          nativeValue == other.nativeValue;
+    }
+    // Allow comparison with raw native enum values
+    return other == nativeValue;
+  }
+
+  // Must match nativeValue.hashCode so that BridgedEnumValue and its
+  // nativeValue hash to the same bucket when used as Map keys.
+  @override
+  int get hashCode => nativeValue.hashCode;
+}

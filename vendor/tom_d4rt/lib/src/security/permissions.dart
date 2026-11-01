@@ -1,0 +1,559 @@
+/// Security and sandboxing system for d4rt interpreter.
+///
+/// This module provides a comprehensive permission system that allows
+/// fine-grained control over what operations interpreted code can perform.
+/// By default, potentially dangerous operations are blocked unless explicitly
+/// granted through the permission system.
+///
+/// ## Example usage:
+/// ```dart
+/// final interpreter = D4rt();
+///
+/// // Grant filesystem access
+/// interpreter.grant(FilesystemPermission.read);
+/// interpreter.grant(FilesystemPermission.write('/tmp'));
+///
+/// // Grant network access
+/// interpreter.grant(NetworkPermission.connect('api.example.com'));
+///
+/// // Grant process execution
+/// interpreter.grant(ProcessRunPermission.any);
+///
+/// // Execute code with restricted permissions
+/// final result = interpreter.execute(source: '''
+///   // This code can now access filesystem, network, and run processes
+///   // within the granted permissions
+/// ''');
+/// ```
+library;
+
+import 'current_directory_io.dart'
+    if (dart.library.html) 'current_directory_web.dart';
+
+/// Base class for all permissions in the d4rt security system.
+abstract class Permission {
+  /// The type of permission (e.g., 'filesystem', 'network', 'process').
+  String get type;
+
+  /// Human-readable description of what this permission allows.
+  String get description;
+
+  /// Checks if this permission allows the given operation.
+  bool allows(dynamic operation);
+
+  @override
+  String toString() => '$type: $description';
+}
+
+/// Filesystem permissions control file and directory operations.
+class FilesystemPermission extends Permission {
+  @override
+  final String type = 'filesystem';
+
+  final String? _path;
+  final bool _read;
+  final bool _write;
+  final bool _execute;
+
+  FilesystemPermission._(this._path, this._read, this._write, this._execute);
+
+  /// Allows reading any file or directory.
+  static final FilesystemPermission read = FilesystemPermission._(
+    null,
+    true,
+    false,
+    false,
+  );
+
+  /// Allows writing to any file or directory.
+  static final FilesystemPermission write = FilesystemPermission._(
+    null,
+    false,
+    true,
+    false,
+  );
+
+  /// Allows executing any file.
+  static final FilesystemPermission execute = FilesystemPermission._(
+    null,
+    false,
+    false,
+    true,
+  );
+
+  /// Allows all filesystem operations on any path.
+  static final FilesystemPermission any = FilesystemPermission._(
+    null,
+    true,
+    true,
+    true,
+  );
+
+  /// Allows reading files/directories under the specified path.
+  factory FilesystemPermission.readPath(String path) =>
+      FilesystemPermission._(path, true, false, false);
+
+  /// Allows writing files/directories under the specified path.
+  factory FilesystemPermission.writePath(String path) =>
+      FilesystemPermission._(path, false, true, false);
+
+  /// Allows executing files under the specified path.
+  factory FilesystemPermission.executePath(String path) =>
+      FilesystemPermission._(path, false, false, true);
+
+  /// Allows all operations under the specified path.
+  factory FilesystemPermission.path(String path) =>
+      FilesystemPermission._(path, true, true, true);
+
+  /// Reduces [path] to the single spelling used for scope comparison.
+  ///
+  /// Absolutizes against the process working directory, switches to `/`
+  /// separators, lowercases a Windows drive letter, and resolves `.` and `..`
+  /// segments away. Without the `..` resolution a grant on `/allowed` would
+  /// authorize `/allowed/../etc/passwd`, which is a scope escape.
+  ///
+  /// This step is purely lexical. Symlink resolution is a separate concern and
+  /// lives in [_scopeIdentity], which layers it on top.
+  static String _canonicalizePath(String path) {
+    final absolutePath = _absolutize(path).replaceAll('\\', '/');
+    final driveMatch = RegExp(r'^[A-Za-z]:').firstMatch(absolutePath);
+
+    String prefix = '';
+    String remainder = absolutePath;
+    if (driveMatch != null) {
+      prefix = driveMatch.group(0)!.toLowerCase();
+      remainder = absolutePath.substring(2);
+    }
+
+    final isAbsolute = remainder.startsWith('/');
+    final normalizedSegments = <String>[];
+
+    for (final rawSegment in remainder.split('/')) {
+      if (rawSegment.isEmpty || rawSegment == '.') {
+        continue;
+      }
+      if (rawSegment == '..') {
+        if (normalizedSegments.isNotEmpty) {
+          normalizedSegments.removeLast();
+        }
+        continue;
+      }
+      normalizedSegments.add(rawSegment);
+    }
+
+    final normalizedPath = normalizedSegments.join('/');
+    final leading = isAbsolute ? '/' : '';
+    return prefix.isNotEmpty
+        ? '$prefix$leading$normalizedPath'
+        : '$leading$normalizedPath';
+  }
+
+  /// Joins [path] onto the working directory when it is relative.
+  ///
+  /// Both the grant and the operation may be spelled relatively (e.g.
+  /// `FilesystemPermission.readPath('build')`), and they only compare
+  /// meaningfully once both are absolute.
+  static String _absolutize(String path) {
+    final isAbsolute =
+        path.startsWith('/') ||
+        path.startsWith(r'\') ||
+        RegExp(r'^[A-Za-z]:').hasMatch(path);
+    if (isAbsolute) return path;
+    return '${currentDirectoryPath()}/$path';
+  }
+
+  /// The single spelling [path] is compared under: lexically canonical AND
+  /// symlink-resolved.
+  ///
+  /// Both steps are needed, in this order. Canonicalizing first makes the path
+  /// absolute so [resolveRealPath] has something well-formed to resolve;
+  /// canonicalizing again afterwards normalizes whatever the platform's
+  /// realpath handed back. Grant and request both pass through here, so they
+  /// are always compared as the same kind of thing.
+  static String _scopeIdentity(String path) =>
+      _canonicalizePath(resolveRealPath(_canonicalizePath(path)));
+
+  /// Whether [requestedPath] names [allowedPath] itself or something under it.
+  ///
+  /// The comparison is on a path-SEGMENT boundary, so a sibling that merely
+  /// shares the string prefix (`/allowed_sneaky` against a grant on
+  /// `/allowed`) is correctly outside the scope.
+  ///
+  /// It is also on the REAL path, so the two spellings of a symlinked location
+  /// are the same scope. That cuts both ways by design: a grant on
+  /// `/private/var/x` admits a read of `/var/x/...`, and — the security-
+  /// relevant direction — a symlink INSIDE a granted directory that points
+  /// outside it no longer smuggles the location back into scope.
+  static bool _isPathWithinScope(String allowedPath, String requestedPath) {
+    final canonicalAllowed = _scopeIdentity(allowedPath);
+    final canonicalRequested = _scopeIdentity(requestedPath);
+    return canonicalRequested == canonicalAllowed ||
+        canonicalRequested.startsWith('$canonicalAllowed/');
+  }
+
+  @override
+  String get description {
+    final operations = [];
+    if (_read) operations.add('read');
+    if (_write) operations.add('write');
+    if (_execute) operations.add('execute');
+
+    final ops = operations.join('/');
+    final path = _path ?? 'any';
+    return '$ops operations on $path';
+  }
+
+  @override
+  bool allows(dynamic operation) {
+    if (operation is! Map<String, dynamic>) return false;
+
+    final opType = operation['type'];
+    final opPath = operation['path'];
+
+    if (opType != 'filesystem') return false;
+
+    // Check if the operation is allowed
+    final requiredRead = operation['read'] ?? false;
+    final requiredWrite = operation['write'] ?? false;
+    final requiredExecute = operation['execute'] ?? false;
+
+    if ((requiredRead && !_read) ||
+        (requiredWrite && !_write) ||
+        (requiredExecute && !_execute)) {
+      return false;
+    }
+
+    // Check path restrictions. An unscoped grant (`_path == null`) means "any
+    // path" and skips this entirely.
+    if (_path != null) {
+      // Some operations have no meaningful path — the `dart:io` import gate,
+      // for instance, asks only "is ANY filesystem access granted?". Those opt
+      // out of the scope check explicitly; note this waives the PATH check
+      // only, never the read/write/execute flags checked above.
+      if (operation['pathAgnostic'] == true) {
+        return true;
+      }
+      // No path and not path-agnostic: the matcher cannot prove the operation
+      // is in scope, so it denies rather than assuming.
+      if (opPath is! String || !_isPathWithinScope(_path, opPath)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+}
+
+/// Network permissions control network operations.
+class NetworkPermission extends Permission {
+  @override
+  final String type = 'network';
+
+  final String? _host;
+  final int? _port;
+  final bool _connect;
+  final bool _listen;
+  final bool _bind;
+
+  NetworkPermission._(
+    this._host,
+    this._port,
+    this._connect,
+    this._listen,
+    this._bind,
+  );
+
+  /// Allows connecting to any host/port.
+  static final NetworkPermission connect = NetworkPermission._(
+    null,
+    null,
+    true,
+    false,
+    false,
+  );
+
+  /// Allows listening on any port.
+  static final NetworkPermission listen = NetworkPermission._(
+    null,
+    null,
+    false,
+    true,
+    false,
+  );
+
+  /// Allows binding to any address/port.
+  static final NetworkPermission bind = NetworkPermission._(
+    null,
+    null,
+    false,
+    false,
+    true,
+  );
+
+  /// Allows all network operations.
+  static final NetworkPermission any = NetworkPermission._(
+    null,
+    null,
+    true,
+    true,
+    true,
+  );
+
+  /// Allows connecting to the specified host.
+  factory NetworkPermission.connectTo(String host) =>
+      NetworkPermission._(host, null, true, false, false);
+
+  /// Allows connecting to the specified host and port.
+  factory NetworkPermission.connectToPort(String host, int port) =>
+      NetworkPermission._(host, port, true, false, false);
+
+  /// Allows listening on the specified port.
+  factory NetworkPermission.listenOn(int port) =>
+      NetworkPermission._(null, port, false, true, false);
+
+  @override
+  String get description {
+    final operations = [];
+    if (_connect) operations.add('connect');
+    if (_listen) operations.add('listen');
+    if (_bind) operations.add('bind');
+
+    final ops = operations.join('/');
+    if (_host != null && _port != null) {
+      return '$ops to $_host:$_port';
+    } else if (_host != null) {
+      return '$ops to $_host';
+    } else if (_port != null) {
+      return '$ops on port $_port';
+    } else {
+      return '$ops on any host/port';
+    }
+  }
+
+  @override
+  bool allows(dynamic operation) {
+    if (operation is! Map<String, dynamic>) return false;
+
+    final opType = operation['type'];
+    final opHost = operation['host'];
+    final opPort = operation['port'];
+
+    if (opType != 'network') return false;
+
+    // Check if the operation is allowed
+    final requiredConnect = operation['connect'] ?? false;
+    final requiredListen = operation['listen'] ?? false;
+    final requiredBind = operation['bind'] ?? false;
+
+    if ((requiredConnect && !_connect) ||
+        (requiredListen && !_listen) ||
+        (requiredBind && !_bind)) {
+      return false;
+    }
+
+    // Check host/port restrictions
+    if (_host != null && opHost != null && opHost != _host) {
+      return false;
+    }
+    if (_port != null && opPort != null && opPort != _port) {
+      return false;
+    }
+
+    return true;
+  }
+}
+
+/// Process permissions control process execution.
+class ProcessRunPermission extends Permission {
+  @override
+  final String type = 'process';
+
+  final String? _command;
+  final List<String>? _allowedArgs;
+
+  ProcessRunPermission._(this._command, this._allowedArgs);
+
+  /// Allows running any command with any arguments.
+  static final ProcessRunPermission any = ProcessRunPermission._(null, null);
+
+  /// Allows running the specified command.
+  factory ProcessRunPermission.command(String command) =>
+      ProcessRunPermission._(command, null);
+
+  /// Allows running the specified command with specific arguments.
+  factory ProcessRunPermission.commandWithArgs(
+    String command,
+    List<String> args,
+  ) => ProcessRunPermission._(command, args);
+
+  @override
+  String get description {
+    if (_command == null) {
+      return 'run any command';
+    } else if (_allowedArgs == null) {
+      return 'run command: $_command';
+    } else {
+      return 'run command: $_command with args: ${_allowedArgs.join(', ')}';
+    }
+  }
+
+  @override
+  bool allows(dynamic operation) {
+    if (operation is! Map<String, dynamic>) return false;
+
+    final opType = operation['type'];
+    final opCommand = operation['command'];
+    final opArgs = operation['args'];
+
+    if (opType != 'process') return false;
+
+    // DFIN3: a scope-free question ("is ANY process execution granted?") —
+    // the `dart:io` import gate asks it — waives the command and argument
+    // checks, as `pathAgnostic` does for a filesystem grant.
+    if (operation['commandAgnostic'] == true) return true;
+
+    // Check command restrictions
+    if (_command != null && opCommand != _command) {
+      return false;
+    }
+
+    // Check argument restrictions
+    if (_allowedArgs != null && opArgs != null) {
+      final args = opArgs as List<String>;
+      if (args.length != _allowedArgs.length) return false;
+
+      for (int i = 0; i < args.length; i++) {
+        if (args[i] != _allowedArgs[i]) return false;
+      }
+    }
+
+    return true;
+  }
+}
+
+/// Isolate permissions control isolate creation and communication.
+class IsolatePermission extends Permission {
+  @override
+  final String type = 'isolate';
+
+  final bool _spawn;
+  final bool _communicate;
+
+  IsolatePermission._(this._spawn, this._communicate);
+
+  /// Allows spawning new isolates.
+  static final IsolatePermission spawn = IsolatePermission._(true, false);
+
+  /// Allows communicating with isolates (send/receive messages).
+  static final IsolatePermission communicate = IsolatePermission._(false, true);
+
+  /// Allows all isolate operations.
+  static final IsolatePermission any = IsolatePermission._(true, true);
+
+  @override
+  String get description {
+    final operations = [];
+    if (_spawn) operations.add('spawn');
+    if (_communicate) operations.add('communicate');
+    return '${operations.join('/')} isolates';
+  }
+
+  @override
+  bool allows(dynamic operation) {
+    if (operation is! Map<String, dynamic>) return false;
+
+    final opType = operation['type'];
+    if (opType != 'isolate') return false;
+
+    final requiredSpawn = operation['spawn'] ?? false;
+    final requiredCommunicate = operation['communicate'] ?? false;
+
+    if ((requiredSpawn && !_spawn) || (requiredCommunicate && !_communicate)) {
+      return false;
+    }
+
+    return true;
+  }
+}
+
+/// Certificate permissions govern loading X.509 certificates and private keys
+/// into a `SecurityContext`.
+///
+/// WHY THIS IS NOT `FilesystemPermission`, which already covers the file read.
+/// It covers it as an ORDINARY read, and a private key is not an ordinary
+/// read: a script scoped to a directory that happens to contain one could
+/// hand it to a `SecurityContext` and serve traffic under the host's identity,
+/// with nothing in the grant list saying that was possible. Naming the
+/// capability separately is what lets an embedder allow a script to read its
+/// own data directory without also allowing it to impersonate the host.
+///
+/// IT GATES THE BYTES VARIANTS TOO, which read nothing. The capability being
+/// granted is "install key material into a TLS context", not "open a file" —
+/// `usePrivateKeyBytes` reaches the same end with bytes the script already
+/// holds, so gating only the path variants would leave the shorter route open.
+/// The path variants are checked TWICE, here and by the filesystem gate, and
+/// that is deliberate: they genuinely do both things.
+class CertificatePermission extends Permission {
+  @override
+  final String type = 'certificate';
+
+  final bool _load;
+
+  CertificatePermission._(this._load);
+
+  /// Allows loading certificates and private keys into a `SecurityContext`.
+  static final CertificatePermission load = CertificatePermission._(true);
+
+  /// Allows all certificate operations.
+  static final CertificatePermission any = CertificatePermission._(true);
+
+  @override
+  String get description => 'load certificates and private keys';
+
+  @override
+  bool allows(dynamic operation) {
+    if (operation is! Map<String, dynamic>) return false;
+    if (operation['type'] != 'certificate') return false;
+    return _load;
+  }
+}
+
+/// Dangerous permissions that should be granted with extreme caution.
+class DangerousPermission extends Permission {
+  @override
+  final String type = 'dangerous';
+
+  final String _operation;
+
+  DangerousPermission._(this._operation);
+
+  /// Allows evaluation of arbitrary code strings (eval-like functionality).
+  static final DangerousPermission codeEvaluation = DangerousPermission._(
+    'code evaluation',
+  );
+
+  /// Allows loading and executing native plugins/libraries.
+  static final DangerousPermission nativePlugins = DangerousPermission._(
+    'native plugins',
+  );
+
+  /// Allows all dangerous operations.
+  static final DangerousPermission any = DangerousPermission._(
+    'any dangerous operation',
+  );
+
+  @override
+  String get description => 'dangerous operation: $_operation';
+
+  @override
+  bool allows(dynamic operation) {
+    if (operation is! Map<String, dynamic>) return false;
+
+    final opType = operation['type'];
+    final opOperation = operation['operation'];
+
+    if (opType != 'dangerous') return false;
+
+    return _operation == 'any dangerous operation' || opOperation == _operation;
+  }
+}

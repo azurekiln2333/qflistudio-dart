@@ -20,6 +20,8 @@ dependencies:
   # 只是靠传递依赖拿到了包，哪天上游不带了就编不过。
   path: ^1.9.1
   dart_eval: 0.8.5
+  tom_d4rt:
+    path: vendor/tom_d4rt
   pubspec_parse: 1.6.0
   analyzer: 8.4.1
   dart_style: 3.1.3

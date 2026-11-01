@@ -1,0 +1,112 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:convert';
+import 'package:tom_d4rt/d4rt.dart';
+
+/// Bridged implementation of dart:io IOSink
+class IOSinkIo {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: IOSink,
+    name: 'IOSink',
+    isAssignable: (v) => v is IOSink,
+    typeParameterCount: 0,
+    nativeNames: ['_StdSink'],
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 1) {
+          throw RuntimeD4rtException(
+            'IOSink(target, {encoding}) requires one '
+            'StreamConsumer<List<int>> argument.',
+          );
+        }
+        final encoding = namedArgs['encoding'];
+        return IOSink(
+          D4.unwrapAs<StreamConsumer<List<int>>>(positionalArgs[0]),
+          encoding: encoding == null ? utf8 : D4.unwrapAs<Encoding>(encoding),
+        );
+      },
+    },
+    methods: {
+      'add': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'IOSink.add', atMost: 1);
+        if (positionalArgs.isEmpty) {
+          throw ArgumentD4rtException('IOSink.add requires data');
+        }
+        // SCD70: coerce, not cast — see `Socket.add` in io/socket.dart.
+        (target as IOSink).add(D4.coerceList<int>(positionalArgs[0], 'bytes'));
+        return null;
+      },
+      'addError': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'IOSink.addError', atMost: 2);
+        if (positionalArgs.isEmpty) {
+          throw ArgumentD4rtException('IOSink.addError requires error');
+        }
+        final stackTrace = positionalArgs.length > 1
+            ? positionalArgs[1] as StackTrace?
+            : null;
+        (target as IOSink).addError(positionalArgs[0]!, stackTrace);
+        return null;
+      },
+      'addStream': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'IOSink.addStream', atMost: 1);
+        if (positionalArgs.isEmpty) {
+          throw ArgumentD4rtException('IOSink.addStream requires stream');
+        }
+        return (target as IOSink).addStream(
+          D4.coerceByteStream(positionalArgs[0], 'IOSink.addStream'),
+        );
+      },
+      'write': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'IOSink.write', atMost: 1);
+        if (positionalArgs.isEmpty) {
+          throw ArgumentD4rtException('IOSink.write requires object');
+        }
+        (target as IOSink).write(positionalArgs[0]);
+        return null;
+      },
+      'writeln': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'IOSink.writeln', atMost: 1);
+        final obj = positionalArgs.isNotEmpty ? positionalArgs[0] : '';
+        (target as IOSink).writeln(obj);
+        return null;
+      },
+      'writeAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'IOSink.writeAll', atMost: 2);
+        if (positionalArgs.isEmpty) {
+          throw ArgumentD4rtException('IOSink.writeAll requires objects');
+        }
+        final objects = positionalArgs[0] as Iterable;
+        final separator = positionalArgs.length > 1
+            ? positionalArgs[1].toString()
+            : '';
+        (target as IOSink).writeAll(objects, separator);
+        return null;
+      },
+      'writeCharCode': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'IOSink.writeCharCode', atMost: 1);
+        if (positionalArgs.isEmpty) {
+          throw ArgumentD4rtException('IOSink.writeCharCode requires charCode');
+        }
+        (target as IOSink).writeCharCode(positionalArgs[0] as int);
+        return null;
+      },
+      'flush': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as IOSink).flush();
+      },
+      'close': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as IOSink).close();
+      },
+    },
+    getters: {
+      'encoding': (visitor, target) => (target as IOSink).encoding,
+      'done': (visitor, target) => (target as IOSink).done,
+      'hashCode': (visitor, target) => (target as IOSink).hashCode,
+      'runtimeType': (visitor, target) => (target as IOSink).runtimeType,
+    },
+    setters: {
+      'encoding': (visitor, target, value) {
+        (target as IOSink).encoding = value as Encoding;
+      },
+    },
+  );
+}

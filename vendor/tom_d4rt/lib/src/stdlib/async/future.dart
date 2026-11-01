@@ -1,0 +1,353 @@
+import 'dart:async';
+import 'package:tom_d4rt/d4rt.dart';
+
+import '../error_handler_args.dart';
+
+class FutureAsync {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: Future,
+    name: 'Future',
+    typeParameterCount: 1, // Future<T>
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length == 1 && positionalArgs[0] is Callable) {
+          final computation = positionalArgs[0] as Callable;
+          return Future(() => computation.call(visitor, []));
+        }
+        throw RuntimeD4rtException('Invalid arguments for Future constructor.');
+      },
+      // Named factory constructors. Dart's `Future.delayed`/`Future.value`/
+      // `Future.error`/`Future.microtask`/`Future.sync` are factory
+      // constructors, so scripts that write `Future<T>.delayed(...)` —
+      // explicit type-arg form — route through constructor lookup, not
+      // the static-method path. Registering them here makes both
+      // `Future.delayed(...)` and `Future<T>.delayed(...)` resolve.
+      'delayed': (visitor, positionalArgs, namedArgs) {
+        final duration = positionalArgs[0] as Duration;
+        final computation = positionalArgs.get<Callable?>(1);
+        return Future.delayed(
+          duration,
+          computation == null ? null : () => computation.call(visitor, []),
+        );
+      },
+      'value': (visitor, positionalArgs, namedArgs) {
+        return Future.value(positionalArgs.get<dynamic>(0));
+      },
+      // `Future.syncValue` is NOT `Future.value` with a different name. Both
+      // complete with the argument, but `value` ADOPTS a future argument —
+      // waiting for it and taking its result, error included — while
+      // `syncValue` completes with the argument as-is. The SDK's own phrasing
+      // is that `syncValue` "is guaranteed to not have an error"; that
+      // guarantee is exactly what adoption would break.
+      'syncValue': (visitor, positionalArgs, namedArgs) {
+        return Future<Object?>.syncValue(positionalArgs.get<dynamic>(0));
+      },
+      'error': (visitor, positionalArgs, namedArgs) {
+        final error = positionalArgs[0];
+        if (error == null) {
+          throw RuntimeD4rtException(
+            'Future.error requires a non-null error object.',
+          );
+        }
+        final stackTrace = positionalArgs.get<StackTrace?>(1);
+        return Future.error(error, stackTrace);
+      },
+      'microtask': (visitor, positionalArgs, namedArgs) {
+        final computation = positionalArgs[0];
+        if (computation is! Callable) {
+          throw RuntimeD4rtException('Future.microtask requires an Function.');
+        }
+        return Future.microtask(() => computation.call(visitor, []));
+      },
+      'sync': (visitor, positionalArgs, namedArgs) {
+        final computation = positionalArgs[0];
+        if (computation is! Callable) {
+          throw RuntimeD4rtException('Future.sync requires an Function.');
+        }
+        return Future.sync(() => computation.call(visitor, []));
+      },
+    },
+    staticMethods: {
+      'delayed': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.delayed', atMost: 2);
+        final duration = positionalArgs[0] as Duration;
+        final computation = positionalArgs.get<Callable?>(1);
+        return Future.delayed(
+          duration,
+          computation == null ? null : () => computation.call(visitor, []),
+        );
+      },
+      'value': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.value', atMost: 1);
+        return Future.value(positionalArgs.get<dynamic>(0));
+      },
+      // Registered in both maps for the reason the comment above the named
+      // factories gives: `Future<T>.syncValue(v)` routes through constructor
+      // lookup and `Future.syncValue(v)` through the static path.
+      'syncValue': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.syncValue', atMost: 1);
+        return Future<Object?>.syncValue(positionalArgs.get<dynamic>(0));
+      },
+      'error': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.error', atMost: 2);
+        final error = positionalArgs[0];
+        if (error == null) {
+          throw RuntimeD4rtException(
+            'Future.error requires a non-null error object.',
+          );
+        }
+        final stackTrace = positionalArgs.get<StackTrace?>(1);
+        return Future.error(error, stackTrace);
+      },
+      'microtask': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.microtask', atMost: 1);
+        final computation = positionalArgs[0];
+        if (computation is! Callable) {
+          throw RuntimeD4rtException('Future.microtask requires an Function.');
+        }
+        return Future.microtask(() => computation.call(visitor, []));
+      },
+      'sync': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.sync', atMost: 1);
+        final computation = positionalArgs[0];
+        if (computation is! Callable) {
+          throw RuntimeD4rtException('Future.sync requires an Function.');
+        }
+        return Future.sync(() => computation.call(visitor, []));
+      },
+      'wait': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.wait', atMost: 1);
+        final futures = positionalArgs[0];
+        if (futures is! Iterable) {
+          throw RuntimeD4rtException('Future.wait requires an Iterable.');
+        }
+        final eagerError = namedArgs.get<bool?>('eagerError') ?? false;
+        final cleanUp = namedArgs.get<Callable?>('cleanUp');
+        return Future.wait(
+          futures.cast<Future>(),
+          eagerError: eagerError,
+          cleanUp: cleanUp == null
+              ? null
+              : (successValue) => cleanUp.call(visitor, [successValue]),
+        );
+      },
+      'any': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.any', atMost: 1);
+        final futures = positionalArgs[0];
+        if (futures is! Iterable) {
+          throw RuntimeD4rtException('Future.any requires an Iterable.');
+        }
+        return Future.any(futures.cast<Future>());
+      },
+      'forEach': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.forEach', atMost: 2);
+        final elements = positionalArgs[0] as Iterable;
+        final action = positionalArgs[1];
+        if (action is! Callable) {
+          throw RuntimeD4rtException(
+            'Future.forEach requires an Function for action.',
+          );
+        }
+        return Future.forEach(
+          elements,
+          (element) => action.call(visitor, [element]) as FutureOr<void>,
+        );
+      },
+      'doWhile': (visitor, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.doWhile', atMost: 1);
+        final action = positionalArgs[0];
+        if (action is! Callable) {
+          throw RuntimeD4rtException(
+            'Future.doWhile requires an Function for action.',
+          );
+        }
+        return Future.doWhile(() async {
+          final result = action.call(visitor, []);
+          // Handle async callbacks that return Future<bool>
+          if (result is Future) {
+            return await result as bool;
+          }
+          return result as bool;
+        });
+      },
+    },
+    methods: {
+      'then': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.then', atMost: 1);
+        final onValue = positionalArgs[0];
+        final onError = namedArgs.get<Callable?>('onError');
+        if (onValue is! Callable) {
+          throw RuntimeD4rtException(
+            'Future.then requires an Function for onValue.',
+          );
+        }
+        return (target as Future).then(
+          (value) => onValue.call(visitor, [value]),
+          onError: onError == null
+              ? null
+              : (error, stackTrace) => onError.call(
+                  visitor,
+                  errorHandlerArgs(onError, error, stackTrace),
+                ),
+        );
+      },
+      'catchError': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.catchError', atMost: 1);
+        final onError = positionalArgs[0];
+        final test = namedArgs.get<Callable?>('test');
+        if (onError is! Callable) {
+          throw RuntimeD4rtException(
+            'Future.catchError requires an Function for onError.',
+          );
+        }
+        return (target as Future).catchError(
+          (error, stackTrace) => onError.call(
+            visitor,
+            errorHandlerArgs(onError, error, stackTrace),
+          ),
+          test: test == null
+              ? null
+              : (error) => test.call(visitor, [error]) as bool,
+        );
+      },
+      'whenComplete': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.whenComplete', atMost: 1);
+        final action = positionalArgs[0];
+        if (action is! Callable) {
+          throw RuntimeD4rtException(
+            'Future.whenComplete requires an Function for action.',
+          );
+        }
+        return (target as Future).whenComplete(() => action.call(visitor, []));
+      },
+      'timeout': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.timeout', atMost: 1);
+        final timeLimit = positionalArgs[0] as Duration;
+        final onTimeout = namedArgs.get<Callable?>('onTimeout');
+        return (target as Future).timeout(
+          timeLimit,
+          onTimeout: onTimeout == null
+              ? null
+              : () => onTimeout.call(visitor, []),
+        );
+      },
+      'asStream': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as Future).asStream();
+      },
+      // FutureExtensions methods
+      'onError': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'Future.onError', atMost: 1);
+        final handleError = positionalArgs[0];
+        final test = namedArgs.get<Callable?>('test');
+        if (handleError is! Callable) {
+          throw RuntimeD4rtException(
+            'Future.onError requires a Function for handleError.',
+          );
+        }
+        return (target as Future).catchError(
+          (error, stackTrace) => handleError.call(
+            visitor,
+            errorHandlerArgs(handleError, error, stackTrace),
+          ),
+          test: test == null
+              ? null
+              : (error) => test.call(visitor, [error]) as bool,
+        );
+      },
+      'ignore': (visitor, target, positionalArgs, namedArgs, _) {
+        final future = target as Future;
+        future.then<void>(
+          (value) => null,
+          onError: (error, stackTrace) => null,
+        );
+        return null;
+      },
+    },
+    getters: {
+      'hashCode': (visitor, target) => (target as Future).hashCode,
+      'runtimeType': (visitor, target) => (target as Future).runtimeType,
+    },
+  );
+}
+
+/// Explicitly ignores a future.
+class UnawaitedAsync {
+  static final NativeFunction definition = NativeFunction(
+    (visitor, positionalArgs, namedArgs, typeArgs) {
+      if (positionalArgs.length != 1 || namedArgs.isNotEmpty) {
+        throw RuntimeD4rtException(
+          'unawaited requires one positional argument (Future<void>? future).',
+        );
+      }
+      unawaited(positionalArgs.single as Future<void>?);
+      return null;
+    },
+    arity: 1,
+    name: 'unawaited',
+  );
+}
+
+/// Thrown when a scheduled timeout happens while waiting for an async result.
+class TimeoutExceptionAsync {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: TimeoutException,
+    name: 'TimeoutException',
+    isAssignable: (v) => v is TimeoutException,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        final message = positionalArgs.get<String?>(0);
+        final duration = positionalArgs.get<Duration?>(1);
+        return TimeoutException(message, duration);
+      },
+    },
+    getters: {
+      'message': (visitor, target) => (target as TimeoutException).message,
+      'duration': (visitor, target) => (target as TimeoutException).duration,
+      'hashCode': (visitor, target) => (target as TimeoutException).hashCode,
+      'runtimeType': (visitor, target) =>
+          (target as TimeoutException).runtimeType,
+    },
+    methods: {
+      'toString': (visitor, target, positionalArgs, namedArgs, _) {
+        return (target as TimeoutException).toString();
+      },
+    },
+  );
+}
+
+class FutureStdlib {
+  static void register(Environment environment) {
+    environment.defineBridge(FutureAsync.definition);
+    environment.defineBridge(TimeoutExceptionAsync.definition);
+    environment.define('unawaited', UnawaitedAsync.definition);
+    environment.define('scheduleMicrotask', _scheduleMicrotask);
+  }
+
+  /// `dart:async`'s `scheduleMicrotask` (SCF35).
+  ///
+  /// The callback runs under the same discipline as a Timer body (SCD73): it
+  /// is the one kind of interpreted callback whose outcome nobody can await,
+  /// so an error it throws leaves unwrapped and the zone the script runs in —
+  /// an embedder's `onUncaughtError` — receives what the script threw (SCC23).
+  static final NativeFunction _scheduleMicrotask = NativeFunction(
+    (visitor, arguments, namedArguments, typeArguments) {
+      if (arguments.length != 1 || arguments[0] is! Callable) {
+        throw RuntimeD4rtException(
+          'scheduleMicrotask requires one positional argument '
+          '(void Function() callback).',
+        );
+      }
+      final callback = arguments[0] as Callable;
+      scheduleMicrotask(() {
+        try {
+          callback.call(visitor, []);
+        } catch (error, stackTrace) {
+          Error.throwWithStackTrace(unwrapScriptError(error), stackTrace);
+        }
+      });
+      return null;
+    },
+    arity: 1,
+    name: 'scheduleMicrotask',
+  );
+}

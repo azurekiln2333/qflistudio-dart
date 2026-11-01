@@ -1,0 +1,316 @@
+import 'dart:collection';
+import 'package:tom_d4rt/d4rt.dart';
+import 'package:tom_d4rt/src/stdlib/collection/map_named_constructors.dart';
+
+/// Bridged LinkedHashMap.
+///
+/// IT RE-DECLARES `Map` MEMBERS THAT THE `LinkedHashMap -> Map` EDGE WOULD ALREADY
+/// REACH — among them `cast`, `removeWhere`, `update` and `updateAll`, which
+/// `SplayTreeMap` leaves to the walk. That asymmetry is KEPT, as a decision
+/// (SCE203), not an oversight:
+///
+/// - The hazard shadowing carries is drift: two implementations of one member
+///   on one type, with the leaf winning. The SCC51 shadow differential
+///   (F-SCC51-8, widened by SCE185) invokes every such pair on the same object
+///   and fails on any divergence, so that hazard is now measured, not trusted.
+/// - Member PARITY across the map family is measured over REACHABLE members
+///   (`sce203_family_reachable_parity_test.dart`), where shadowing is
+///   invisible; the only difference it records is `SplayTreeMap`'s sorted-map
+///   API, which is the SDK's.
+///
+/// Deleting the copies would change nothing a script can observe, so it is a
+/// clean-up rather than a fix. `ServerSocket`'s 28 were deleted (sce195)
+/// because they were never covered by the differential; these are.
+class LinkedHashMapCollection {
+  static BridgedClass get definition => BridgedClass(
+    nativeType: LinkedHashMap,
+    name: 'LinkedHashMap',
+    isAssignable: (v) => v is LinkedHashMap,
+    typeParameterCount: 2,
+    constructors: {
+      '': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            "Constructor LinkedHashMap() does not take positional arguments.",
+          );
+        }
+        // ignore: prefer_collection_literals
+        return LinkedHashMap<dynamic, dynamic>();
+      },
+      'from': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 1) {
+          throw RuntimeD4rtException(
+            "Constructor LinkedHashMap.from(Map other) expects one positional argument.",
+          );
+        }
+        final otherMap = positionalArgs[0];
+        if (otherMap is Map) {
+          return LinkedHashMap<dynamic, dynamic>.from(otherMap);
+        }
+        throw RuntimeD4rtException(
+          "Argument to LinkedHashMap.from must be a Map.",
+        );
+      },
+      'of': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.length != 1) {
+          throw RuntimeD4rtException(
+            "Constructor LinkedHashMap.of(Map other) expects one positional argument.",
+          );
+        }
+        final otherMap = positionalArgs[0];
+        if (otherMap is Map) {
+          return LinkedHashMap<dynamic, dynamic>.of(otherMap);
+        }
+        throw RuntimeD4rtException(
+          "Argument to LinkedHashMap.of must be a Map.",
+        );
+      },
+      'identity': (visitor, positionalArgs, namedArgs) {
+        if (positionalArgs.isNotEmpty) {
+          throw RuntimeD4rtException(
+            "Constructor LinkedHashMap.identity() does not take positional arguments.",
+          );
+        }
+        return LinkedHashMap<dynamic, dynamic>.identity();
+      },
+      'fromIterable': (visitor, positionalArgs, namedArgs) =>
+          MapNamedConstructors.fromIterable(
+            'LinkedHashMap',
+            LinkedHashMap<dynamic, dynamic>.new,
+            visitor,
+            positionalArgs,
+            namedArgs,
+          ),
+      'fromIterables': (visitor, positionalArgs, namedArgs) =>
+          MapNamedConstructors.fromIterables(
+            'LinkedHashMap',
+            LinkedHashMap<dynamic, dynamic>.new,
+            positionalArgs,
+          ),
+      'fromEntries': (visitor, positionalArgs, namedArgs) =>
+          MapNamedConstructors.fromEntries(
+            'LinkedHashMap',
+            LinkedHashMap<dynamic, dynamic>.new,
+            positionalArgs,
+          ),
+    },
+    methods: {
+      '[]': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is LinkedHashMap && positionalArgs.length == 1) {
+          return target[positionalArgs[0]];
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap[] getter",
+        );
+      },
+      'addAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.addAll', atMost: 1);
+        if (target is LinkedHashMap && positionalArgs.length == 1) {
+          final otherMap = positionalArgs[0];
+          if (otherMap is Map) {
+            target.addAll(otherMap.cast<dynamic, dynamic>());
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to LinkedHashMap.addAll must be a Map.",
+          );
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.addAll",
+        );
+      },
+      'clear': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is LinkedHashMap &&
+            positionalArgs.isEmpty &&
+            namedArgs.isEmpty) {
+          target.clear();
+          return null;
+        }
+        throw RuntimeD4rtException("Invalid arguments for LinkedHashMap.clear");
+      },
+      'containsKey': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.containsKey', atMost: 1);
+        if (target is LinkedHashMap && positionalArgs.length == 1) {
+          return target.containsKey(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.containsKey",
+        );
+      },
+      'containsValue': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.containsValue', atMost: 1);
+        if (target is LinkedHashMap && positionalArgs.length == 1) {
+          return target.containsValue(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.containsValue",
+        );
+      },
+      'forEach': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.forEach', atMost: 1);
+        if (target is LinkedHashMap && positionalArgs.length == 1) {
+          final action = positionalArgs[0];
+          if (action is Callable) {
+            target.forEach((key, value) {
+              action.call(visitor, [key, value]);
+            });
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to LinkedHashMap.forEach must be a function.",
+          );
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.forEach",
+        );
+      },
+      'putIfAbsent': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.putIfAbsent', atMost: 2);
+        if (target is LinkedHashMap && positionalArgs.length == 2) {
+          final key = positionalArgs[0];
+          final ifAbsent = positionalArgs[1];
+          if (ifAbsent is Callable) {
+            return target.putIfAbsent(key, () => ifAbsent.call(visitor, []));
+          }
+          throw RuntimeD4rtException(
+            "Second argument to LinkedHashMap.putIfAbsent (ifAbsent) must be a function.",
+          );
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.putIfAbsent",
+        );
+      },
+      'remove': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.remove', atMost: 1);
+        if (target is LinkedHashMap && positionalArgs.length == 1) {
+          return target.remove(positionalArgs[0]);
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.remove",
+        );
+      },
+      'removeWhere': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.removeWhere', atMost: 1);
+        if (target is LinkedHashMap && positionalArgs.length == 1) {
+          final test = positionalArgs[0];
+          if (test is Callable) {
+            target.removeWhere((key, value) {
+              final result = test.call(visitor, [key, value]);
+              return result is bool && result;
+            });
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to LinkedHashMap.removeWhere must be a function.",
+          );
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.removeWhere",
+        );
+      },
+      'update': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.update', atMost: 2);
+        if (target is LinkedHashMap && positionalArgs.length == 2) {
+          final key = positionalArgs[0];
+          final update = positionalArgs[1];
+          final ifAbsent = namedArgs['ifAbsent'] as Callable?;
+          if (update is Callable) {
+            return target.update(
+              key,
+              (value) => update.call(visitor, [value]),
+              ifAbsent: ifAbsent == null
+                  ? null
+                  : () => ifAbsent.call(visitor, []),
+            );
+          }
+          throw RuntimeD4rtException(
+            "Second argument to LinkedHashMap.update must be a function.",
+          );
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.update",
+        );
+      },
+      'updateAll': (visitor, target, positionalArgs, namedArgs, _) {
+        D4.checkArity(positionalArgs, 'LinkedHashMap.updateAll', atMost: 1);
+        if (target is LinkedHashMap && positionalArgs.length == 1) {
+          final update = positionalArgs[0];
+          if (update is Callable) {
+            target.updateAll(
+              (key, value) => update.call(visitor, [key, value]),
+            );
+            return null;
+          }
+          throw RuntimeD4rtException(
+            "Argument to LinkedHashMap.updateAll must be a function.",
+          );
+        }
+        throw RuntimeD4rtException(
+          "Invalid arguments for LinkedHashMap.updateAll",
+        );
+      },
+      // No `addEntries` here on purpose — inherited from `MapCore` via the
+      // `LinkedHashMap -> Map` edge. See the note in `hash_map.dart`. This
+      // one mattered more: a `<String, int>{}` literal IS a
+      // `LinkedHashMap`, so the shadowing copy broke `addEntries` for
+      // ordinary map literals too, not only for explicitly constructed
+      // `LinkedHashMap`s.
+      'cast': (visitor, target, positionalArgs, namedArgs, _) {
+        if (target is LinkedHashMap) {
+          return target.cast<dynamic, dynamic>();
+        }
+        throw RuntimeD4rtException("Invalid arguments for LinkedHashMap.cast");
+      },
+    },
+    getters: {
+      'length': (visitor, target) {
+        if (target is LinkedHashMap) return target.length;
+        throw RuntimeD4rtException(
+          "Target is not a LinkedHashMap for getter 'length'",
+        );
+      },
+      'isEmpty': (visitor, target) {
+        if (target is LinkedHashMap) return target.isEmpty;
+        throw RuntimeD4rtException(
+          "Target is not a LinkedHashMap for getter 'isEmpty'",
+        );
+      },
+      'isNotEmpty': (visitor, target) {
+        if (target is LinkedHashMap) return target.isNotEmpty;
+        throw RuntimeD4rtException(
+          "Target is not a LinkedHashMap for getter 'isNotEmpty'",
+        );
+      },
+      'keys': (visitor, target) {
+        if (target is LinkedHashMap) return target.keys;
+        throw RuntimeD4rtException(
+          "Target is not a LinkedHashMap for getter 'keys'",
+        );
+      },
+      'values': (visitor, target) {
+        if (target is LinkedHashMap) return target.values;
+        throw RuntimeD4rtException(
+          "Target is not a LinkedHashMap for getter 'values'",
+        );
+      },
+      'entries': (visitor, target) {
+        if (target is LinkedHashMap) return target.entries;
+        throw RuntimeD4rtException(
+          "Target is not a LinkedHashMap for getter 'entries'",
+        );
+      },
+      'hashCode': (visitor, target) {
+        if (target is LinkedHashMap) return target.hashCode;
+        throw RuntimeD4rtException(
+          "Target is not a LinkedHashMap for getter 'hashCode'",
+        );
+      },
+      'runtimeType': (visitor, target) {
+        if (target is LinkedHashMap) return target.runtimeType;
+        throw RuntimeD4rtException(
+          "Target is not a LinkedHashMap for getter 'runtimeType'",
+        );
+      },
+    },
+  );
+}
