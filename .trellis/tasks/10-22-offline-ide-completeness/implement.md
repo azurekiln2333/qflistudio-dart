@@ -26,3 +26,26 @@ Every portable unit is actually executed with bounded timeout and exact output; 
 Four actual existing Herdr Pi own disjoint work under root supervision. Heavy
 execution follows a fresh named C-coordinator grant; old failed/released grants
 are not reusable. Initial startup/signing/license work remains separately scoped.
+
+## Commit sweep
+
+Swept all uncommitted work on feat/offline-ide-completeness.
+
+| Commit | Theme |
+| --- | --- |
+| `477a52b` build(vendor): add the d4rt interpreter as a vendored dependency | vendor + pubspec |
+| `5a9550b` feat(runtime): run Dart offline through the d4rt interpreter | lib + portable tests |
+| `5754a6d` feat(analyzer): harden diagnostics for the offline interpreter | analyzer + catalog audit |
+| `08c36d6` feat(curriculum): extend the Dart course with sixteen chapters | curriculum + content |
+| `f2cf1bd` feat(ohos): hold a native startup splash with real progress | ohos + main |
+| `78b72d3` docs(dart): record the portable runtime contract and the host gate | specs, READMEs, LICENSE, research |
+
+Skipped, and why:
+
+- 13 official-*.txt files under the task research directory. They are
+  whole web pages captured into single-line text, which the sweep rules
+  exclude as saved pages.
+- .trellis/.runtime/sessions/*.json, a Trellis runtime session file.
+
+Every other untracked file was committed, including the vendored runtime.
+
