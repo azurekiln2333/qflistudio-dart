@@ -27,6 +27,7 @@ Implement the complete request from attachment `C:/Users/lichengyu/.codex/attach
 | R10 | C/C++ custom headers and Python offline module/pip management | Actual toolchain/sandbox execution from C/Python owners |
 | R11 | Standalone apps stay offline | No new runtime network fetch/UI, offline regression and manifest review |
 | R12 | Verify, Conventional Commits and push when possible | Analysis/tests/content gates, exact staging, commit/push and remote-head evidence |
+| R13 | Rewrite Simplified Chinese, Traditional Chinese and English READMEs | Three equivalent accurate documents, controlled Chinese mechanical/manual checks, relative language links, Conventional Commit and remote OID proof |
 
 ## Completion and exclusions
 

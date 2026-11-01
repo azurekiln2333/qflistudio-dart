@@ -60,8 +60,9 @@ core repository require separate review and commits.
 - `TextEditingController` also notifies on selection changes. Compare the text
   with the last observed buffer before marking it dirty or invalidating results;
   moving the caret must preserve diagnostics and compiled-artifact status.
-- Compilation writes upstream Kernel `.dill` bytes on Android/desktop, and EVC
-  bytes on the retained portable platforms, to
+- Compilation writes upstream Kernel `.dill` bytes on Android/desktop. The
+  explicitly labeled legacy EVC action uses dart_eval's restricted syntax subset;
+  the product AST interpreter does not create EVC. Artifacts are saved to
   `build/<relative-entry-path-without-extension><compiled.extension>` inside the selected project.
   Display success only after the write and flush complete.
 - A saved `.dill` exposes Run compiled result. This action reads the artifact
@@ -72,7 +73,8 @@ core repository require separate review and commits.
 - A run displays actual stdout/stderr and its exit code. Cancellation terminates
   the worker and returns 130. Run failures before execution use 127; runtime
   exceptions use 1. Release stream subscriptions on completion or disposal.
-- `dart_eval` compatibility is narrower than the Dart SDK. On portable targets keep
+- The portable interpreter has explicit language/capability limits and legacy
+  EVC compilation has a separate smaller syntax subset. On portable targets keep
   `runtimeStatus: 'unavailable'` until a target-platform build and execution are
   verified; passing host tests alone does not establish target support.
 

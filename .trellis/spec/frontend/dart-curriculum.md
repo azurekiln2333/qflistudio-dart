@@ -57,14 +57,16 @@ flutter test --no-pub
 host SDK and diffs stdout. A missing host SDK is a hard failure, never a skip.
 
 `tool/verify_portable_content.dart` independently executes EVERY lesson and
-paired example on the actual portable Compiler/Runtime path, without a whitelist.
+paired example through the production `startPortableDart` policy/supervisor path,
+without a whitelist.
 `--chapter <key>` supports focused repair; `--report <path>` persists exact stdout,
 errors and counts. Each unit owns an isolate with a bounded timeout; kill it in
 finally so synchronous infinite loops cannot hang the audit. Normalize CRLF and
 trailing newlines only, preserving spaces. Any failed unit exits nonzero;
-unsupported features and timeouts are failures. The initial October 22 audit is
-240 checked / 154 failures, so a passing SDK suite or legacy subset does not
-establish that old content runs on OHOS. Keep this gate incomplete until repaired.
+unsupported features and timeouts are failures. The initial October 22 dart_eval
+audit was 240 checked / 154 failures. Vendored production tom_d4rt now passes all
+240 on the host (`research/portable-production-baseline.json`). This repairs the
+host portable gate; installed OHOS acceptance remains separate and open.
 
 ## 5. Test gates
 
@@ -72,15 +74,16 @@ establish that old content runs on OHOS. Keep this gate incomplete until repaire
 - `test/dart_content_run_test.dart` — real compile/run/output for all 240.
 - `test/dart_content_import_test.dart` — import → editor Run path.
 - `test/dart_content_widget_test.dart` — real pages render the Dart catalog.
-- `test/dart_content_dart_eval_test.dart` — dart_eval portable-engine branch;
-  asserts the curated subset (`_dartEvalPortableIds`, empirically verified) and
-  reports the rest as official-SDK-required. Never guess the subset by regex.
-  This is a legacy partial regression test, not the all-content acceptance gate.
+- `test/dart_content_portable_test.dart` — full production portable runtime,
+  every tutorial and example, no feature skips.
+- `test/dart_content_dart_eval_test.dart` — legacy EVC regression subset
+  (`DartCurriculum.dartEvalVerifiedIds`), independent of product Run. Never infer
+  portable support or failure from this smaller legacy compiler test.
 
 ## 6. Wrong vs correct
 
 Wrong: emit an `engine` JSON key (parser drops it; user cannot see it).
-Correct: state the official-SDK requirement in `explain`.
+Correct: state actual runtime limits and verification scope in `explain`.
 
 Wrong: read from stdin and ship a fabricated `inputFixtures` field.
 Correct: keep counted programs self-contained; explain stdin with the real

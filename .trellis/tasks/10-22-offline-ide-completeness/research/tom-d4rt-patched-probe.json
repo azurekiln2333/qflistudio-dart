@@ -1,0 +1,1687 @@
+{
+  "engine": "tom_d4rt 1.229.0+qfli.1 experimental, not production",
+  "checked": 240,
+  "failures": 0,
+  "results": [
+    {
+      "id": "dart-lesson-001",
+      "passed": true,
+      "expected": "Hello, Dart!\n这是我的第一个程序\n3\n",
+      "actual": "Hello, Dart!\n这是我的第一个程序\n3\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-002",
+      "passed": true,
+      "expected": "小明 今年 20 岁\n身高 1.75，圆周率 3.14159\n是学生吗？true\nint\n10.0\n10\n",
+      "actual": "小明 今年 20 岁\n身高 1.75，圆周率 3.14159\n是学生吗？true\nint\n10.0\n10\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-003",
+      "passed": true,
+      "expected": "小明 考了 88 分\n小明的平均分是 90.0\n名字长度：2\n第一行\n第二行\n",
+      "actual": "小明 考了 88 分\n小明的平均分是 90.0\n名字长度：2\n第一行\n第二行\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-004",
+      "passed": true,
+      "expected": "9\n5\n14\n3.5\n3\n1\n18\ntrue\ntrue\ntrue\n",
+      "actual": "9\n5\n14\n3.5\n3\n1\n18\ntrue\ntrue\ntrue\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-005",
+      "passed": true,
+      "expected": "43\n39.8\n0.333\n255\n解析失败\n",
+      "actual": "43\n39.8\n0.333\n255\n解析失败\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-006",
+      "passed": true,
+      "expected": "应用：QFLIDartWing\n商品：键盘\n含税：210.94\n",
+      "actual": "应用：QFLIDartWing\n商品：键盘\n含税：210.94\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-007",
+      "passed": true,
+      "expected": "512 B\n2.0 KB\n",
+      "actual": "512 B\n2.0 KB\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-008",
+      "passed": true,
+      "expected": "3\n周一\n90\n5\n",
+      "actual": "3\n周一\n90\n5\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-009",
+      "passed": true,
+      "expected": "Dart Language\nDART LANGUAGE\ndart language\ntrue\ntrue\n[apple, banana, cherry]\napple | banana | cherry\n",
+      "actual": "Dart Language\nDART LANGUAGE\ndart language\ntrue\ntrue\n[apple, banana, cherry]\napple | banana | cherry\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-010",
+      "passed": true,
+      "expected": "姓名：小明\n年龄：20（成年）\n城市：杭州\n卡片长度：4 字\n",
+      "actual": "姓名：小明\n年龄：20（成年）\n城市：杭州\n卡片长度：4 字\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-011",
+      "passed": true,
+      "expected": "良好\n",
+      "actual": "良好\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-012",
+      "passed": true,
+      "expected": "未成年\n匿名用户\n10\n",
+      "actual": "未成年\n匿名用户\n10\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-013",
+      "passed": true,
+      "expected": "200: 成功\n404: 未找到\n999: 未知状态码\n",
+      "actual": "200: 成功\n404: 未找到\n999: 未知状态码\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-014",
+      "passed": true,
+      "expected": "1 到 100 的和是 5050\n[1, 4, 9, 16, 25]\n",
+      "actual": "1 到 100 的和是 5050\n[1, 4, 9, 16, 25]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-015",
+      "passed": true,
+      "expected": "倒计时 3\n倒计时 2\n倒计时 1\n发射！\n至少执行了一次，attempts=1\n",
+      "actual": "倒计时 3\n倒计时 2\n倒计时 1\n发射！\n至少执行了一次，attempts=1\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-016",
+      "passed": true,
+      "expected": "1\n2\n4\n5\n7\n8\n第一个 7 的倍数是 7\n",
+      "actual": "1\n2\n4\n5\n7\n8\n第一个 7 的倍数是 7\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-017",
+      "passed": true,
+      "expected": "8\n12\n你好，小明！\n",
+      "actual": "8\n12\n你好，小明！\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-018",
+      "passed": true,
+      "expected": "你好，小明！\n早上好，小红！\n晚上好，小刚！\n",
+      "actual": "你好，小明！\n早上好，小红！\n晚上好，小刚！\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-019",
+      "passed": true,
+      "expected": "[苹果, 香蕉, 橙子, 葡萄]\n苹果\n葡萄\n共 4 种\n含香蕉？true\n[苹果, 橙子, 葡萄]\n",
+      "actual": "[苹果, 香蕉, 橙子, 葡萄]\n苹果\n葡萄\n共 4 种\n含香蕉？true\n[苹果, 橙子, 葡萄]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-020",
+      "passed": true,
+      "expected": "第 1 名：88\n第 2 名：92\n第 3 名：79\n第 4 名：95\n优秀分：92\n优秀分：95\n[92, 79]\n[95, 79, 92, 88]\n",
+      "actual": "第 1 名：88\n第 2 名：92\n第 3 名：79\n第 4 名：95\n优秀分：92\n优秀分：95\n[92, 79]\n[95, 79, 92, 88]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-021",
+      "passed": true,
+      "expected": "[67, 79, 88, 92, 95]\n[95, 92, 88, 79, 67]\n2\n-1\ntrue\ntrue\n",
+      "actual": "[67, 79, 88, 92, 95]\n[95, 92, 88, 79, 67]\n2\n-1\ntrue\ntrue\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-022",
+      "passed": true,
+      "expected": "小明\n未填写\nfalse\nname = 小明\nage = 18\nscore = 88\ncity = 杭州\n",
+      "actual": "小明\n未填写\nfalse\nname = 小明\nage = 18\nscore = 88\ncity = 杭州\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-023",
+      "passed": true,
+      "expected": "{1, 2, 3}\n3\n{2, 3}\n{1, 2, 3, 4}\n{1}\n",
+      "actual": "{1, 2, 3}\n3\n{2, 3}\n{1, 2, 3, 4}\n{1}\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-024",
+      "passed": true,
+      "expected": "[2, 4, 6, 8, 10, 12]\n[2, 4, 6]\n[1, 2, 3]\n",
+      "actual": "[2, 4, 6, 8, 10, 12]\n[2, 4, 6]\n[1, 2, 3]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-025",
+      "passed": true,
+      "expected": "总和 31\n最大 9\nabc\n",
+      "actual": "总和 31\n最大 9\nabc\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-026",
+      "passed": true,
+      "expected": "[0, 1, 2, 3, 4]\n[基础奖励, 额外奖励]\n[1, 4, 9, 16]\n[9]\n",
+      "actual": "[0, 1, 2, 3, 4]\n[基础奖励, 额外奖励]\n[1, 4, 9, 16]\n[9]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-027",
+      "passed": true,
+      "expected": "{a: 11, b: 2, c: 5}\n{A: 22, B: 4, C: 10}\n[a, b, c, d]\n",
+      "actual": "{a: 11, b: 2, c: 5}\n{A: 22, B: 4, C: 10}\n[a, b, c, d]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-028",
+      "passed": true,
+      "expected": "the: 3\ncat: 1\ndog: 1\nbird: 1\n",
+      "actual": "the: 3\ncat: 1\ndog: 1\nbird: 1\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-029",
+      "passed": true,
+      "expected": "小明\nnull\n阿明\ntrue\n",
+      "actual": "小明\nnull\n阿明\ntrue\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-030",
+      "passed": true,
+      "expected": "默认值\n填入了\n3\nnull\nHANGZHOU\n",
+      "actual": "默认值\n填入了\n3\nnull\nHANGZHOU\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-031",
+      "passed": true,
+      "expected": "2\n小明\n没有值\n",
+      "actual": "2\n小明\n没有值\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-032",
+      "passed": true,
+      "expected": "QFLIDartWing\n42\n",
+      "actual": "QFLIDartWing\n42\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-033",
+      "passed": true,
+      "expected": "[1, 3, 5]\n9\n0\n2\n",
+      "actual": "[1, 3, 5]\n9\n0\n2\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-034",
+      "passed": true,
+      "expected": "姓名：小明\n城市：未知城市\n年龄：未填写\n",
+      "actual": "姓名：小明\n城市：未知城市\n年龄：未填写\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-035",
+      "passed": true,
+      "expected": "小明：58 分\n及格？false\n",
+      "actual": "小明：58 分\n及格？false\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-036",
+      "passed": true,
+      "expected": "77.0\n25.0\n",
+      "actual": "77.0\n25.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-037",
+      "passed": true,
+      "expected": "100.0\n250.0\n",
+      "actual": "100.0\n250.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-038",
+      "passed": true,
+      "expected": "3\n共创建了 3 个计数器\n",
+      "actual": "3\n共创建了 3 个计数器\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-039",
+      "passed": true,
+      "expected": "旺财 说：汪汪\n小旺 说：汪汪（奶声奶气）\n",
+      "actual": "旺财 说：汪汪\n小旺 说：汪汪（奶声奶气）\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-040",
+      "passed": true,
+      "expected": "面积是 12.57\n面积是 9.00\n",
+      "actual": "面积是 12.57\n面积是 9.00\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-041",
+      "passed": true,
+      "expected": "￥12.50\n80%\n",
+      "actual": "￥12.50\n80%\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-042",
+      "passed": true,
+      "expected": "唐老鸭 在游泳\n唐老鸭 在飞行\n",
+      "actual": "唐老鸭 在游泳\n唐老鸭 在飞行\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-043",
+      "passed": true,
+      "expected": "邮件通知\n短信通知\n通知\n",
+      "actual": "邮件通知\n短信通知\n通知\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-044",
+      "passed": true,
+      "expected": "(4, 6)\ntrue\n1\n",
+      "actual": "(4, 6)\ntrue\n1\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-045",
+      "passed": true,
+      "expected": "low: 低 紧急？false\nmedium: 中 紧急？false\nhigh: 高 紧急？true\n高\n",
+      "actual": "low: 低 紧急？false\nmedium: 中 紧急？false\nhigh: 高 紧急？true\n高\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-046",
+      "passed": true,
+      "expected": "deposit: 100.00\ndeposit: 50.00\nwithdraw: 30.00\n余额 120.00\n",
+      "actual": "deposit: 100.00\ndeposit: 50.00\nwithdraw: 30.00\n余额 120.00\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-047",
+      "passed": true,
+      "expected": "1\na\nnull\n20\ndouble\n",
+      "actual": "1\na\nnull\n20\ndouble\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-048",
+      "passed": true,
+      "expected": "Box<int>(42)\nPair<int, String>(18, age)\n",
+      "actual": "Box<int>(42)\nPair<int, String>(18, age)\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-049",
+      "passed": true,
+      "expected": "7\npear\n6\n4.0\n",
+      "actual": "7\npear\n6\n4.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-050",
+      "passed": true,
+      "expected": "7\n12\n[10, 20, 30]\n",
+      "actual": "7\n12\n[10, 20, 30]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-051",
+      "passed": true,
+      "expected": "[apple, avocado]\n[banana, berry]\n[1, 2, 3]\n",
+      "actual": "[apple, avocado]\n[banana, berry]\n[1, 2, 3]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-052",
+      "passed": true,
+      "expected": "6\n写入失败：_TypeError\n[1, 2, 3, 1.5]\n",
+      "actual": "6\n写入失败：_TypeError\n[1, 2, 3, 1.5]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-053",
+      "passed": true,
+      "expected": "1\nnull\nA\n没有元素\n",
+      "actual": "1\nnull\nA\n没有元素\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-054",
+      "passed": true,
+      "expected": "1\n-1\n命中 1 未命中 1\n2\n",
+      "actual": "1\n-1\n命中 1 未命中 1\n2\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-055",
+      "passed": true,
+      "expected": "解析失败：Invalid radix-10 number\n清理完成\n程序继续\n",
+      "actual": "解析失败：Invalid radix-10 number\n清理完成\n程序继续\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-056",
+      "passed": true,
+      "expected": "年龄合法：20\nValidationException(age: 不能为负)\n",
+      "actual": "年龄合法：20\nValidationException(age: 不能为负)\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-057",
+      "passed": true,
+      "expected": "10\n不是数字：abc\n非法值：必须为正\n",
+      "actual": "10\n不是数字：abc\n非法值：必须为正\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-058",
+      "passed": true,
+      "expected": "越界（这是缺陷，通常要修代码）：RangeError\n可预期：业务层可预期的失败\n",
+      "actual": "越界（这是缺陷，通常要修代码）：RangeError\n可预期：业务层可预期的失败\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-059",
+      "passed": true,
+      "expected": "成功：20\n失败：不是数字\n",
+      "actual": "成功：20\n失败：不是数字\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-060",
+      "passed": true,
+      "expected": "host = localhost\nport = 8080\nname = app\n错误数：1\n非法行：坏行\n",
+      "actual": "host = localhost\nport = 8080\nname = app\n错误数：1\n非法行：坏行\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-061",
+      "passed": true,
+      "expected": "3\n7\n3\n10\n2\n",
+      "actual": "3\n7\n3\n10\n2\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-062",
+      "passed": true,
+      "expected": "小明\n18\ntrue\nfalse\n(age: 18, name: 小明)\n",
+      "actual": "小明\n18\ntrue\nfalse\n(age: 18, name: 小明)\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-063",
+      "passed": true,
+      "expected": "原点\n普通点 (1, 2)\n普通点 (3, 4)\n",
+      "actual": "原点\n普通点 (1, 2)\n普通点 (3, 4)\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-064",
+      "passed": true,
+      "expected": "空列表\n只有一个元素：42\n首项 1，其余 3 个\n",
+      "actual": "空列表\n只有一个元素：42\n首项 1，其余 3 个\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-065",
+      "passed": true,
+      "expected": "小明（18 岁）\n小红（年龄未知）\n数据不完整\n",
+      "actual": "小明（18 岁）\n小红（年龄未知）\n数据不完整\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-066",
+      "passed": true,
+      "expected": "圆半径 2.0\n正方形边长 3.0\n",
+      "actual": "圆半径 2.0\n正方形边长 3.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-067",
+      "passed": true,
+      "expected": "奇数 3\n偶数 8\n奇数 15\n负数 -4\n",
+      "actual": "奇数 3\n偶数 8\n奇数 15\n负数 -4\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-068",
+      "passed": true,
+      "expected": "3.14\n12.0\n",
+      "actual": "3.14\n12.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-069",
+      "passed": true,
+      "expected": "mercury: g=3.70\nearth: g=9.82\nmars: g=3.73\n3\n",
+      "actual": "mercury: g=3.70\nearth: g=9.82\nmars: g=3.73\n3\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-070",
+      "passed": true,
+      "expected": "77.0\n旺财 汪汪叫\n",
+      "actual": "77.0\n旺财 汪汪叫\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-071",
+      "passed": true,
+      "expected": "正整数 7\n字符串 \"dart\"，长度 4\n非空列表，长度 3\n其它：-1\n",
+      "actual": "正整数 7\n字符串 \"dart\"，长度 4\n非空列表，长度 3\n其它：-1\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-072",
+      "passed": true,
+      "expected": "0\n5\n10\n",
+      "actual": "0\n5\n10\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-073",
+      "passed": true,
+      "expected": "开始\n收到 42\n完成\n结束\n",
+      "actual": "开始\n收到 42\n完成\n结束\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-074",
+      "passed": true,
+      "expected": "小明 18\n姓名长度 2\n",
+      "actual": "小明 18\n姓名长度 2\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-075",
+      "passed": true,
+      "expected": "[4, 9, 16]\n29\n",
+      "actual": "[4, 9, 16]\n29\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-076",
+      "passed": true,
+      "expected": "捕获到：计算失败\n1\n",
+      "actual": "捕获到：计算失败\n1\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-077",
+      "passed": true,
+      "expected": "超时了\n按时返回 2\n",
+      "actual": "超时了\n按时返回 2\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-078",
+      "passed": true,
+      "expected": "Future<int>\n10\n20\n",
+      "actual": "Future<int>\n10\n20\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-079",
+      "passed": true,
+      "expected": "22\n-1\n",
+      "actual": "22\n-1\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-080",
+      "passed": true,
+      "expected": "主流程继续\n后台任务完成\n",
+      "actual": "主流程继续\n后台任务完成\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-081",
+      "passed": true,
+      "expected": "[1, 2, 3, 4]\n4\n",
+      "actual": "[1, 2, 3, 4]\n4\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-082",
+      "passed": true,
+      "expected": "打开资源\n关闭资源\n外层捕获：处理中出错\n",
+      "actual": "打开资源\n关闭资源\n外层捕获：处理中出错\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-083",
+      "passed": true,
+      "expected": "总和 15\n",
+      "actual": "总和 15\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-084",
+      "passed": true,
+      "expected": "[4, 16, 36]\n",
+      "actual": "[4, 16, 36]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-085",
+      "passed": true,
+      "expected": "[10, 20, 30]\n",
+      "actual": "[10, 20, 30]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-086",
+      "passed": true,
+      "expected": "第一个订阅者: [1, 2]\n第二个订阅者: [1, 2]\n",
+      "actual": "第一个订阅者: [1, 2]\n第二个订阅者: [1, 2]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-087",
+      "passed": true,
+      "expected": "[值 1, 错误：坏值 2, 值 3]\n",
+      "actual": "[值 1, 错误：坏值 2, 值 3]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-088",
+      "passed": true,
+      "expected": "[2, 4, 6]\n",
+      "actual": "[2, 4, 6]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-089",
+      "passed": true,
+      "expected": "fold 求和 10\n拼接 abc\n",
+      "actual": "fold 求和 10\n拼接 abc\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-090",
+      "passed": true,
+      "expected": "收到 [1, 2]\n",
+      "actual": "收到 [1, 2]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-091",
+      "passed": true,
+      "expected": "1 到 100 的和 = 5050\n",
+      "actual": "1 到 100 的和 = 5050\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-092",
+      "passed": true,
+      "expected": "乘积 6\ndart 诞生于 2011\n",
+      "actual": "乘积 6\ndart 诞生于 2011\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-093",
+      "passed": true,
+      "expected": "worker 返回 15\n",
+      "actual": "worker 返回 15\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-094",
+      "passed": true,
+      "expected": "[55, 5050, 500500]\n505605\n",
+      "actual": "[55, 5050, 500500]\n505605\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-095",
+      "passed": true,
+      "expected": "主隔离区捕获：隔离区里出错\n一切正常\n",
+      "actual": "主隔离区捕获：隔离区里出错\n一切正常\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-096",
+      "passed": true,
+      "expected": "和 43，最大值 16\n",
+      "actual": "和 43，最大值 16\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-097",
+      "passed": true,
+      "expected": "你好，Dart\n长度 13\n",
+      "actual": "你好，Dart\n长度 13\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-098",
+      "passed": true,
+      "expected": "行数 3\n第一行 第一行\n最后一行 第三行\n",
+      "actual": "行数 3\n第一行 第一行\n最后一行 第三行\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-099",
+      "passed": true,
+      "expected": "dart 文件数 2\n[a.dart, b.dart]\n",
+      "actual": "dart 文件数 2\n[a.dart, b.dart]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-100",
+      "passed": true,
+      "expected": "目标存在 true\n内容 复制我\n",
+      "actual": "目标存在 true\n内容 复制我\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-101",
+      "passed": true,
+      "expected": "旧文件存在 false\n新文件存在 true\n新文件内容 数据\n",
+      "actual": "旧文件存在 false\n新文件存在 true\n新文件内容 数据\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-102",
+      "passed": true,
+      "expected": "name=小明\nscores=[90, 85]\n",
+      "actual": "name=小明\nscores=[90, 85]\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-103",
+      "passed": true,
+      "expected": "true\n文件总数 3\n",
+      "actual": "true\n文件总数 3\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-104",
+      "passed": true,
+      "expected": "存在 true\n长度 5\n是文件 true\n",
+      "actual": "存在 true\n长度 5\n是文件 true\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-105",
+      "passed": true,
+      "expected": "{\"name\":\"小明\",\"age\":18}\n小明\n18\nfalse\n",
+      "actual": "{\"name\":\"小明\",\"age\":18}\n小明\n18\nfalse\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-106",
+      "passed": true,
+      "expected": "班级 一班\n人数 2\n第一名 小明\n",
+      "actual": "班级 一班\n人数 2\n第一名 小明\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-107",
+      "passed": true,
+      "expected": "小明 18\n",
+      "actual": "小明 18\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-108",
+      "passed": true,
+      "expected": "{\"x\":3,\"y\":4}\n",
+      "actual": "{\"x\":3,\"y\":4}\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-109",
+      "passed": true,
+      "expected": "商品数 3\n总价 25\n",
+      "actual": "商品数 3\n总价 25\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-110",
+      "passed": true,
+      "expected": "解析失败：Unexpected character\nvalid=true\n",
+      "actual": "解析失败：Unexpected character\nvalid=true\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-111",
+      "passed": true,
+      "expected": "通过 加法\n通过 字符串长度\n通过 末尾元素\n通过数 3\n",
+      "actual": "通过 加法\n通过 字符串长度\n通过 末尾元素\n通过数 3\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-112",
+      "passed": true,
+      "expected": "分组：数学\n  2/2 通过\n分组：字符串\n  1/1 通过\n",
+      "actual": "分组：数学\n  2/2 通过\n分组：字符串\n  1/1 通过\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-113",
+      "passed": true,
+      "expected": "90\n-5\n非法输入被拒绝\n",
+      "actual": "90\n-5\n非法输入被拒绝\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-114",
+      "passed": true,
+      "expected": "ValidationError: 年龄不能为负\n年龄合法\n",
+      "actual": "ValidationError: 年龄不能为负\n年龄合法\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-115",
+      "passed": true,
+      "expected": "原始 localhost:8080\n更新 localhost:9090\n",
+      "actual": "原始 localhost:8080\n更新 localhost:9090\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-116",
+      "passed": true,
+      "expected": "集合大小 2\ntrue\n",
+      "actual": "集合大小 2\ntrue\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-117",
+      "passed": true,
+      "expected": "你好，小明\n未知用户\n",
+      "actual": "你好，小明\n未知用户\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-118",
+      "passed": true,
+      "expected": "localhost:8080\nlocalhost:80\n",
+      "actual": "localhost:8080\nlocalhost:80\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-119",
+      "passed": true,
+      "expected": "n=10 操作次数 10\nn=100 操作次数 100\nn=1000 操作次数 1000\n",
+      "actual": "n=10 操作次数 10\nn=100 操作次数 100\nn=1000 操作次数 1000\n",
+      "error": null
+    },
+    {
+      "id": "dart-lesson-120",
+      "passed": true,
+      "expected": "命令 build\ntarget=ohos\nmode=release\n参数个数 2\n",
+      "actual": "命令 build\ntarget=ohos\nmode=release\n参数个数 2\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-001",
+      "passed": true,
+      "expected": "Hello, Dart!\n这是我的第一个程序\n3\n",
+      "actual": "Hello, Dart!\n这是我的第一个程序\n3\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-002",
+      "passed": true,
+      "expected": "小明 今年 20 岁\n身高 1.75，圆周率 3.14159\n是学生吗？true\nint\n10.0\n10\n",
+      "actual": "小明 今年 20 岁\n身高 1.75，圆周率 3.14159\n是学生吗？true\nint\n10.0\n10\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-003",
+      "passed": true,
+      "expected": "小明 考了 88 分\n小明的平均分是 90.0\n名字长度：2\n第一行\n第二行\n",
+      "actual": "小明 考了 88 分\n小明的平均分是 90.0\n名字长度：2\n第一行\n第二行\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-004",
+      "passed": true,
+      "expected": "9\n5\n14\n3.5\n3\n1\n18\ntrue\ntrue\ntrue\n",
+      "actual": "9\n5\n14\n3.5\n3\n1\n18\ntrue\ntrue\ntrue\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-005",
+      "passed": true,
+      "expected": "43\n39.8\n0.333\n255\n解析失败\n",
+      "actual": "43\n39.8\n0.333\n255\n解析失败\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-006",
+      "passed": true,
+      "expected": "应用：QFLIDartWing\n商品：键盘\n含税：210.94\n",
+      "actual": "应用：QFLIDartWing\n商品：键盘\n含税：210.94\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-007",
+      "passed": true,
+      "expected": "512 B\n2.0 KB\n",
+      "actual": "512 B\n2.0 KB\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-008",
+      "passed": true,
+      "expected": "3\n周一\n90\n5\n",
+      "actual": "3\n周一\n90\n5\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-009",
+      "passed": true,
+      "expected": "Dart Language\nDART LANGUAGE\ndart language\ntrue\ntrue\n[apple, banana, cherry]\napple | banana | cherry\n",
+      "actual": "Dart Language\nDART LANGUAGE\ndart language\ntrue\ntrue\n[apple, banana, cherry]\napple | banana | cherry\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-010",
+      "passed": true,
+      "expected": "姓名：小明\n年龄：20（成年）\n城市：杭州\n卡片长度：4 字\n",
+      "actual": "姓名：小明\n年龄：20（成年）\n城市：杭州\n卡片长度：4 字\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-011",
+      "passed": true,
+      "expected": "良好\n",
+      "actual": "良好\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-012",
+      "passed": true,
+      "expected": "未成年\n匿名用户\n10\n",
+      "actual": "未成年\n匿名用户\n10\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-013",
+      "passed": true,
+      "expected": "200: 成功\n404: 未找到\n999: 未知状态码\n",
+      "actual": "200: 成功\n404: 未找到\n999: 未知状态码\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-014",
+      "passed": true,
+      "expected": "1 到 100 的和是 5050\n[1, 4, 9, 16, 25]\n",
+      "actual": "1 到 100 的和是 5050\n[1, 4, 9, 16, 25]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-015",
+      "passed": true,
+      "expected": "倒计时 3\n倒计时 2\n倒计时 1\n发射！\n至少执行了一次，attempts=1\n",
+      "actual": "倒计时 3\n倒计时 2\n倒计时 1\n发射！\n至少执行了一次，attempts=1\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-016",
+      "passed": true,
+      "expected": "1\n2\n4\n5\n7\n8\n第一个 7 的倍数是 7\n",
+      "actual": "1\n2\n4\n5\n7\n8\n第一个 7 的倍数是 7\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-017",
+      "passed": true,
+      "expected": "8\n12\n你好，小明！\n",
+      "actual": "8\n12\n你好，小明！\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-018",
+      "passed": true,
+      "expected": "你好，小明！\n早上好，小红！\n晚上好，小刚！\n",
+      "actual": "你好，小明！\n早上好，小红！\n晚上好，小刚！\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-019",
+      "passed": true,
+      "expected": "[苹果, 香蕉, 橙子, 葡萄]\n苹果\n葡萄\n共 4 种\n含香蕉？true\n[苹果, 橙子, 葡萄]\n",
+      "actual": "[苹果, 香蕉, 橙子, 葡萄]\n苹果\n葡萄\n共 4 种\n含香蕉？true\n[苹果, 橙子, 葡萄]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-020",
+      "passed": true,
+      "expected": "第 1 名：88\n第 2 名：92\n第 3 名：79\n第 4 名：95\n优秀分：92\n优秀分：95\n[92, 79]\n[95, 79, 92, 88]\n",
+      "actual": "第 1 名：88\n第 2 名：92\n第 3 名：79\n第 4 名：95\n优秀分：92\n优秀分：95\n[92, 79]\n[95, 79, 92, 88]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-021",
+      "passed": true,
+      "expected": "[67, 79, 88, 92, 95]\n[95, 92, 88, 79, 67]\n2\n-1\ntrue\ntrue\n",
+      "actual": "[67, 79, 88, 92, 95]\n[95, 92, 88, 79, 67]\n2\n-1\ntrue\ntrue\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-022",
+      "passed": true,
+      "expected": "小明\n未填写\nfalse\nname = 小明\nage = 18\nscore = 88\ncity = 杭州\n",
+      "actual": "小明\n未填写\nfalse\nname = 小明\nage = 18\nscore = 88\ncity = 杭州\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-023",
+      "passed": true,
+      "expected": "{1, 2, 3}\n3\n{2, 3}\n{1, 2, 3, 4}\n{1}\n",
+      "actual": "{1, 2, 3}\n3\n{2, 3}\n{1, 2, 3, 4}\n{1}\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-024",
+      "passed": true,
+      "expected": "[2, 4, 6, 8, 10, 12]\n[2, 4, 6]\n[1, 2, 3]\n",
+      "actual": "[2, 4, 6, 8, 10, 12]\n[2, 4, 6]\n[1, 2, 3]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-025",
+      "passed": true,
+      "expected": "总和 31\n最大 9\nabc\n",
+      "actual": "总和 31\n最大 9\nabc\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-026",
+      "passed": true,
+      "expected": "[0, 1, 2, 3, 4]\n[基础奖励, 额外奖励]\n[1, 4, 9, 16]\n[9]\n",
+      "actual": "[0, 1, 2, 3, 4]\n[基础奖励, 额外奖励]\n[1, 4, 9, 16]\n[9]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-027",
+      "passed": true,
+      "expected": "{a: 11, b: 2, c: 5}\n{A: 22, B: 4, C: 10}\n[a, b, c, d]\n",
+      "actual": "{a: 11, b: 2, c: 5}\n{A: 22, B: 4, C: 10}\n[a, b, c, d]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-028",
+      "passed": true,
+      "expected": "the: 3\ncat: 1\ndog: 1\nbird: 1\n",
+      "actual": "the: 3\ncat: 1\ndog: 1\nbird: 1\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-029",
+      "passed": true,
+      "expected": "小明\nnull\n阿明\ntrue\n",
+      "actual": "小明\nnull\n阿明\ntrue\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-030",
+      "passed": true,
+      "expected": "默认值\n填入了\n3\nnull\nHANGZHOU\n",
+      "actual": "默认值\n填入了\n3\nnull\nHANGZHOU\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-031",
+      "passed": true,
+      "expected": "2\n小明\n没有值\n",
+      "actual": "2\n小明\n没有值\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-032",
+      "passed": true,
+      "expected": "QFLIDartWing\n42\n",
+      "actual": "QFLIDartWing\n42\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-033",
+      "passed": true,
+      "expected": "[1, 3, 5]\n9\n0\n2\n",
+      "actual": "[1, 3, 5]\n9\n0\n2\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-034",
+      "passed": true,
+      "expected": "姓名：小明\n城市：未知城市\n年龄：未填写\n",
+      "actual": "姓名：小明\n城市：未知城市\n年龄：未填写\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-035",
+      "passed": true,
+      "expected": "小明：58 分\n及格？false\n",
+      "actual": "小明：58 分\n及格？false\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-036",
+      "passed": true,
+      "expected": "77.0\n25.0\n",
+      "actual": "77.0\n25.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-037",
+      "passed": true,
+      "expected": "100.0\n250.0\n",
+      "actual": "100.0\n250.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-038",
+      "passed": true,
+      "expected": "3\n共创建了 3 个计数器\n",
+      "actual": "3\n共创建了 3 个计数器\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-039",
+      "passed": true,
+      "expected": "旺财 说：汪汪\n小旺 说：汪汪（奶声奶气）\n",
+      "actual": "旺财 说：汪汪\n小旺 说：汪汪（奶声奶气）\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-040",
+      "passed": true,
+      "expected": "面积是 12.57\n面积是 9.00\n",
+      "actual": "面积是 12.57\n面积是 9.00\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-041",
+      "passed": true,
+      "expected": "￥12.50\n80%\n",
+      "actual": "￥12.50\n80%\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-042",
+      "passed": true,
+      "expected": "唐老鸭 在游泳\n唐老鸭 在飞行\n",
+      "actual": "唐老鸭 在游泳\n唐老鸭 在飞行\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-043",
+      "passed": true,
+      "expected": "邮件通知\n短信通知\n通知\n",
+      "actual": "邮件通知\n短信通知\n通知\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-044",
+      "passed": true,
+      "expected": "(4, 6)\ntrue\n1\n",
+      "actual": "(4, 6)\ntrue\n1\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-045",
+      "passed": true,
+      "expected": "low: 低 紧急？false\nmedium: 中 紧急？false\nhigh: 高 紧急？true\n高\n",
+      "actual": "low: 低 紧急？false\nmedium: 中 紧急？false\nhigh: 高 紧急？true\n高\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-046",
+      "passed": true,
+      "expected": "deposit: 100.00\ndeposit: 50.00\nwithdraw: 30.00\n余额 120.00\n",
+      "actual": "deposit: 100.00\ndeposit: 50.00\nwithdraw: 30.00\n余额 120.00\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-047",
+      "passed": true,
+      "expected": "1\na\nnull\n20\ndouble\n",
+      "actual": "1\na\nnull\n20\ndouble\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-048",
+      "passed": true,
+      "expected": "Box<int>(42)\nPair<int, String>(18, age)\n",
+      "actual": "Box<int>(42)\nPair<int, String>(18, age)\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-049",
+      "passed": true,
+      "expected": "7\npear\n6\n4.0\n",
+      "actual": "7\npear\n6\n4.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-050",
+      "passed": true,
+      "expected": "7\n12\n[10, 20, 30]\n",
+      "actual": "7\n12\n[10, 20, 30]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-051",
+      "passed": true,
+      "expected": "[apple, avocado]\n[banana, berry]\n[1, 2, 3]\n",
+      "actual": "[apple, avocado]\n[banana, berry]\n[1, 2, 3]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-052",
+      "passed": true,
+      "expected": "6\n写入失败：_TypeError\n[1, 2, 3, 1.5]\n",
+      "actual": "6\n写入失败：_TypeError\n[1, 2, 3, 1.5]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-053",
+      "passed": true,
+      "expected": "1\nnull\nA\n没有元素\n",
+      "actual": "1\nnull\nA\n没有元素\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-054",
+      "passed": true,
+      "expected": "1\n-1\n命中 1 未命中 1\n2\n",
+      "actual": "1\n-1\n命中 1 未命中 1\n2\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-055",
+      "passed": true,
+      "expected": "解析失败：Invalid radix-10 number\n清理完成\n程序继续\n",
+      "actual": "解析失败：Invalid radix-10 number\n清理完成\n程序继续\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-056",
+      "passed": true,
+      "expected": "年龄合法：20\nValidationException(age: 不能为负)\n",
+      "actual": "年龄合法：20\nValidationException(age: 不能为负)\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-057",
+      "passed": true,
+      "expected": "10\n不是数字：abc\n非法值：必须为正\n",
+      "actual": "10\n不是数字：abc\n非法值：必须为正\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-058",
+      "passed": true,
+      "expected": "越界（这是缺陷，通常要修代码）：RangeError\n可预期：业务层可预期的失败\n",
+      "actual": "越界（这是缺陷，通常要修代码）：RangeError\n可预期：业务层可预期的失败\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-059",
+      "passed": true,
+      "expected": "成功：20\n失败：不是数字\n",
+      "actual": "成功：20\n失败：不是数字\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-060",
+      "passed": true,
+      "expected": "host = localhost\nport = 8080\nname = app\n错误数：1\n非法行：坏行\n",
+      "actual": "host = localhost\nport = 8080\nname = app\n错误数：1\n非法行：坏行\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-061",
+      "passed": true,
+      "expected": "3\n7\n3\n10\n2\n",
+      "actual": "3\n7\n3\n10\n2\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-062",
+      "passed": true,
+      "expected": "小明\n18\ntrue\nfalse\n(age: 18, name: 小明)\n",
+      "actual": "小明\n18\ntrue\nfalse\n(age: 18, name: 小明)\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-063",
+      "passed": true,
+      "expected": "原点\n普通点 (1, 2)\n普通点 (3, 4)\n",
+      "actual": "原点\n普通点 (1, 2)\n普通点 (3, 4)\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-064",
+      "passed": true,
+      "expected": "空列表\n只有一个元素：42\n首项 1，其余 3 个\n",
+      "actual": "空列表\n只有一个元素：42\n首项 1，其余 3 个\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-065",
+      "passed": true,
+      "expected": "小明（18 岁）\n小红（年龄未知）\n数据不完整\n",
+      "actual": "小明（18 岁）\n小红（年龄未知）\n数据不完整\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-066",
+      "passed": true,
+      "expected": "圆半径 2.0\n正方形边长 3.0\n",
+      "actual": "圆半径 2.0\n正方形边长 3.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-067",
+      "passed": true,
+      "expected": "奇数 3\n偶数 8\n奇数 15\n负数 -4\n",
+      "actual": "奇数 3\n偶数 8\n奇数 15\n负数 -4\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-068",
+      "passed": true,
+      "expected": "3.14\n12.0\n",
+      "actual": "3.14\n12.0\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-069",
+      "passed": true,
+      "expected": "mercury: g=3.70\nearth: g=9.82\nmars: g=3.73\n3\n",
+      "actual": "mercury: g=3.70\nearth: g=9.82\nmars: g=3.73\n3\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-070",
+      "passed": true,
+      "expected": "77.0\n旺财 汪汪叫\n",
+      "actual": "77.0\n旺财 汪汪叫\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-071",
+      "passed": true,
+      "expected": "正整数 7\n字符串 \"dart\"，长度 4\n非空列表，长度 3\n其它：-1\n",
+      "actual": "正整数 7\n字符串 \"dart\"，长度 4\n非空列表，长度 3\n其它：-1\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-072",
+      "passed": true,
+      "expected": "0\n5\n10\n",
+      "actual": "0\n5\n10\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-073",
+      "passed": true,
+      "expected": "开始\n收到 42\n完成\n结束\n",
+      "actual": "开始\n收到 42\n完成\n结束\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-074",
+      "passed": true,
+      "expected": "小明 18\n姓名长度 2\n",
+      "actual": "小明 18\n姓名长度 2\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-075",
+      "passed": true,
+      "expected": "[4, 9, 16]\n29\n",
+      "actual": "[4, 9, 16]\n29\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-076",
+      "passed": true,
+      "expected": "捕获到：计算失败\n1\n",
+      "actual": "捕获到：计算失败\n1\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-077",
+      "passed": true,
+      "expected": "超时了\n按时返回 2\n",
+      "actual": "超时了\n按时返回 2\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-078",
+      "passed": true,
+      "expected": "Future<int>\n10\n20\n",
+      "actual": "Future<int>\n10\n20\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-079",
+      "passed": true,
+      "expected": "22\n-1\n",
+      "actual": "22\n-1\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-080",
+      "passed": true,
+      "expected": "主流程继续\n后台任务完成\n",
+      "actual": "主流程继续\n后台任务完成\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-081",
+      "passed": true,
+      "expected": "[1, 2, 3, 4]\n4\n",
+      "actual": "[1, 2, 3, 4]\n4\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-082",
+      "passed": true,
+      "expected": "打开资源\n关闭资源\n外层捕获：处理中出错\n",
+      "actual": "打开资源\n关闭资源\n外层捕获：处理中出错\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-083",
+      "passed": true,
+      "expected": "总和 15\n",
+      "actual": "总和 15\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-084",
+      "passed": true,
+      "expected": "[4, 16, 36]\n",
+      "actual": "[4, 16, 36]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-085",
+      "passed": true,
+      "expected": "[10, 20, 30]\n",
+      "actual": "[10, 20, 30]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-086",
+      "passed": true,
+      "expected": "第一个订阅者: [1, 2]\n第二个订阅者: [1, 2]\n",
+      "actual": "第一个订阅者: [1, 2]\n第二个订阅者: [1, 2]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-087",
+      "passed": true,
+      "expected": "[值 1, 错误：坏值 2, 值 3]\n",
+      "actual": "[值 1, 错误：坏值 2, 值 3]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-088",
+      "passed": true,
+      "expected": "[2, 4, 6]\n",
+      "actual": "[2, 4, 6]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-089",
+      "passed": true,
+      "expected": "fold 求和 10\n拼接 abc\n",
+      "actual": "fold 求和 10\n拼接 abc\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-090",
+      "passed": true,
+      "expected": "收到 [1, 2]\n",
+      "actual": "收到 [1, 2]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-091",
+      "passed": true,
+      "expected": "1 到 100 的和 = 5050\n",
+      "actual": "1 到 100 的和 = 5050\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-092",
+      "passed": true,
+      "expected": "乘积 6\ndart 诞生于 2011\n",
+      "actual": "乘积 6\ndart 诞生于 2011\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-093",
+      "passed": true,
+      "expected": "worker 返回 15\n",
+      "actual": "worker 返回 15\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-094",
+      "passed": true,
+      "expected": "[55, 5050, 500500]\n505605\n",
+      "actual": "[55, 5050, 500500]\n505605\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-095",
+      "passed": true,
+      "expected": "主隔离区捕获：隔离区里出错\n一切正常\n",
+      "actual": "主隔离区捕获：隔离区里出错\n一切正常\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-096",
+      "passed": true,
+      "expected": "和 43，最大值 16\n",
+      "actual": "和 43，最大值 16\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-097",
+      "passed": true,
+      "expected": "你好，Dart\n长度 13\n",
+      "actual": "你好，Dart\n长度 13\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-098",
+      "passed": true,
+      "expected": "行数 3\n第一行 第一行\n最后一行 第三行\n",
+      "actual": "行数 3\n第一行 第一行\n最后一行 第三行\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-099",
+      "passed": true,
+      "expected": "dart 文件数 2\n[a.dart, b.dart]\n",
+      "actual": "dart 文件数 2\n[a.dart, b.dart]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-100",
+      "passed": true,
+      "expected": "目标存在 true\n内容 复制我\n",
+      "actual": "目标存在 true\n内容 复制我\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-101",
+      "passed": true,
+      "expected": "旧文件存在 false\n新文件存在 true\n新文件内容 数据\n",
+      "actual": "旧文件存在 false\n新文件存在 true\n新文件内容 数据\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-102",
+      "passed": true,
+      "expected": "name=小明\nscores=[90, 85]\n",
+      "actual": "name=小明\nscores=[90, 85]\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-103",
+      "passed": true,
+      "expected": "true\n文件总数 3\n",
+      "actual": "true\n文件总数 3\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-104",
+      "passed": true,
+      "expected": "存在 true\n长度 5\n是文件 true\n",
+      "actual": "存在 true\n长度 5\n是文件 true\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-105",
+      "passed": true,
+      "expected": "{\"name\":\"小明\",\"age\":18}\n小明\n18\nfalse\n",
+      "actual": "{\"name\":\"小明\",\"age\":18}\n小明\n18\nfalse\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-106",
+      "passed": true,
+      "expected": "班级 一班\n人数 2\n第一名 小明\n",
+      "actual": "班级 一班\n人数 2\n第一名 小明\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-107",
+      "passed": true,
+      "expected": "小明 18\n",
+      "actual": "小明 18\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-108",
+      "passed": true,
+      "expected": "{\"x\":3,\"y\":4}\n",
+      "actual": "{\"x\":3,\"y\":4}\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-109",
+      "passed": true,
+      "expected": "商品数 3\n总价 25\n",
+      "actual": "商品数 3\n总价 25\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-110",
+      "passed": true,
+      "expected": "解析失败：Unexpected character\nvalid=true\n",
+      "actual": "解析失败：Unexpected character\nvalid=true\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-111",
+      "passed": true,
+      "expected": "通过 加法\n通过 字符串长度\n通过 末尾元素\n通过数 3\n",
+      "actual": "通过 加法\n通过 字符串长度\n通过 末尾元素\n通过数 3\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-112",
+      "passed": true,
+      "expected": "分组：数学\n  2/2 通过\n分组：字符串\n  1/1 通过\n",
+      "actual": "分组：数学\n  2/2 通过\n分组：字符串\n  1/1 通过\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-113",
+      "passed": true,
+      "expected": "90\n-5\n非法输入被拒绝\n",
+      "actual": "90\n-5\n非法输入被拒绝\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-114",
+      "passed": true,
+      "expected": "ValidationError: 年龄不能为负\n年龄合法\n",
+      "actual": "ValidationError: 年龄不能为负\n年龄合法\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-115",
+      "passed": true,
+      "expected": "原始 localhost:8080\n更新 localhost:9090\n",
+      "actual": "原始 localhost:8080\n更新 localhost:9090\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-116",
+      "passed": true,
+      "expected": "集合大小 2\ntrue\n",
+      "actual": "集合大小 2\ntrue\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-117",
+      "passed": true,
+      "expected": "你好，小明\n未知用户\n",
+      "actual": "你好，小明\n未知用户\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-118",
+      "passed": true,
+      "expected": "localhost:8080\nlocalhost:80\n",
+      "actual": "localhost:8080\nlocalhost:80\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-119",
+      "passed": true,
+      "expected": "n=10 操作次数 10\nn=100 操作次数 100\nn=1000 操作次数 1000\n",
+      "actual": "n=10 操作次数 10\nn=100 操作次数 100\nn=1000 操作次数 1000\n",
+      "error": null
+    },
+    {
+      "id": "dart-example-120",
+      "passed": true,
+      "expected": "命令 build\ntarget=ohos\nmode=release\n参数个数 2\n",
+      "actual": "命令 build\ntarget=ohos\nmode=release\n参数个数 2\n",
+      "error": null
+    }
+  ]
+}

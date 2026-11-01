@@ -1,0 +1,1051 @@
+{
+  "date": "2026-10-22",
+  "engine": "tom_d4rt 1.229.0+qfli.1 candidate",
+  "platform": "Windows host",
+  "targetDeviceVerified": false,
+  "nativeAot": {
+    "semanticMatrix": {
+      "fresh_globals_static_local": {
+        "actual": "[8, 12, 14]\n[100, 200, 13]\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "[8, 12, 14]\n[100, 200, 13]\n"
+      },
+      "unrelated_global_port": {
+        "actual": "7\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "7\n"
+      },
+      "unrelated_local_port": {
+        "actual": "7\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "7\n"
+      },
+      "explicit_unsendable_port": {
+        "actual": "unsendable capture rejected\n",
+        "children": 0,
+        "childrenExited": 0,
+        "passed": true,
+        "expected": "unsendable capture rejected\n"
+      },
+      "shared_scope_and_recursive_function": {
+        "actual": "[6, 6, 55]\n3\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "[6, 6, 55]\n3\n"
+      },
+      "mutable_alias_cycle": {
+        "actual": "[2, true, true]\n1\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "[2, true, true]\n1\n"
+      },
+      "local_shadow_avoids_capture": {
+        "actual": "5\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "5\n"
+      },
+      "child_stdout_and_native_identity": {
+        "actual": "real child print\ntrue\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "real child print\ntrue\n"
+      },
+      "spawn_lifecycle": {
+        "actual": "real-child\ntrue\nnull\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "real-child\ntrue\nnull\n"
+      },
+      "spawn_error_listener": {
+        "actual": "true\n",
+        "children": 1,
+        "childrenExited": 1,
+        "passed": true,
+        "expected": "true\n"
+      },
+      "run_typed_exception": {
+        "actual": "real failure\nafter error\n",
+        "children": 2,
+        "childrenExited": 2,
+        "passed": true,
+        "expected": "real failure\nafter error\n"
+      },
+      "nested_run": {
+        "actual": "42\n",
+        "children": 2,
+        "childrenExited": 2,
+        "passed": true,
+        "expected": "42\n"
+      },
+      "imported_function_fresh_globals": {
+        "actual": "8\n100\n",
+        "expected": "8\n100\n",
+        "passed": true
+      }
+    },
+    "typedCaptures": {
+      "typed_list": {
+        "actual": [
+          "List<int>",
+          true,
+          false,
+          2
+        ],
+        "hostType": "List<int>",
+        "passed": true
+      },
+      "const_list": {
+        "actual": [
+          "List<int>",
+          true,
+          true,
+          1
+        ],
+        "hostType": "List<int>",
+        "passed": true
+      },
+      "unmodifiable_list": {
+        "actual": [
+          "List<int>",
+          true,
+          true,
+          1
+        ],
+        "hostType": "List<int>",
+        "passed": true
+      },
+      "typed_map": {
+        "actual": [
+          "_Map<String, int>",
+          true,
+          false,
+          2
+        ],
+        "hostType": "_Map<String, int>",
+        "passed": true
+      },
+      "const_map": {
+        "actual": [
+          "_ConstMap<String, int>",
+          true,
+          true,
+          1
+        ],
+        "hostType": "_ConstMap<String, int>",
+        "passed": true
+      },
+      "typed_set": {
+        "actual": [
+          "_Set<int>",
+          true,
+          false,
+          2
+        ],
+        "hostType": "_Set<int>",
+        "passed": true
+      },
+      "const_set": {
+        "actual": [
+          "_ConstSet<int>",
+          true,
+          true,
+          1
+        ],
+        "hostType": "_ConstSet<int>",
+        "passed": true
+      }
+    },
+    "cancellation": {
+      "cases": [
+        {
+          "name": "before-first-spawn",
+          "requests": 0,
+          "pendingAtCancel": 0,
+          "activeAtCancel": 0,
+          "created": 0,
+          "exited": 0,
+          "activeAfterStop": 0,
+          "pendingAfterStop": 0,
+          "loopEntered": false,
+          "spawnRejected": true,
+          "stopElapsedMs": 0,
+          "passed": true
+        },
+        {
+          "name": "during-outer-native-spawn",
+          "requests": 1,
+          "pendingAtCancel": 1,
+          "activeAtCancel": 0,
+          "created": 1,
+          "exited": 1,
+          "activeAfterStop": 0,
+          "pendingAfterStop": 0,
+          "loopEntered": false,
+          "spawnRejected": true,
+          "stopElapsedMs": 0,
+          "passed": true
+        },
+        {
+          "name": "during-descendant-native-spawn",
+          "requests": 2,
+          "pendingAtCancel": 1,
+          "activeAtCancel": 1,
+          "created": 2,
+          "exited": 2,
+          "activeAfterStop": 0,
+          "pendingAfterStop": 0,
+          "loopEntered": false,
+          "spawnRejected": false,
+          "stopElapsedMs": 0,
+          "passed": true
+        },
+        {
+          "name": "busy-nested-child-grandchild",
+          "requests": 3,
+          "pendingAtCancel": 0,
+          "activeAtCancel": 3,
+          "created": 3,
+          "exited": 3,
+          "activeAfterStop": 0,
+          "pendingAfterStop": 0,
+          "loopEntered": true,
+          "spawnRejected": false,
+          "stopElapsedMs": 0,
+          "passed": true
+        },
+        {
+          "name": "burst50-cancel-after-five-descendants",
+          "requests": 6,
+          "pendingAtCancel": 4,
+          "activeAtCancel": 2,
+          "created": 6,
+          "exited": 6,
+          "activeAfterStop": 0,
+          "pendingAfterStop": 0,
+          "loopEntered": false,
+          "spawnRejected": false,
+          "stopElapsedMs": 0,
+          "passed": true
+        }
+      ],
+      "pendingNativeSpawnStress": {
+        "iterations": 20,
+        "created": 40,
+        "exited": 40,
+        "allPendingAtCancel": true,
+        "passed": true,
+        "results": [
+          {
+            "name": "pending-race-0",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-1",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-2",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-3",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-4",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-5",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-6",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-7",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-8",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-9",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-10",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-11",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-12",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-13",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-14",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-15",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-16",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-17",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-18",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          },
+          {
+            "name": "pending-race-19",
+            "requests": 2,
+            "pendingAtCancel": 1,
+            "activeAtCancel": 1,
+            "created": 2,
+            "exited": 2,
+            "activeAfterStop": 0,
+            "pendingAfterStop": 0,
+            "loopEntered": false,
+            "spawnRejected": false,
+            "stopElapsedMs": 0,
+            "passed": true
+          }
+        ]
+      },
+      "passed": true
+    },
+    "naturalLiveness": {
+      "cases": [
+        {
+          "name": "main-return-keeps-timer",
+          "events": [
+            "main-done",
+            "late-timer"
+          ],
+          "idleAtMainDone": false,
+          "idleAtOuterExit": true,
+          "activeAtOuterExit": 0,
+          "pendingAtOuterExit": 0,
+          "created": 1,
+          "exited": 1,
+          "activeAtIdle": 0,
+          "pendingAtIdle": 0,
+          "passed": true
+        },
+        {
+          "name": "child-survives-outer-exit",
+          "events": [
+            "main-done",
+            "child-started",
+            "child-finished"
+          ],
+          "idleAtMainDone": false,
+          "idleAtOuterExit": false,
+          "activeAtOuterExit": 1,
+          "pendingAtOuterExit": 0,
+          "created": 2,
+          "exited": 2,
+          "activeAtIdle": 0,
+          "pendingAtIdle": 0,
+          "passed": true
+        }
+      ],
+      "queuedRequestStress": {
+        "iterations": 20,
+        "created": 60,
+        "exited": 60,
+        "results": [
+          {
+            "name": "queued-unawaited-grandchild-0",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-1",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 1,
+            "pendingAtOuterExit": 0,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-2",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-3",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-4",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 1,
+            "pendingAtOuterExit": 0,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-5",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-6",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-7",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-8",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 1,
+            "pendingAtOuterExit": 0,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-9",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-10",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-11",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-12",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-13",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-14",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-15",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-16",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-17",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 1,
+            "pendingAtOuterExit": 0,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-18",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 0,
+            "pendingAtOuterExit": 1,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          },
+          {
+            "name": "queued-unawaited-grandchild-19",
+            "events": [
+              "main-done",
+              "child-started",
+              "child-finished"
+            ],
+            "idleAtMainDone": false,
+            "idleAtOuterExit": false,
+            "activeAtOuterExit": 1,
+            "pendingAtOuterExit": 0,
+            "created": 3,
+            "exited": 3,
+            "activeAtIdle": 0,
+            "pendingAtIdle": 0,
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "passed": true
+    },
+    "spawnUriRejection": {
+      "permissionDenied": {
+        "permissionGranted": false,
+        "result": "Unsupported operation: Isolate.spawnUri is unsupported by the interpreted runtime. Use Isolate.spawn with a source function instead.",
+        "rejectionType": "UnsupportedError",
+        "nativeMessages": [],
+        "hostCreated": 0,
+        "hostActiveAfterStop": 0,
+        "hostPendingAfterStop": 0,
+        "passed": true
+      },
+      "permissionGranted": {
+        "permissionGranted": true,
+        "result": "Unsupported operation: Isolate.spawnUri is unsupported by the interpreted runtime. Use Isolate.spawn with a source function instead.",
+        "rejectionType": "UnsupportedError",
+        "nativeMessages": [],
+        "hostCreated": 0,
+        "hostActiveAfterStop": 0,
+        "hostPendingAfterStop": 0,
+        "passed": true
+      },
+      "interpretedAwaitCatch": {
+        "actual": "rejected",
+        "passed": true
+      },
+      "passed": true
+    },
+    "lateChildPolicyOutput": {
+      "messages": [
+        {
+          "type": "stdout",
+          "data": "late child print\n"
+        },
+        {
+          "type": "stdout",
+          "data": "late stdout"
+        },
+        {
+          "type": "stderr",
+          "data": "late stderr"
+        }
+      ],
+      "events": [
+        "main-done",
+        "D:\\AppData\\Local\\Temp\\qfli-late-output-e399f3e6"
+      ],
+      "idleBeforeRelease": false,
+      "created": 3,
+      "exited": 3,
+      "scratchInherited": true,
+      "passed": true
+    }
+  },
+  "retainedFlutterRegression": {
+    "path": "test/portable_isolate_supervisor_test.dart",
+    "passed": 13,
+    "failed": 0,
+    "command": "flutter --packages .dart_tool/isolate-supervisor-package-config.json test --no-pub test/portable_isolate_supervisor_test.dart --reporter expanded"
+  },
+  "commands": [
+    "dart compile exe candidate_probe.dart --output candidate-probe.exe",
+    "dart compile exe typed_capture_probe.dart --output typed-capture-probe.exe",
+    "dart compile exe supervision_probe.dart --output supervision-probe.exe",
+    "dart compile exe idle_probe.dart --output idle-probe.exe",
+    "dart compile exe spawn_uri_probe.dart --output spawn-uri-probe.exe",
+    ".\\candidate-probe.exe",
+    ".\\typed-capture-probe.exe",
+    ".\\supervision-probe.exe",
+    ".\\idle-probe.exe",
+    ".\\spawn-uri-probe.exe --without-native-control",
+    "dart compile exe policy_late_print_probe.dart --output policy-late-print-probe.exe",
+    ".\\policy-late-print-probe.exe"
+  ],
+  "dartSdk": "3.11.5 stable windows_x64",
+  "jitSpawnUriNativeControl": {
+    "nativeControl": {
+      "message": "native-source-executed",
+      "nativeExitObserved": true,
+      "passed": true
+    },
+    "permissionDenied": {
+      "permissionGranted": false,
+      "result": "Unsupported operation: Isolate.spawnUri is unsupported by the interpreted runtime. Use Isolate.spawn with a source function instead.",
+      "rejectionType": "UnsupportedError",
+      "nativeMessages": [],
+      "hostCreated": 0,
+      "hostActiveAfterStop": 0,
+      "hostPendingAfterStop": 0,
+      "passed": true
+    },
+    "permissionGranted": {
+      "permissionGranted": true,
+      "result": "Unsupported operation: Isolate.spawnUri is unsupported by the interpreted runtime. Use Isolate.spawn with a source function instead.",
+      "rejectionType": "UnsupportedError",
+      "nativeMessages": [],
+      "hostCreated": 0,
+      "hostActiveAfterStop": 0,
+      "hostPendingAfterStop": 0,
+      "passed": true
+    },
+    "interpretedAwaitCatch": {
+      "actual": "rejected",
+      "passed": true
+    },
+    "passed": true
+  },
+  "jitLateChildPolicyOutput": {
+    "messages": [
+      {
+        "type": "stdout",
+        "data": "late child print\n"
+      },
+      {
+        "type": "stdout",
+        "data": "late stdout"
+      },
+      {
+        "type": "stderr",
+        "data": "late stderr"
+      }
+    ],
+    "events": [
+      "main-done",
+      "D:\\AppData\\Local\\Temp\\qfli-late-output-a9d7b971"
+    ],
+    "idleBeforeRelease": false,
+    "created": 3,
+    "exited": 3,
+    "scratchInherited": true,
+    "passed": true
+  }
+}

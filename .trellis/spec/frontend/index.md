@@ -21,6 +21,7 @@ explicit Dart null-safe JSON parsing.
 | [Directory Structure](./directory-structure.md) | Where Flutter pages/assets live, core vs repo ownership | Documented |
 | [Component Guidelines](./component-guidelines.md) | Widget structure, props, Material 3 styling, accessibility | Documented |
 | [Lifecycle & Effects](./hook-guidelines.md) | No hooks; `initState`/`dispose`, subscriptions, generation guards | Documented |
+| [OHOS Native Startup](./ohos-startup.md) | JVMX-style native loading layer, progress bridge and first-frame handoff | Documented |
 | [State Management](./state-management.md) | `State<T>` + `ChangeNotifier`; local vs shared; offline contract | Documented |
 | [Quality Guidelines](./quality-guidelines.md) | Lints, widget tests, forbidden/required patterns | Documented |
 | [Type Safety](./type-safety.md) | Dart null safety, typed models, explicit JSON parsing | Documented |
@@ -31,6 +32,7 @@ explicit Dart null-safe JSON parsing.
 
 ## Pre-Development Checklist
 
+- For startup or OHOS entry changes, read [OHOS Native Startup](./ohos-startup.md).
 - For Dart tools, read [Dart Tools Contract](./dart-tools.md) before changing
   the page or its integration with the formatter, diagnostics, compiler, and
   runner.

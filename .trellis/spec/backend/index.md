@@ -26,11 +26,14 @@ is the sibling package `../qfli_studio_core`.
 | [Native Dart Runtime](./dart-native-runtime.md) | Official Android/desktop VM, SDK packaging and Kernel compilation | Android and desktop implemented; iOS native port pending |
 | [Dart HAP Inspection](./dart-hap-inspection.md) | Frozen package identity, ABI, permission, assets and evidence boundaries | Python fixtures verified; device gate separate |
 | [Dart Offline Native Host](./dart-offline-host.md) | Native URL refusal and preserved local platform routes | Host behavior verified; target rebuild pending |
+| [Portable Dart Runtime](./dart-portable-runtime.md) | Vendored AST interpreter, offline IO, real isolates and lifecycle | Host verified; OHOS installed gate pending |
 
 ## Pre-Development Checklist
 
 - Read [Native Dart Runtime](./dart-native-runtime.md) before changing
   execution, compilation, or platform packaging.
+- Read [Portable Dart Runtime](./dart-portable-runtime.md) before changing
+  portable execution, vendor bridges or portable content verification.
 - Read [Data & Storage](./database-guidelines.md) before adding any persisted
   state (there is no database; use a JSON file under the storage directory).
 - Read [Error Handling](./error-handling.md) before touching a run/compile path:
