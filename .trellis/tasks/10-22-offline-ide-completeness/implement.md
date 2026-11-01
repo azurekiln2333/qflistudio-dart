@@ -40,12 +40,14 @@ Swept all uncommitted work on feat/offline-ide-completeness.
 | `f2cf1bd` feat(ohos): hold a native startup splash with real progress | ohos + main |
 | `78b72d3` docs(dart): record the portable runtime contract and the host gate | specs, READMEs, LICENSE, research |
 
-Skipped, and why:
+Skipped: nothing.
+
+Committed after a second look (commit 83fc9c5):
 
 - 13 official-*.txt files under the task research directory. They are
-  whole web pages captured into single-line text, which the sweep rules
-  exclude as saved pages.
-- .trellis/.runtime/sessions/*.json, a Trellis runtime session file.
-
-Every other untracked file was committed, including the vendored runtime.
+  official page text captured into single-line files. They are plain
+  text, the largest is 171 KB, and none holds a secret. They were skipped
+  at first as saved pages; the extension was the only reason.
+- .trellis/.runtime/sessions/*.json (commit 6da852b), a 0.2 KB Trellis
+  session pointer that names the last task worked on.
 
