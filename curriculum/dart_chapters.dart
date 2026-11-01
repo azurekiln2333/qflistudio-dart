@@ -46,11 +46,8 @@ abstract final class DartCurriculum {
 
   /// Lessons empirically verified to run on dart_eval 0.8.5 and match output.
   ///
-  /// This is the single source of truth for engine compatibility. It was
-  /// produced by actually running every lesson through the dart_eval
-  /// compile+execute path; the remaining lessons require the official SDK. The
-  /// generator projects this into each lesson's `explain` so the requirement is
-  /// visible in the UI, and the tests assert against it.
+  /// This is only the legacy EVC compiler regression set. The production AST
+  /// interpreter and its full-content execution gate are independent of it.
   ///
   /// Do not extend from static inspection — only from a passing dart_eval run.
   static const dartEvalVerifiedIds = <String>{
@@ -100,18 +97,13 @@ abstract final class DartCurriculum {
   };
 
   /// Short engine tag for example summaries (compact catalog subtitle).
-  static String engineTag(String lessonId) =>
-      dartEvalVerifiedIds.contains(lessonId)
-      ? '[引擎：官方 SDK / dart_eval 均可]'
-      : '[引擎：需官方 Dart SDK]';
+  static String engineTag(String lessonId) => '[引擎：官方 SDK / 离线便携均可]';
 
   /// Human-readable runtime requirement for [lessonId].
   static String engineNote(String lessonId) =>
-      dartEvalVerifiedIds.contains(lessonId)
-      ? '运行要求：本课已在官方 Dart SDK 与 dart_eval 便携引擎上实测通过，'
-            '两者都能直接运行本课代码。'
-      : '运行要求：本课需要官方 Dart SDK 引擎（Android/桌面/原生构建）。'
-            'dart_eval 便携子集不支持本课用到的语法，请勿以 dart_eval 结果判定本课。';
+      '运行要求：本课已通过官方 Dart SDK 与离线便携解释器的主机运行校验；'
+      'OHOS 设备运行仍需单独验证。便携环境允许项目和临时目录文件访问，'
+      '不提供联网、原生进程、标准输入或符号链接遍历。';
 
   /// First lesson id (inclusive) of each chapter, derived from [counts] order.
   static Map<String, int> get firstIndex {

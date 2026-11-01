@@ -53,7 +53,8 @@ const List<DartLesson> genericsLessons = <DartLesson>[
     explain:
         '泛型类把类型参数声明在类名后，如 Box<T>。实例化时指定类型，让容器只接受'
         '该类型。标准库的 List<E>、Map<K,V>、Future<T> 都是泛型类。写自己的容器'
-        '能体会泛型带来的类型安全。',
+        '能体会泛型带来的类型安全。swap 中显式写 Pair<V, K>，同时展示交换后的类型，'
+        '也避免依赖便携解释器尚未完整支持的构造器类型推断。',
     objective: '会定义泛型类并实例化出特定类型的容器。',
     pitfalls: <String>[
       '泛型类内部不能 new T()，因为不知道 T 是否有无参构造。',
@@ -73,7 +74,7 @@ const List<DartLesson> genericsLessons = <DartLesson>[
         "  final K key;\n"
         "  final V value;\n"
         "\n"
-        "  Pair<V, K> swap() => Pair(value, key);\n"
+        "  Pair<V, K> swap() => Pair<V, K>(value, key);\n"
         "\n"
         "  @override\n"
         "  String toString() => 'Pair<\${K.toString()}, \${V.toString()}>(\$key, \$value)';\n"

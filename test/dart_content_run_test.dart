@@ -10,7 +10,7 @@ import 'package:qfli_dart/dart_runner.dart';
 import '../curriculum/dart_curriculum.dart';
 import '../curriculum/dart_lesson.dart';
 
-/// Runtime gate for the 120-lesson Dart curriculum: every lesson and every
+/// Runtime gate for the Dart curriculum: every lesson and every
 /// example is compiled and **actually executed** through the real
 /// [DartProgramRunner] (the app's injected runner), and stdout is compared to
 /// the declared output.
@@ -18,7 +18,7 @@ import '../curriculum/dart_lesson.dart';
 /// The host Dart SDK is required. When it is absent the suite fails loudly
 /// rather than skipping, so a green run always means real execution happened.
 ///
-/// Runs all 240 programs. Kept as a single sequential test to bound process
+/// Runs both units for every lesson. One sequential test bounds process
 /// churn; `flutter test` runs it on the VM.
 void main() {
   const runner = DartProgramRunner();
@@ -28,7 +28,7 @@ void main() {
     test('host Dart SDK is required for runtime verification', () {
       fail(
         'Native Dart toolchain unavailable on this host. '
-        'Cannot verify the 120 lessons for real.',
+        'Cannot verify the curriculum for real.',
       );
     });
     return;
@@ -50,18 +50,18 @@ void main() {
           expected: lesson.output,
           failures: failures,
         );
-        if (lesson.resolvedExampleCode != lesson.code) {
-          await _verify(
-            runner: runner,
-            lesson: lesson,
-            code: lesson.resolvedExampleCode,
-            label: 'example',
-            expected: lesson.output,
-            failures: failures,
-          );
-        }
+        checked++;
+        await _verify(
+          runner: runner,
+          lesson: lesson,
+          code: lesson.resolvedExampleCode,
+          label: 'example',
+          expected: lesson.output,
+          failures: failures,
+        );
       }
 
+      expect(checked, dartCurriculum.length * 2);
       expect(
         failures,
         isEmpty,
@@ -124,7 +124,9 @@ Future<void> _verify({
 
 bool _matches(String expected, String actual) {
   if (expected == actual) return true;
-  return expected.trimRight() == actual.trimRight();
+  String normalize(String value) =>
+      value.replaceAll('\r\n', '\n').replaceFirst(RegExp(r'\n+$'), '');
+  return normalize(expected) == normalize(actual);
 }
 
 String _escape(String value) =>

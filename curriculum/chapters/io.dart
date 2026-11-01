@@ -4,8 +4,8 @@ import '../dart_lesson.dart';
 ///
 /// Export name: `ioLessons`. Keep lessons sorted by id.
 ///
-/// Every program here uses `dart:io` file APIs and requires the official Dart
-/// SDK engine. Each creates its own temporary directory and removes it in a
+/// Every program uses real `dart:io` file APIs on SDK and portable engines.
+/// Each creates its own temporary directory and removes it in a
 /// `finally` block, so no files are left behind and output is deterministic
 /// (no timestamps are printed).
 const List<DartLesson> ioLessons = <DartLesson>[
@@ -21,9 +21,9 @@ const List<DartLesson> ioLessons = <DartLesson>[
         '程序产出的中间文件不该散落在用户目录，正确做法是 Directory.systemTemp.'
         'createTempSync() 建一个专属临时目录，往里写、读，最后在 finally 里递归删除——'
         '无论中间是否出错都会清理。本课写一段中文再读回，并打印字节长度'
-        '（UTF-8 下中文占 3 字节）。需要官方 Dart SDK 引擎，dart_eval 不支持 dart:io。',
+        '（UTF-8 下中文占 3 字节）。便携环境将文件访问限制在项目与专属临时目录。',
     objective: '能创建临时目录，写文件、读文件，并在 finally 中清理。',
-    prerequisites: <String>['已掌握 try/finally', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 try/finally', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '忘记在 finally 中清理会在系统临时目录留下垃圾。',
       'lengthSync 返回字节数，中文不是以字符数计。',
@@ -77,9 +77,9 @@ const List<DartLesson> ioLessons = <DartLesson>[
         '按换行符切分成 List<String>，自动处理跨平台的换行约定，'
         '因此你可以直接用 lines.length 数行数、用 lines.first/lines.last 取首末行。'
         '写入时用 \\n 明确分行。注意末尾若有换行，通常不会额外产生一个空行。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能把多行文本写入文件并用 readAsLinesSync 按行读取。',
-    prerequisites: <String>['已掌握文件读写', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握文件读写', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'readAsLinesSync 返回的是行列表，不是一段含 \\n 的字符串。',
       '不同平台原始换行不同，按行读取能屏蔽这个差异。',
@@ -136,9 +136,9 @@ const List<DartLesson> ioLessons = <DartLesson>[
         '再用 expand 或直接 map 取文件名，按扩展名过滤即可得到需要的清单。'
         '本课写两个 .dart 和一个 .txt，统计 .dart 文件数量并打印名字。'
         '注意 listSync 的顺序不保证稳定，因此打印前要排序，输出才确定。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能列举目录内容、筛选文件并按扩展名过滤统计。',
-    prerequisites: <String>['已掌握目录与文件基础', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握目录与文件基础', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'listSync 顺序不保证，统计集合要排序后再输出。',
       'listSync 默认不递归，子目录内容需递归处理。',
@@ -202,9 +202,9 @@ const List<DartLesson> ioLessons = <DartLesson>[
         'copySync 把源文件复制到目标路径，返回新的 File。复制前后用 existsSync 检查'
         '文件是否存在，是防御式编程的常见做法——尤其当目标可能已被占用或源不存在时。'
         '本课建源文件、复制到新路径，确认目标存在并读出其内容验证一致。'
-        '所有文件都落在专属临时目录，finally 里整体删除。需要官方 Dart SDK 引擎。',
+        '所有文件都落在专属临时目录，finally 里整体删除。本课代码也可在离线便携解释器中运行。',
     objective: '能复制文件并用 existsSync 验证结果。',
-    prerequisites: <String>['已掌握文件写入与读取', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握文件写入与读取', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '目标路径所在目录不存在时复制会失败，先确保父目录存在。',
       '复制会覆盖同名目标，必要时先检查 existsSync。',
@@ -260,9 +260,9 @@ const List<DartLesson> ioLessons = <DartLesson>[
         'renameSync 能重命名文件，也能把它移动到另一个路径（同一文件系统内是原子操作）。'
         '操作后旧路径不再存在、新路径存在，且内容不变。这是整理文件、改变扩展名的'
         '常用手段。删除用 deleteSync。本课把 old.txt 改名为 new.txt，验证旧文件消失、'
-        '新文件保留内容。需要官方 Dart SDK 引擎。',
+        '新文件保留内容。本课代码也可在离线便携解释器中运行。',
     objective: '能用 renameSync 改名文件并验证旧路径消失、内容保留。',
-    prerequisites: <String>['已掌握文件读写与存在性检查', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握文件读写与存在性检查', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '跨文件系统的 rename 可能退化为复制+删除，非原子。',
       '目标已存在时行为依平台而异，稳妥做法是先删或先检查。',
@@ -319,9 +319,9 @@ const List<DartLesson> ioLessons = <DartLesson>[
         '把结构化数据持久化到磁盘，JSON 是最通用的格式：先用 jsonEncode 把 Map/List '
         '转成字符串写入文件，之后再读出来用 jsonDecode 还原。注意 jsonDecode 返回的'
         '是 dynamic，通常需要 as 成具体类型才能安全取字段。本课把带姓名和分数列表的'
-        'Map 写盘再读回，验证往返一致。需要官方 Dart SDK 引擎。',
+        'Map 写盘再读回，验证往返一致。本课代码也可在离线便携解释器中运行。',
     objective: '能把 Map 编码写盘并用 jsonDecode 还原取字段。',
-    prerequisites: <String>['已掌握文件读写与 JSON 基础', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握文件读写与 JSON 基础', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'jsonDecode 返回 dynamic，不转类型直接取字段容易类型错误。',
       '文件不是合法 JSON 时 jsonDecode 抛 FormatException。',
@@ -384,9 +384,9 @@ const List<DartLesson> ioLessons = <DartLesson>[
         '若是子目录则递归进去。本课在临时根目录下建一个 sub 子目录，'
         '共放 3 个文件（1 个在根、2 个在 sub），递归统计得到 3。'
         '递归时要留意符号链接可能造成环，生产代码可改用 followLinks: false。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能写递归函数遍历目录树并统计文件数量。',
-    prerequisites: <String>['已掌握目录列举与递归', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握目录列举与递归', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'listSync 默认不跟随符号链接，递归时注意避免环。',
       '统计时别把子目录本身也算成文件。',
@@ -462,9 +462,9 @@ const List<DartLesson> ioLessons = <DartLesson>[
         '除了内容，文件还有元数据：是否存在、多大、是文件还是目录、以及修改时间等。'
         'existsSync 查询存在性，lengthSync 取字节长度，statSync() 返回 FileStat，'
         '其 type 可判断是文件还是目录。本课只打印长度与类型这类稳定信息，'
-        '刻意不打印修改时间——时间戳不确定，会让输出每次不同。需要官方 Dart SDK 引擎。',
+        '刻意不打印修改时间——时间戳不确定，会让输出每次不同。本课代码也可在离线便携解释器中运行。',
     objective: '能读取文件的长度与类型等元数据并做判断。',
-    prerequisites: <String>['已掌握文件读写', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握文件读写', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '不要打印 lastModified 等时间戳，否则输出不确定、无法断言。',
       'lengthSync 是字节数；statSync 也不返回字符数。',

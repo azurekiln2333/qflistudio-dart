@@ -210,47 +210,30 @@ void main() {
 
     test('every lesson and example carries a visible engine requirement', () {
       // Engine notes must be in the rendered fields (explain / example summary),
-      // driven by the shared verified whitelist, not only a test constant.
+      // Product Run uses the interpreter; the legacy EVC subset is separate.
       for (final tutorial in catalog.tutorials) {
-        final isEval = DartCurriculum.dartEvalVerifiedIds.contains(tutorial.id);
         final lesson = tutorial.lessons.first;
-        if (isEval) {
-          expect(
-            lesson.explain,
-            contains('dart_eval'),
-            reason: '${tutorial.id} should say dart_eval-capable',
-          );
-        } else {
-          expect(
-            lesson.explain,
-            contains('需要官方 Dart SDK'),
-            reason: '${tutorial.id} should say official-SDK-required',
-          );
-        }
+        expect(lesson.explain, contains('离线便携解释器'), reason: tutorial.id);
+        expect(lesson.explain, contains('设备运行仍需单独验证'), reason: tutorial.id);
       }
       for (final example in catalog.examples) {
-        final lessonId = example.sourceLessonId!;
-        final isEval = DartCurriculum.dartEvalVerifiedIds.contains(lessonId);
         expect(
           example.summary,
-          contains(isEval ? '均可' : '需官方 Dart SDK'),
+          contains('离线便携均可'),
           reason: example.id,
         );
       }
     });
 
-    test('no whitelist lesson body contradicts its engine note', () {
-      // A dart_eval-verified lesson must not still say, in its authored prose,
-      // that it requires the official SDK.
+    test('no authored lesson body contradicts its portable engine note', () {
       final contradictory = RegExp(r'需要官方 Dart SDK|必须在官方|在官方 Dart SDK 引擎上运行');
       for (final tutorial in catalog.tutorials) {
-        if (!DartCurriculum.dartEvalVerifiedIds.contains(tutorial.id)) continue;
         final explain = tutorial.lessons.first.explain;
         final body = explain.split('运行要求：').first;
         expect(
           contradictory.hasMatch(body),
           isFalse,
-          reason: '${tutorial.id} prose contradicts its dart_eval support',
+          reason: '${tutorial.id} prose contradicts portable Run support',
         );
       }
     });

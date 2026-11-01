@@ -20,9 +20,9 @@ const List<DartLesson> streamsLessons = <DartLesson>[
         '每来一个元素，循环体执行一次，直到流关闭。它像普通 for-in，但每个元素可能'
         '来自异步。与 toList 一次性收集不同，await for 适合边到达边处理（累加、'
         '写日志、更新界面）。注意 await for 会一直消费到流结束，遇到无限流要主动'
-        'break。本课需要官方 Dart SDK 引擎。',
+        'break。本课本课代码也可在离线便携解释器中运行。',
     objective: '能用 await for 遍历流并累积结果。',
-    prerequisites: <String>['已掌握 Future 与 await', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Future 与 await', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'await for 会一直消费到流关闭，对无限流必须用 break 退出。',
       '在 await for 里 await 别的异步操作会短暂暂停消费，注意背压。',
@@ -70,9 +70,9 @@ const List<DartLesson> streamsLessons = <DartLesson>[
         '流支持与 Iterable 类似的变换操作：where 只放行满足条件的元素，map 把每个'
         '元素变成新值，二者可链式组合。它们都是惰性的——只有被消费（toList、await for）'
         '时才真正驱动。本课先 where 取出偶数，再 map 求平方，得到与原列表不同的结果。'
-        '注意流的变换顺序影响结果：先筛后算更省事。本课需要官方 Dart SDK 引擎。',
+        '注意流的变换顺序影响结果：先筛后算更省事。本课本课代码也可在离线便携解释器中运行。',
     objective: '能组合 where 与 map 对流做过滤和变换。',
-    prerequisites: <String>['已掌握 Stream 与 await for', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Stream 与 await for', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '变换是惰性的，不消费则不会执行任何回调。',
       'map 返回的新流元素类型可不同，注意泛型推断。',
@@ -120,9 +120,9 @@ const List<DartLesson> streamsLessons = <DartLesson>[
         'StreamController 让你手动往流里 add 元素，处理完后 close 关闭流。'
         'controller.stream 是供消费的一端。切记：close 之后不能再 add，否则报错；'
         '单订阅流只能被消费一次。本课先启动收集，再推送三个值并关闭。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能用 StreamController 手动生产数据并正确关闭。',
-    prerequisites: <String>['已掌握 Stream 消费', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Stream 消费', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'close 之后再 add 会抛 StateError。',
       '单订阅流被消费一次后再 listen 会报 "already listened"。',
@@ -173,9 +173,9 @@ const List<DartLesson> streamsLessons = <DartLesson>[
         '每个事件会被分发给所有当前订阅者，常用于"一处产生、多处观察"的场景'
         '（如同一个状态同时驱动界面和数据统计）。注意广播流不缓存历史事件：'
         '订阅之前发出的事件收不到；本课先订阅再推送，保证两个订阅者都能收到。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能创建广播流并让两个订阅者接收到相同事件。',
-    prerequisites: <String>['已掌握 StreamController', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 StreamController', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '广播流不重放历史事件，订阅晚就收不到早期数据。',
       '没有订阅者时广播的事件会被直接丢弃。',
@@ -232,9 +232,9 @@ const List<DartLesson> streamsLessons = <DartLesson>[
         'handleError 注册一个错误回调，把错误接住并继续消费后面的元素，'
         '非常适合"部分失败仍要处理其余数据"的场景。本课用 asyncExpand 把一个元素'
         '展开成"值流"或"错误流"，再 handleError 捕获坏值，最终按顺序记录值 1、'
-        '错误、值 3。需要官方 Dart SDK 引擎。',
+        '错误、值 3。本课代码也可在离线便携解释器中运行。',
     objective: '能用 handleError 捕获流内错误并让流继续。',
-    prerequisites: <String>['已掌握流变换与异常', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握流变换与异常', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'handleError 的回调返回类型要与流元素兼容（或为 void）。',
       '不注册 handleError 时，错误会走订阅的 onError 或变成未捕获异常。',
@@ -290,9 +290,9 @@ const List<DartLesson> streamsLessons = <DartLesson>[
         '用 asyncMap。它接收一个返回 Future 的函数，逐个等待完成，并保持元素顺序。'
         '注意 asyncMap 默认是串行的：一个元素处理完才处理下一个，这保证了顺序，'
         '但也意味着总耗时是各段之和。本课把每个值异步翻倍后收集为 [2, 4, 6]。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能用 asyncMap 对流元素做异步变换并保序收集。',
-    prerequisites: <String>['已掌握 map 与异步函数', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 map 与异步函数', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'asyncMap 逐个等待，天然串行；要并发需另用 Future.wait。',
       '变换函数必须返回 Future，否则用 map 即可。',
@@ -343,9 +343,9 @@ const List<DartLesson> streamsLessons = <DartLesson>[
         '并入累积值，最终返回单个结果。它适合求和、计数、拼接字符串等"把一串值压成'
         '一个值"的需求。与 reduce 不同，fold 允许显式给出初始值，因此空流也能安全返回'
         '初始值，类型也更灵活。本课分别用 fold 对整数求和、对字符串拼接。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能用 fold 对流做求和与字符串拼接两种归约。',
-    prerequisites: <String>['已掌握流消费与闭包', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握流消费与闭包', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'fold 的初始值类型决定结果类型，泛型写错会编译失败。',
       '累积器每次都要返回新值，返回 null 会导致后续计算失败。',
@@ -394,9 +394,9 @@ const List<DartLesson> streamsLessons = <DartLesson>[
         '停止接收后续事件，这对"满足条件后不再关心"或"页面销毁时取消"至关重要，'
         '否则可能造成内存泄漏或对已销毁对象操作。本课订阅后收到 1、2，'
         '在推送 3 之前取消订阅，因此 3 不会被接收。取消是异步的，'
-        '等它完成后再推送更稳妥。需要官方 Dart SDK 引擎。',
+        '等它完成后再推送更稳妥。本课代码也可在离线便携解释器中运行。',
     objective: '能用 StreamSubscription 取消订阅并验证后续事件不再到达。',
-    prerequisites: <String>['已掌握 listen 与 StreamController', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 listen 与 StreamController', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'cancel 是异步的，取消前已排队的事件可能仍会到达。',
       '不取消长期订阅会导致监听器泄漏。',

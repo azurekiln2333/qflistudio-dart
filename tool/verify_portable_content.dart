@@ -58,7 +58,7 @@ Future<void> main(List<String> args) async {
     final file = File(report);
     await file.parent.create(recursive: true);
     await file.writeAsString(
-      '${const JsonEncoder.withIndent('  ').convert({'engine': 'dart_eval 0.8.5', 'scope': 'host portable engine; not OHOS device execution', 'checked': results.length, 'failures': failures, 'results': results})}\n',
+      '${const JsonEncoder.withIndent('  ').convert({'engine': 'tom_d4rt 1.229.0+qfli.1; product offline policy and supervisor', 'scope': 'host portable engine; not OHOS device execution', 'checked': results.length, 'failures': failures, 'results': results})}\n',
       flush: true,
     );
   }

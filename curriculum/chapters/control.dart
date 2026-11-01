@@ -97,8 +97,8 @@ const List<DartLesson> controlLessons = <DartLesson>[
     explain:
         'switch 适合对同一个值做多路等值判断。Dart 3 支持 case 后直接跟 => 表达式，'
         '不需要手写 break，也不会意外穿透。default 处理其余情况。相比长串 else if，'
-        'switch 的意图更清楚。switch 表达式是 Dart 3 语法，需要官方 Dart SDK 引擎；'
-        'dart_eval 子集对它的支持有限，未能保证运行。',
+        'switch 的意图更清楚。switch 表达式是 Dart 3 语法；'
+        '本课的模式分支可直接在离线便携解释器中运行。',
     objective: '会用 switch 箭头语法处理多分支并给出默认分支。',
     pitfalls: <String>[
       '传统 case 忘了 break 会穿透到下一个 case；箭头语法没有这个问题。',

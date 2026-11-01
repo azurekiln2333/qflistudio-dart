@@ -4,8 +4,8 @@ import '../dart_lesson.dart';
 ///
 /// Export name: `isolateLessons`. Keep lessons sorted by id.
 ///
-/// Every program here requires the official Dart SDK engine: `dart_eval` does
-/// not implement `dart:isolate`. All computations are deterministic.
+/// Both engines use actual native isolates with deterministic computations.
+/// The portable bridge reconstructs source and preserves lexical captures.
 const List<DartLesson> isolateLessons = <DartLesson>[
   DartLesson(
     id: 'dart-lesson-091',
@@ -20,9 +20,9 @@ const List<DartLesson> isolateLessons = <DartLesson>[
         '最简单的入口：传入一个函数，它在新的隔离区里执行，返回一个 Future，'
         'await 即可拿到返回值。本课在隔离区里求 1 到 100 的和。'
         '注意隔离区不共享内存，参数和返回值必须可跨隔离区传递（可发送对象）。'
-        '需要官方 Dart SDK 引擎，dart_eval 不支持 isolate。',
+        '便携运行也会创建实际隔离区，子任务在独立状态中执行。',
     objective: '能用 Isolate.run 在独立隔离区里完成一次计算并取回结果。',
-    prerequisites: <String>['已掌握 Future 与 await', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Future 与 await', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '隔离区不能访问主隔离区的全局/可变状态，闭包捕获的变量会被复制。',
       '闭包必须能发送，捕获不可发送对象（如打开的 Socket）会报错。',
@@ -77,9 +77,9 @@ const List<DartLesson> isolateLessons = <DartLesson>[
         '可以返回 Map、List、String、数字，甚至 Dart 3 的记录。本课把配置 Map 传进去'
         '算乘积，再返回一个记录 (name, year) 并在主隔离区解构访问字段。'
         '这种"传数据进去、取结果回来"是最常见、最安全的并发模式。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能把数据传入隔离区并返回 Map/记录，从中取出结果。',
-    prerequisites: <String>['已掌握 Isolate.run', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Isolate.run', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '捕获的变量是副本，隔离区内的修改不会同步回主隔离区。',
       '不可发送对象（打开的文件、端口等）不能作为参数或返回值。',
@@ -129,9 +129,9 @@ const List<DartLesson> isolateLessons = <DartLesson>[
         '入口函数接收一个 SendPort，用来把结果回发。主隔离区用 ReceivePort 接收。'
         '本课 spawn 一个 worker，worker 求和后通过端口 send 回来，主隔离区用 '
         'receive.first 拿到第一个消息。收完记得 close 端口。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能用 spawn + SendPort/ReceivePort 与隔离区双向通信。',
-    prerequisites: <String>['已掌握 Isolate.run', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Isolate.run', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'ReceivePort 不 close 会一直挂起，导致程序不退出。',
       'worker 入口函数必须是顶层或静态函数，不能是捕获了状态的实例方法。',
@@ -196,9 +196,9 @@ const List<DartLesson> isolateLessons = <DartLesson>[
         'Future.wait，就能并行执行并等全部完成。本课同时对 10、100、1000 求和，'
         '三条计算在不同隔离区里并行，结果按传入顺序返回 [55, 5050, 500500]，'
         '再求和验证。注意并行不是免费：隔离区创建有成本，任务足够大才划算。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能并发调度多个隔离区并聚合它们的结果。',
-    prerequisites: <String>['已掌握 Isolate.run 与 Future.wait', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Isolate.run 与 Future.wait', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '结果顺序是传入顺序，不是完成先后。',
       '任何一路失败都会让 Future.wait 整体失败。',
@@ -258,9 +258,9 @@ const List<DartLesson> isolateLessons = <DartLesson>[
         '错误，主隔离区用 try/catch 就能捕获——错误信息也会一起传回来。这让你能'
         '像处理普通异步错误一样处理隔离区内的失败。本课先在隔离区抛 StateError 并'
         '捕获，再跑一个正常任务验证后续流程不受影响。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能捕获隔离区内传播出来的异常，并继续执行后续任务。',
-    prerequisites: <String>['已掌握 Isolate.run 与异步异常', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Isolate.run 与异步异常', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '错误对象也要能跨隔离区发送，自定义异常需满足可发送条件。',
       '未捕获的隔离区错误若没人 await，可能成为未处理异常。',
@@ -310,9 +310,9 @@ const List<DartLesson> isolateLessons = <DartLesson>[
         '"求和"和"求最大值"分派到两个隔离区，各自独立计算，再用 Future.wait 收集、'
         '合并成一句结论。这种"分工—并行—合并"模式适合统计、图像处理等可拆分的工作。'
         '要点是子任务之间不共享状态，因此天然避免竞态。'
-        '需要官方 Dart SDK 引擎。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能把独立子任务分派到不同隔离区并合并结果。',
-    prerequisites: <String>['已掌握多隔离区并行', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握多隔离区并行', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '子任务若有依赖关系就不能盲目并行，需按序执行。',
       '合并时注意各结果在列表中的固定位置，别错位。',

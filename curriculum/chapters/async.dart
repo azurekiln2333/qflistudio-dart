@@ -4,9 +4,8 @@ import '../dart_lesson.dart';
 ///
 /// Export name: `asyncLessons`. Keep lessons sorted by id.
 ///
-/// Every program here uses `Future`/`async`/`await` and requires the official
-/// Dart SDK engine; `dart_eval` only implements a reduced subset. Timing is
-/// pinned to `Duration.zero` so stdout is deterministic.
+/// Future/async/await programs run on both SDK and product portable engines.
+/// Timings and awaited dependencies keep stdout deterministic.
 const List<DartLesson> asyncLessons = <DartLesson>[
   DartLesson(
     id: 'dart-lesson-073',
@@ -20,9 +19,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         '直到 Future 完成并取出它的值，然后再继续往下执行。注意 await 只暂停所在函数，'
         '不会阻塞整个程序。也可以用 .then 注册回调，但 await 让异步代码看起来像同步代码，'
         '更易读。本课把延时设成 Duration.zero，让输出顺序完全确定。'
-        'async/await 需要官方 Dart SDK 引擎，dart_eval 只支持有限子集。',
+        '异步任务需要被等待，才能在完成后使用结果。',
     objective: '能声明 async 函数，用 await 取 Future 的值，并预测输出顺序。',
-    prerequisites: <String>['了解函数与返回值', '运行环境为官方 Dart SDK'],
+    prerequisites: <String>['了解函数与返回值', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '忘记 await 会拿到 Future 对象本身，而不是它的值。',
       'await 只能在 async 函数内使用，且 main 也要声明 async。',
@@ -122,9 +121,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         '结果列表，顺序与传入顺序一致（不是完成顺序）。它适合彼此独立的操作：'
         '三个任务各算一个平方，最后一次性收集。与串行 await 相比，并发能显著缩短'
         '总耗时。若其中任一 Future 出错，Future.wait 默认会以该错误失败，'
-        '除非设置 eagerError: false。本课需要官方 Dart SDK。',
+        '除非设置 eagerError: false。本课代码也可在离线便携解释器中运行。',
     objective: '能用 Future.wait 并发执行多个 Future 并汇总结果。',
-    prerequisites: <String>['已掌握 Future 与 await', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Future 与 await', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'Future.wait 的结果顺序是传入顺序，不是完成先后。',
       '列表中任一 Future 抛错都会让整组失败，需按需自行捕获。',
@@ -172,9 +171,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         '所以 try/catch 同样适用。这让异步错误处理和同步代码保持一致的心智模型：'
         '把可能失败的 await 放进 try，用 on 指定异常类型并读取它的信息。'
         '捕获后流程继续，后面的 await 不受影响。这是最推荐的异步错误处理方式。'
-        '本课需要官方 Dart SDK。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能用 try/catch 捕获并处理异步操作抛出的异常。',
-    prerequisites: <String>['已掌握 await 与异常基础', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 await 与异常基础', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '只对 Future 用 .catchError 而漏掉 await，错误可能逃逸到未捕获区。',
       'on 子句写错类型会导致不匹配，落到通用 catch 或直接抛出。',
@@ -228,9 +227,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         '超过时限则抛 TimeoutException。它的用处是避免无限等待——例如某个慢任务'
         '卡住时及时失败并提示用户。注意超时并不自动取消底层操作，只是让等待方提前'
         '放弃。合理设置时限，并把 await ... .timeout(...) 放进 try/catch。'
-        '本课需要官方 Dart SDK。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能用 timeout 限制 Future 的等待时间并处理超时异常。',
-    prerequisites: <String>['已掌握 await 与 try/catch', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 await 与 try/catch', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'timeout 不会取消原 Future，后台操作可能仍在进行。',
       '时限过短会频繁误报超时，需结合实际场景设置。',
@@ -286,9 +285,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         '而是拿到一个 Future 对象。要取得里面的值可以 await，也可以用 .then 注册'
         '"值到了之后做什么"，并在回调里做变换、返回新值。then 适合简单的一次性映射，'
         '复杂逻辑用 await 更清晰。理解"函数返回 Future，而不是值"是异步入门的关键。'
-        '本课需要官方 Dart SDK。',
+        '本课代码也可在离线便携解释器中运行。',
     objective: '能区分 async 函数返回的 Future 与其内部值，并用 then 变换。',
-    prerequisites: <String>['已掌握 await 与 async', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 await 与 async', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'async 函数里 return 10 实际返回 Future<int>，不是 int。',
       'then 回调里返回新值会形成新的 Future，层层叠加要留意。',
@@ -334,9 +333,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         '抛出错误，错误会沿着链条传递，直到遇到 catchError 被兜住并给出替代值。'
         '这形成了"正常路径用 then、异常路径用 catchError"的组合。相比 try/catch，'
         'catchError 更贴近 Future 的组合风格，但要注意它返回的仍是 Future，'
-        '需要 await 才能取值。本课需要官方 Dart SDK。',
+        '需要 await 才能取值。本课代码也可在离线便携解释器中运行。',
     objective: '能组合 then 与 catchError，在失败时提供兜底结果。',
-    prerequisites: <String>['已掌握 then 与异步异常', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 then 与异步异常', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'catchError 的回调必须返回与链类型兼容的值，否则类型不匹配。',
       '把 catchError 放错位置可能漏掉后半段的错误。',
@@ -381,9 +380,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         '提示"unawaited_futures"。unawaited(future) 就是显式声明"我知道它没被 await，'
         '这是有意的"。它不是魔法：后台任务仍会执行，但主流程不会等它；若后台任务'
         '抛错且无人处理，仍可能变成未捕获异常。演示时用一次 await 收尾，'
-        '保证后台任务有机会打印。本课需要官方 Dart SDK。',
+        '保证后台任务有机会打印。本课代码也可在离线便携解释器中运行。',
     objective: '能用 unawaited 表达有意的即发即忘，并说明其风险。',
-    prerequisites: <String>['已掌握 Future 与事件循环', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Future 与事件循环', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'unawaited 只是抑制提示，不改变"不等待"的事实。',
       '后台任务抛错可能无人捕获，导致进程级未处理异常。',
@@ -433,9 +432,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         'Stream.fromIterable 把一个可迭代对象变成流，元素按顺序逐个发出。'
         'toList() 会收集流里所有元素，并返回一个 Future<List<T>>，所以要用 await。'
         '这一课是异步到流的过渡：先体会"多个异步值"的样子，下一章再展开 map、where、'
-        '监听与取消。本课需要官方 Dart SDK。',
+        '监听与取消。本课代码也可在离线便携解释器中运行。',
     objective: '能把 Iterable 转成 Stream 并收集成一个列表。',
-    prerequisites: <String>['已掌握 Future 与 await', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Future 与 await', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'toList() 返回 Future，忘记 await 会拿到 Future 而非列表。',
       '单订阅流只能被消费一次，重复 toList 会报错。',
@@ -481,9 +480,9 @@ const List<DartLesson> asyncLessons = <DartLesson>[
         'try/finally 保证无论 try 块是正常返回还是抛错，finally 都会执行；'
         '当 finally 里也涉及 await 时，请确保 finally 本身在 async 函数内。'
         '本课模拟"打开资源—处理出错—关闭资源"，外层再捕获错误，'
-        '清晰看到清理先于错误外传。本课需要官方 Dart SDK。',
+        '清晰看到清理先于错误外传。本课代码也可在离线便携解释器中运行。',
     objective: '能用 try/finally 在异步流程中保证清理逻辑必然执行。',
-    prerequisites: <String>['已掌握异步异常与 finally', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握异步异常与 finally', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '把清理写在 try 末尾而非 finally，出错时会漏掉。',
       'finally 里再抛错会覆盖原异常，需谨慎处理。',

@@ -229,7 +229,7 @@ const String _source = 'https://dart.dev/language';
 const String _license =
     'Original QFLI curriculum; reference link retained. CC BY 4.0';
 
-const String _updatedAtValue = '2026-10-12';
+const String _updatedAtValue = '2026-10-22';
 
 String _updatedAt(List<DartLesson> lessons) => _updatedAtValue;
 

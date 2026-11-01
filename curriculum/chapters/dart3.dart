@@ -4,10 +4,8 @@ import '../dart_lesson.dart';
 ///
 /// Export name: `dart3Lessons`. Keep lessons sorted by id.
 ///
-/// Most programs here require the official Dart SDK engine. The generated
-/// lesson entry appends the per-lesson engine requirement to `explain` from
-/// `DartCurriculum.dartEvalVerifiedIds`; records (lesson 061) are verified to
-/// run on dart_eval 0.8.5, sealed/patterns are not.
+/// Programs are verified on SDK and product portable engines. The generator
+/// appends the runtime scope and the separate OHOS device evidence boundary.
 const List<DartLesson> dart3Lessons = <DartLesson>[
   DartLesson(
     id: 'dart-lesson-061',
@@ -27,7 +25,7 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
     pitfalls: <String>[
       '位置记录只能用 \$1、\$2 访问，没有名字；命名记录才能用 .name。',
       '记录是结构类型：字段顺序和名字都是类型的一部分，(int, int) 与 (x: int, y: int) 不是同一类型。',
-      '记录是 Dart 3 语法，部分旧的 dart_eval 版本支持有限；本课代码已在官方 SDK 与 dart_eval 0.8.5 上实测通过。',
+      '记录的字段结构固定；需要可变长度数据时应使用集合。',
     ],
     code:
         "void main() {\n"
@@ -69,9 +67,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         '的返回值"。记录之间用 == 比较时，Dart 会逐字段比较：字段全部相等，两个记录就'
         '相等，这称为结构相等（structural equality）。例如 (name: \'小明\', age: 18) 与'
         '另一个同样内容的记录相等，而 age 变成 19 就不相等。toString() 会把命名记录'
-        '排成 (age: 18, name: 小明) 的样子，字段按名字排序。记录是官方 SDK 特性。',
+        '排成 (age: 18, name: 小明) 的样子，字段按名字排序。记录适合表示一组固定结构的值。',
     objective: '能比较两个命名记录是否相等，并解释结构相等的含义。',
-    prerequisites: <String>['已完成记录与解构一课', '官方 Dart SDK'],
+    prerequisites: <String>['已完成记录与解构一课', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '记录相等是逐字段比较，不是比较引用；这与默认的类实例行为不同。',
       'toString 里命名记录字段按名字字母序排列，不要依赖构造时的书写顺序。',
@@ -116,9 +114,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         '(0, 0) => ... 是常量模式，专门匹配原点；(final x, 0) 匹配第二个字段为 0 的'
         '记录，同时把第一个字段绑到 x；(final x, final y) 兜底并绑定两个字段。'
         'switch 表达式直接返回值，比传统 switch 语句更紧凑。分支从上到下匹配，'
-        '第一个命中的生效。记录模式需要官方 Dart SDK。',
+        '第一个命中的生效。记录模式可以直接解构字段。',
     objective: '能用记录模式对坐标分类，并在分支里绑定字段值。',
-    prerequisites: <String>['已掌握记录与解构', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握记录与解构', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '分支顺序决定结果：(0, 0) 必须在 (final x, 0) 之前，否则原点会被后者吃掉。',
       'final 绑定只读取值；要重新赋值需用 var 绑定，但模式里很少这么做。',
@@ -168,9 +166,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         '元素的列表并绑定它；[final first, ...final rest] 匹配至少一个元素，first 是'
         '首项，rest 是其余项组成的新列表（可能为空）。这比手动检查 length 再索引更安全，'
         '也不会越界。列表模式在匹配时会看长度，因此是非常精确的结构匹配。'
-        '本课为官方 SDK 特性。',
+        '本课使用 Dart 3 的结构化匹配。',
     objective: '能用列表模式安全地拆出首项与剩余项。',
-    prerequisites: <String>['已掌握 List 基础', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 List 基础', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '[] 只匹配空列表，不会匹配"非空但元素为空"的情况。',
       'rest 是一个新的 List，修改它不影响原列表。',
@@ -220,9 +218,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         '存在 name 键，且其值是 String，匹配时把值绑到 name。可以在一个模式里要求多个键：'
         '{\'name\': final String name, \'age\': final int age} 要求两个键都存在且类型正确。'
         '不满足就尝试下一个分支。整套分支用 _ 兜底最稳妥，避免出现"无匹配"的崩溃。'
-        '映射模式是官方 SDK 特性。',
+        '映射模式按键提取需要的数据。',
     objective: '能用映射模式按键存在性与类型分流处理数据。',
-    prerequisites: <String>['已掌握 Map 基础', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 Map 基础', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '映射模式默认不要求穷尽所有键，只检查你写出的键。',
       '键的类型与值的类型都要匹配：值不是 String 时该分支不会命中。',
@@ -273,9 +271,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         '对象模式写成 类名(属性: 模式)：它先检查对象是不是该类实例，再把你点名的 getter'
         '取出来匹配。Circle(radius: final r) 的含义是"如果是 Circle，就把 radius 取出来'
         '绑到 r"。这比自己写 if (shape is Circle) 再读 shape.radius 更紧凑，还能在同一个'
-        'switch 里处理多种类型。对象模式是官方 SDK 特性。',
+        'switch 里处理多种类型。对象模式通过属性获取需要的值。',
     objective: '能用对象模式从不同类实例中提取字段并分支处理。',
-    prerequisites: <String>['已掌握类与 getter', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握类与 getter', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '对象模式里的名字必须是该类真实存在的 getter/字段，写错名字编译报错。',
       '分支要覆盖所有可能的类型，否则需要 _ 兜底。',
@@ -338,9 +336,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         '模式负责"形状对不对"，when 负责"条件满不满足"。写成 (final int n) when n < 0'
         '表示：先匹配它是 int 并绑定 n，再用 when 判断 n < 0，成立才走这个分支。'
         'when 让模式匹配带上任意布尔逻辑，避免在分支体里再写 if。多个带 when 的分支'
-        '按顺序尝试，第一个"形状与条件都成立"的生效。when 是官方 SDK 特性。',
+        '按顺序尝试，第一个"形状与条件都成立"的生效。when 只在模式成功后继续检查条件。',
     objective: '能用 when 给模式附加条件，实现带条件的分类。',
-    prerequisites: <String>['已掌握 switch 模式', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 switch 模式', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'when 里的表达式必须返回 bool，且通常依赖模式绑定的变量。',
       '条件分支顺序依然重要：更具体的条件要写在前面。',
@@ -387,10 +385,10 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         'sealed 类表示"子类只能是同一库里的这些"。它带来的好处是：对 sealed 类做 switch 时，'
         '只要覆盖全部直接子类，编译器就认为你已经穷尽，不再要求 _ 兜底；反之漏掉一个子类会'
         '直接编译报错。这让"类型即状态"的建模既安全又好维护。area 函数对 Shape 做 switch，'
-        'Circle 与 Rectangle 两个子类都被覆盖，所以没有默认分支。本课为官方 SDK 特性，'
-        '且 dart_eval 不支持 sealed。',
+        'Circle 与 Rectangle 两个子类都被覆盖，所以没有默认分支。便携解释器可以执行这些合法子类与模式分支；'
+        '静态继承约束仍应由官方分析器校验。',
     objective: '能定义 sealed 类族，并写出不需要兜底的穷尽 switch。',
-    prerequisites: <String>['已掌握继承与抽象类', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握继承与抽象类', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'sealed 的子类必须与父类在同一个库（同一文件或 part）中声明。',
       '新增子类后，所有穷尽 switch 会立刻编译报错——这正是它的价值，不是 bug。',
@@ -455,9 +453,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         'Dart 3 的枚举不只是名字列表：它可以像类一样声明 final 字段、const 构造、'
         'getter 甚至方法。写法是每个枚举值后跟构造实参，例如 earth(5.97e24, 6371)。'
         '于是 Planet.values 里每一项都带着自己的质量与半径，surfaceGravity 直接算出'
-        '表面重力。重写 toString 能让 print 输出更可读。增强 enum 是官方 SDK 特性。',
+        '表面重力。重写 toString 能让 print 输出更可读。增强枚举可以把数据与行为放在同一类型中。',
     objective: '能定义带字段与计算属性的增强枚举，并遍历它的所有值。',
-    prerequisites: <String>['已掌握 class 与 getter', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 class 与 getter', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '枚举构造必须是 const，字段也必须是 final。',
       '枚举值之间不能互相引用构造实参以外的实例状态。',
@@ -517,9 +515,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         'base class 表示它可以被继承，但子类也必须声明 base、final 或 sealed。'
         '这两者把库作者的意图写进类型系统：Temperature 用 final 表明"我就该被直接使用"，'
         'Animal 用 base 允许 Dog 继承，而 Dog 自己也用 final 收口。注意这些是编译期约束，'
-        '不能在运行时用代码"测试"继承禁令，本课演示的是合法用法。属于官方 SDK 特性。',
+        '不能在运行时用代码"测试"继承禁令，本课演示的是合法用法。静态继承规则应交由官方分析器检查。',
     objective: '能用 final/base 修饰符表达继承策略，并写出合法子类。',
-    prerequisites: <String>['已掌握继承与 override', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握继承与 override', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '继承 final class 会在编译期报错，不是运行时错误。',
       'base 类跨库被继承时，子类也必须标 base/final/sealed。',
@@ -585,9 +583,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         '绑定的变量带进作用域。例如 if (value case int n when n > 0) 只对正整数成立；'
         'if (value case String s) 对字符串成立并绑定 s；甚至能用 List(length: final len) '
         '这种对象模式读取集合长度。它比 is + 强制转换更省事，也更难写错。if-case 是'
-        '官方 SDK 特性。',
+        '这是 Dart 3 模式匹配的结构化用法。',
     objective: '能用 if-case 对不同类型和形状的值做分流与绑定。',
-    prerequisites: <String>['已掌握 switch 模式与对象模式', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握 switch 模式与对象模式', 'Dart 离线运行环境'],
     pitfalls: <String>[
       'case 里绑定的变量只在对应分支可见，出了分支就失效。',
       'when 条件不满足时会走 else，而不是报错。',
@@ -645,9 +643,9 @@ const List<DartLesson> dart3Lessons = <DartLesson>[
         '模式与递归是天生一对。sum 用三个分支描述列表的形状：[] 是空列表，返回 0（基准'
         '情形）；[final single] 只有一个元素，直接返回它；[final first, ...final rest] '
         '取出首项，把 rest 再交给 sum。因为没有索引操作，永远不会越界；分支把"形状"'
-        '说清楚，递归就自然收敛。这体现了模式匹配"按结构思考"的风格。官方 SDK 特性。',
+        '说清楚，递归就自然收敛。这体现了模式匹配"按结构思考"的风格。这是 Dart 3 模式匹配的结构化用法。',
     objective: '能用列表模式写出带基准情形的递归函数。',
-    prerequisites: <String>['已掌握列表模式与函数递归', '官方 Dart SDK'],
+    prerequisites: <String>['已掌握列表模式与函数递归', 'Dart 离线运行环境'],
     pitfalls: <String>[
       '递归必须有基准情形（这里是 [] 与单元素分支），否则无限递归。',
       'rest 每次是新列表，递归总和复杂度是 O(n)；超长列表考虑迭代写法。',

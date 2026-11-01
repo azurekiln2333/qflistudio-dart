@@ -9,20 +9,10 @@ import 'package:flutter_test/flutter_test.dart';
 import '../curriculum/dart_chapters.dart';
 import '../curriculum/dart_curriculum.dart';
 
-/// Real execution on the **dart_eval portable engine** — the branch the app
-/// uses when the official SDK is unavailable (iOS/OHOS and unsupported hosts).
-///
-/// Complementary to `dart_content_run_test.dart` (official SDK VM). dart_eval
-/// 0.8.5 covers only a narrow subset of Dart; most of this curriculum targets
-/// the official SDK. This test runs the lessons in the shared, empirically
-/// verified [DartCurriculum.dartEvalVerifiedIds] whitelist and asserts their
-/// output. Every other lesson is reported as SDK-required and is NOT counted as
-/// passing here.
-///
-/// The whitelist lives in `curriculum/dart_chapters.dart` so the generator can
-/// project the same requirement into the UI; it was curated from actual runs
-/// because dart_eval has non-obvious gaps (`continue`, operator overloads,
-/// value-equality in `Set`, `runtimeType` printing, some casts).
+/// Legacy EVC compiler regression, independent of the product AST interpreter.
+/// Only the empirically verified [DartCurriculum.dartEvalVerifiedIds] subset is
+/// checked here. The full production portable gate is
+/// `dart_content_portable_test.dart`; this subset never establishes its result.
 void main() {
   test('dart_eval subset lessons run and match declared output', () async {
     final byId = {for (final l in dartCurriculum) l.id: l};
@@ -57,7 +47,7 @@ void main() {
     print(
       'dart_eval: ran=$ran of ${dartCurriculum.length} lessons; '
       '${dartCurriculum.length - DartCurriculum.dartEvalVerifiedIds.length} '
-      'SDK-required',
+      'outside this legacy EVC regression subset',
     );
   });
 }

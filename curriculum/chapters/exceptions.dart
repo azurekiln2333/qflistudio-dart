@@ -204,7 +204,7 @@ const List<DartLesson> exceptionsLessons = <DartLesson>[
         '有些团队偏好把可预期的失败表达成返回值而不是异常。用一个带 ok/err 的'
         '结果类，让调用方必须显式处理失败分支，避免忘记 try/catch。异常适合真正的'
         '意外，返回值适合可预期的分支。本课用到 sealed 类与 switch 模式解构，'
-        '属于 Dart 3 特性，需要官方 Dart SDK 引擎；dart_eval 子集不保证支持。',
+        '属于 Dart 3 特性；本课代码也已通过离线便携运行校验。',
     objective: '会用结果类型显式表达成功或失败。',
     pitfalls: <String>[
       '结果类型会让调用链变长，简单场景用异常更直接。',
