@@ -11,6 +11,7 @@ import 'package:qfli_studio_core/widgets/tool_widgets.dart';
 
 import 'dart_runner.dart';
 import 'dart_tools.dart';
+import 'native_dart_toolchain.dart';
 
 class DartToolsPage extends StatefulWidget {
   const DartToolsPage({
@@ -525,7 +526,9 @@ class _DartToolsPageState extends State<DartToolsPage> {
                       icon: const Icon(Icons.account_tree_outlined),
                     ),
                     IconButton(
-                      tooltip: '编译',
+                      tooltip: NativeDartToolchain.supported
+                          ? '编译'
+                          : '编译旧版 EVC（语法子集）',
                       onPressed: _busy ? null : () => unawaited(_compile()),
                       icon: const Icon(Icons.memory_outlined),
                     ),

@@ -149,6 +149,8 @@ abstract final class DartTools {
     return compilePortable(projectPath: projectPath, entryFile: entryFile);
   }
 
+  /// Legacy EVC compiler with a smaller language subset than portable Run.
+  /// The AST interpreter executes source and does not generate EVC artifacts.
   static Future<CompiledDartProgram> compilePortable({
     required String projectPath,
     required String entryFile,
