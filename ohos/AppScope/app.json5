@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.azurekiln.qfli.dartwing",
+    "bundleName": "com.azurekiln.qfli.dart",
     "vendor": "QFLI",
     "versionCode": 1000000,
     "versionName": "1.0.0",

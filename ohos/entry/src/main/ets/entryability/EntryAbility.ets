@@ -44,7 +44,15 @@ export default class EntryAbility extends FlutterAbility {
     );
     platformChannel.setMethodCallHandler({
       onMethodCall(call: MethodCall, result: MethodResult): void {
-        if (call.method === 'openUrl' || call.method === 'openAgreement') {
+        if (call.method === 'startupProgress') {
+          const progress = call.argument('progress') as number;
+          if (typeof progress === 'number' && Number.isFinite(progress)) {
+            abilityContext.eventHub.emit('EVENT_STARTUP_PROGRESS', Math.max(0, Math.min(1, progress)));
+            result.success(null);
+          } else {
+            result.error('INVALID_PROGRESS', 'Startup progress must be a number', null);
+          }
+        } else if (call.method === 'openUrl' || call.method === 'openAgreement') {
           result.error('OFFLINE_ONLY', 'Dart 独立版不打开外部页面', null);
         } else if (call.method === 'shareText') {
           // 系统分享面板（Share Kit）：纯文本分享。
