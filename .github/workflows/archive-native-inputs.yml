@@ -26,7 +26,7 @@ jobs:
         abi: [arm64-v8a, x86_64]
     steps:
       - name: Check out source
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Download and verify the original Termux package
@@ -41,6 +41,7 @@ jobs:
           import os
           import pathlib
           import subprocess
+          import tarfile
           import zipfile
 
           lock = json.loads(pathlib.Path('native/dart-sdk/android/packages.lock.json').read_text())
@@ -57,9 +58,15 @@ jobs:
               subprocess.run(['gh', 'api', artifact_path + '/zip'], stdout=target, check=True)
           filename = pathlib.PurePosixPath(package['filename']).name
           with zipfile.ZipFile(archive) as zipped:
-              members = [n for n in zipped.namelist() if pathlib.PurePosixPath(n).name == filename]
-              assert len(members) == 1, 'Expected exactly one source package'
-              data = zipped.read(members[0])
+              # Termux uploads a tar of debs inside the Actions artifact ZIP.
+              with zipped.open(metadata['name'] + '.tar') as tar_stream:
+                  with tarfile.open(fileobj=tar_stream, mode='r|') as tar:
+                      matches = []
+                      for member in tar:
+                          if member.name == 'debs/' + filename and member.isfile():
+                              matches.append(tar.extractfile(member).read())
+                      assert len(matches) == 1, 'Expected exactly one source package'
+                      data = matches[0]
           digest = hashlib.sha256(data).hexdigest()
           assert len(data) == package['size'], 'Source package size differs from lock'
           assert digest == package['sha256'], 'Source package SHA256 differs from lock'
@@ -75,5 +82,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$RELEASE_TAG" "$PACKAGE_PATH" --repo "$GITHUB_REPOSITORY"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          package = Path(os.environ['PACKAGE_PATH'])
+          repo = os.environ['GITHUB_REPOSITORY']
+          tag = os.environ['RELEASE_TAG']
+          release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releases/tags/{tag}']))
+          assets = [a for a in release['assets'] if a['name'] == package.name]
+          if assets:
+              digest = 'sha256:' + hashlib.sha256(package.read_bytes()).hexdigest()
+              assert len(assets) == 1 and assets[0]['digest'] == digest, 'Existing asset has different bytes'
+              assert assets[0]['size'] == package.stat().st_size, 'Existing asset has different size'
+              print('Identical verified input is already archived')
+          else:
+              subprocess.run(['gh', 'release', 'upload', tag, str(package), '--repo', repo], check=True)
+          PY
           printf 'Archived verified package: `%s`\n' "$(basename "$PACKAGE_PATH")" >> "$GITHUB_STEP_SUMMARY"
