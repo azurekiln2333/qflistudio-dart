@@ -20,8 +20,8 @@ OHOS pins CPF-Flutter 3.41.9+ohos-1.0.2 at commit
 26.0.0.821 archive is pinned by official CDN URL and SHA256. HTTP Range access
 verified its real ZIP layout and the official response's matching content hash;
 the workflow verifies the complete download before extraction. The archive
-contains SDK API 26; keep the authored project target API 24 and let the real
-build establish compatibility. Strip signing configuration from the CI copy,
+contains SDK API 26; keep the authored project target API 24. Run 43943142540
+successfully built and inspected this combination. Strip signing configuration from the CI copy,
 build unsigned HAP/APP, inspect both and export the HAP's native libraries.
 
 Keep platform jobs independent so one compiler failure does not erase another

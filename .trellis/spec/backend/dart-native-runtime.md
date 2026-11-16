@@ -183,6 +183,10 @@ For standard Flutter compatibility changes, run `tool/ci/test_prepare_core.py`
 and the startup tests. Linux CI runs full application analysis and host tests.
 Check macOS application and bundled-SDK architectures and verify codesigning.
 Check the iOS executable, App.framework and Flutter.framework architectures.
+`bash -n` on Windows checks grammar only. Apple command behavior and Bash 3.2
+runtime compatibility require the real Apple workflow; a Git Bash pass is not
+that verification. Search both workflow steps and Xcode packaging scripts when
+fixing a shared command invocation.
 
 `native_dart_toolchain_test.dart` exercises VM IO, async code, native exit codes,
 compile failure, cancellation and source-independent Kernel execution.

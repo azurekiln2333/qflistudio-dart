@@ -4,25 +4,27 @@
 工作流分别导出原生依赖和完整应用。
 每份产物附带来源记录和 SHA256。
 
-## 已验证的构建
+## 构建状态
 
 以下记录来自 2026 年 11 月 17 日的试构建。
 
 | 平台 | 原生依赖 | 完整应用 | 状态 |
 | --- | --- | --- | --- |
-| Android ARM64 | `native-android-arm64-v8a` | `app-android-arm64-v8a` | 两项成功 |
-| Android x86_64 | `native-android-x86_64` | `app-android-x86_64` | 两项成功 |
-| Windows x64 | `native-windows-x64` | `app-windows-x64` | 两项成功 |
-| Linux x64 | `native-linux-x64` | `app-linux-x64` | 两项成功 |
+| Android ARM64 | [native-android-arm64-v8a](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43922631253/artifacts/14255300791) | [app-android-arm64-v8a](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14261922032) | 两项成功 |
+| Android x86_64 | [native-android-x86_64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43922631253/artifacts/14253868977) | [app-android-x86_64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14262206372) | 两项成功 |
+| Windows x64 | [native-windows-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14261461227) | [app-windows-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14261441637) | 两项成功 |
+| Linux x64 | [native-linux-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14260781767) | [app-linux-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14262651489) | 两项成功 |
 | macOS ARM64 | `native-macos-arm64` | `app-macos-arm64` | 构建中 |
-| macOS x64 | `native-macos-x64` | `app-macos-x64` | 应用重新构建中 |
-| iOS ARM64 | `native-ios-arm64-frameworks` | `app-ios-arm64-unsigned-xcarchive` | 重新构建中 |
-| OHOS ARM64 | `native-ohos-arm64-libraries` | `app-ohos-arm64-unsigned` | 试构建中 |
+| macOS x64 | [native-macos-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/artifacts/14264831464) | `app-macos-x64` | SDK 成功，应用重新构建中 |
+| iOS ARM64 | [native-ios-arm64-frameworks](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/artifacts/14264106077) | [app-ios-arm64-unsigned-xcarchive](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/artifacts/14264670782) | 两项成功 |
+| OHOS ARM64 | [native-ohos-arm64-libraries](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540/artifacts/14263248969) | [app-ohos-arm64-unsigned](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540/artifacts/14264177854) | 两项成功 |
 
-已成功的运行记录：
+构建与下载入口：
 
 - [Android 原生 SDK](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43922631253)
 - [Android、Windows、Linux 应用](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780)
+- [iOS 归档与 Apple 构建](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490)
+- [OHOS 构建](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540)
 
 ## 下载方法
 
@@ -31,6 +33,8 @@
 3. 滚动到 **Artifacts**。
 4. 下载对应平台的 ZIP。
 
+GitHub 下载的是外层 ZIP。
+应用安装包或内层归档位于其中。
 工作流将产物保留 30 天。
 运行摘要也提供下载链接。
 过期后须重新运行构建。
@@ -84,6 +88,7 @@ OHOS 工作流校验工具包的 SHA256。
 下载地址来自华为官方 CDN。
 工具包包含 API 26 SDK。
 项目的目标 API 保持为 24。
+此组合已通过 GitHub 构建和包结构校验。
 锁文件位于 `tool/ci/ohos-command-line-tools.lock.json`。
 下载或校验失败时，工作流会明确失败。
 可用以下配置覆盖默认工具包：

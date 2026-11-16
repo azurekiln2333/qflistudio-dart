@@ -1,0 +1,71 @@
+{
+  "retrievedAtUtc": "2026-11-16T20:01:48.856912+00:00",
+  "verificationBoundary": "The primary archive passed full SHA-256 verification in GitHub Actions run 43943142540 before extraction. Local probes and fallback verification use official response headers and remote ZIP metadata only. Download query signatures are omitted.",
+  "sources": [
+    {
+      "commandLineToolsVersion": "26.0.0.821",
+      "role": "locked primary",
+      "officialArchiveUrlWithoutQuery": "https://contentcenter-vali-drcn.dbankcdn.cn/pvt_2/DeveloperAlliance_package_901_9/d1/v3/PCx_dpJhQG63WXNUPT30vg/commandline-tools-linux-x64-26.0.0.821.zip",
+      "sizeBytes": 2347882285,
+      "sha256": "58da7359019e9360a8bb82da0cd1d3b3b26fedc338379f257849f2162e3ac1fc",
+      "sourceReference": "https://github.com/apap6628114/lnga_harmony/blob/233f20b5654486a96f6b5657fe3bd9d7e19e8578/.github/workflows/build-hap.yml",
+      "officialGetProbe": {
+        "status": 206,
+        "requestRange": "bytes=0-0",
+        "responseHeaders": {
+          "Content-Range": "bytes 0-0/2347882285",
+          "Content-Length": "1",
+          "x-amz-content-sha256": "58da7359019e9360a8bb82da0cd1d3b3b26fedc338379f257849f2162e3ac1fc"
+        }
+      },
+      "sdkMetadata": {
+        "apiVersion": "26",
+        "version": "26.0.0.105",
+        "metadataEvidence": "Remote ZIP metadata read by workflow_design agent"
+      },
+      "fullArchiveDownloadedLocally": false,
+      "fullArchiveHashComputedLocally": false,
+      "fullArchiveCiVerification": {
+        "verified": true,
+        "runId": 43943142540,
+        "jobId": 133565653606,
+        "runUrl": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540",
+        "headSha": "2f9243a78bd22d549518de7d4c03953a28c52ccb",
+        "step": "Install the verified HarmonyOS command line tools",
+        "stepConclusion": "success",
+        "archiveSize": 2347882285,
+        "computedSha256": "58da7359019e9360a8bb82da0cd1d3b3b26fedc338379f257849f2162e3ac1fc",
+        "evidence": "Bootstrap computes SHA-256 over the complete archive before unpacking. Both downloaded artifacts contain matching toolchain provenance. Application HAP and APP builds completed with target API 24 unchanged."
+      }
+    },
+    {
+      "commandLineToolsVersion": "6.1.1.268",
+      "role": "API 24 Beta1 fallback; not selected",
+      "officialArchiveUrlWithoutQuery": "https://contentcenter-vali-drcn.dbankcdn.cn/pvt_2/DeveloperAlliance_package_901_9/bb/v3/2kEEcCD9Ts2UwlVvAYKfNQ/commandline-tools-linux-x64-6.1.1.268.zip",
+      "sizeBytes": 2139596502,
+      "sha256": "73178103d433d60f4a061420047416018023836852fad4bde2d37e0f02e3d782",
+      "sourceReference": "https://github.com/hhtczengjing/ohos_command_line_tools/blob/3c035617b43ad1c352f91f6aae8e062876d5298c/versions/6.1.1.268.json",
+      "officialGetProbe": {
+        "status": 206,
+        "requestRange": "bytes=0-0",
+        "responseHeaders": {
+          "Content-Range": "bytes 0-0/2139596502",
+          "Content-Length": "1",
+          "x-amz-content-sha256": "73178103d433d60f4a061420047416018023836852fad4bde2d37e0f02e3d782"
+        }
+      },
+      "sdkMetadata": {
+        "apiVersion": "24",
+        "displayName": "HarmonyOS 6.1.1",
+        "platformVersion": "6.1.1",
+        "version": "6.1.1.115",
+        "releaseType": "Beta1",
+        "stage": "Beta1",
+        "metadataEvidence": "Range-read ZIP central directory and sdk/default/sdk-pkg.json; 18221566 bytes read in total"
+      },
+      "fullArchiveDownloadedLocally": false,
+      "fullArchiveHashComputedLocally": false
+    }
+  ],
+  "stableApi24": "6.1.1.280 release exists on ErBWs/ohos-sdk, but original official URL and digest were not recovered. Expired run logs returned 410. No stable API 24 source is claimed."
+}

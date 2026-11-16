@@ -1,0 +1,478 @@
+{
+  "retrievedAtUtc": "2026-11-16T20:10:12.399133+00:00",
+  "source": "GitHub REST API; no log or credential content",
+  "scope": "Successful Android native, Android/Windows/Linux application and OHOS application/native-library runs. Apple remains a dated observation only.",
+  "runs": [
+    {
+      "id": 43922631253,
+      "name": "Android native SDK",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "ac8dadd3d66a5cf85486b3e22bc6f747563f8b89",
+      "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43922631253",
+      "created_at": "2026-11-16T17:50:49Z",
+      "updated_at": "2026-11-16T17:51:38Z",
+      "jobs": [
+        {
+          "id": 133493628366,
+          "name": "Package x86_64",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T17:50:52Z",
+          "completed_at": "2026-11-16T17:51:31Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43922631253/job/133493628366"
+        },
+        {
+          "id": 133493628819,
+          "name": "Package arm64-v8a",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T17:50:53Z",
+          "completed_at": "2026-11-16T17:51:37Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43922631253/job/133493628819"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14255300791,
+          "name": "native-android-arm64-v8a",
+          "size_in_bytes": 149880583,
+          "digest": "sha256:ad1eb9187a39fb7b38c09439727ed057374319c114ce38a2366761f6b3cd5bcc",
+          "expired": false,
+          "created_at": "2026-11-16T17:51:34Z",
+          "expires_at": "2026-12-16T17:51:25Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14255300791/zip"
+        },
+        {
+          "id": 14253868977,
+          "name": "native-android-x86_64",
+          "size_in_bytes": 208302630,
+          "digest": "sha256:c0851f9ad0294a00e2985ac3dd20c324c703f7f50cd8ec74865aeb14e2072d1b",
+          "expired": false,
+          "created_at": "2026-11-16T17:51:28Z",
+          "expires_at": "2026-12-16T17:51:16Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14253868977/zip"
+        }
+      ],
+      "observedAtUtc": "2026-11-16T19:53:08.577977+00:00"
+    },
+    {
+      "id": 43937445780,
+      "name": "Android Windows Linux applications",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "11eba01af51446554aab21a09958b65d803b84a2",
+      "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780",
+      "created_at": "2026-11-16T19:15:34Z",
+      "updated_at": "2026-11-16T19:22:22Z",
+      "jobs": [
+        {
+          "id": 133545650064,
+          "name": "android-arm64-v8a",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T19:15:37Z",
+          "completed_at": "2026-11-16T19:21:19Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/job/133545650064"
+        },
+        {
+          "id": 133545650408,
+          "name": "windows-x64",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T19:15:36Z",
+          "completed_at": "2026-11-16T19:19:48Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/job/133545650408"
+        },
+        {
+          "id": 133545650528,
+          "name": "linux-x64",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T19:15:38Z",
+          "completed_at": "2026-11-16T19:22:21Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/job/133545650528"
+        },
+        {
+          "id": 133545650909,
+          "name": "android-x86_64",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T19:15:37Z",
+          "completed_at": "2026-11-16T19:21:19Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/job/133545650909"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14262651489,
+          "name": "app-linux-x64",
+          "size_in_bytes": 250273052,
+          "digest": "sha256:0fa01e5e4dc6ccc0867cc6b5742aafd308f6c9fa2347e83ed073670546a04f45",
+          "expired": false,
+          "created_at": "2026-11-16T19:22:17Z",
+          "expires_at": "2026-12-16T19:22:09Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14262651489/zip"
+        },
+        {
+          "id": 14262206372,
+          "name": "app-android-x86_64",
+          "size_in_bytes": 219927749,
+          "digest": "sha256:e1f820726435c88d1d8ddbd180b5e38d121f6485e4596f06a50a0624453a169b",
+          "expired": false,
+          "created_at": "2026-11-16T19:21:16Z",
+          "expires_at": "2026-12-16T19:21:09Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14262206372/zip"
+        },
+        {
+          "id": 14261922032,
+          "name": "app-android-arm64-v8a",
+          "size_in_bytes": 160661881,
+          "digest": "sha256:2f09a6322165d6263cbbc4e5ff9c3fcd52297af505b3f727659009052a3719f0",
+          "expired": false,
+          "created_at": "2026-11-16T19:21:15Z",
+          "expires_at": "2026-12-16T19:21:10Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14261922032/zip"
+        },
+        {
+          "id": 14261461227,
+          "name": "native-windows-x64",
+          "size_in_bytes": 208900947,
+          "digest": "sha256:84048e9f967596e89e00621b489dfa438be096d36a0ba69b1438409afa8a3b1e",
+          "expired": false,
+          "created_at": "2026-11-16T19:17:12Z",
+          "expires_at": "2026-12-16T19:17:07Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14261461227/zip"
+        },
+        {
+          "id": 14261441637,
+          "name": "app-windows-x64",
+          "size_in_bytes": 226279809,
+          "digest": "sha256:e305f2df500baa0377b2bf6842725935d16d517c3c545d6627c5f2dee279ad69",
+          "expired": false,
+          "created_at": "2026-11-16T19:19:42Z",
+          "expires_at": "2026-12-16T19:19:36Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14261441637/zip"
+        },
+        {
+          "id": 14260781767,
+          "name": "native-linux-x64",
+          "size_in_bytes": 226594006,
+          "digest": "sha256:e1e4553d9fb77c24fb7e379380a0405d6816340ad62493a054e050d323572224",
+          "expired": false,
+          "created_at": "2026-11-16T19:18:33Z",
+          "expires_at": "2026-12-16T19:18:25Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14260781767/zip"
+        }
+      ],
+      "observedAtUtc": "2026-11-16T19:53:08.577977+00:00"
+    },
+    {
+      "id": 43940734490,
+      "name": "Apple applications and native dependencies",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "head_sha": "8ddca2dbffe4882c7ef21be1ffc31ca3f0baa54e",
+      "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490",
+      "created_at": "2026-11-16T19:34:27Z",
+      "updated_at": "2026-11-16T20:02:49Z",
+      "successClaimed": false,
+      "observedAtUtc": "2026-11-16T20:10:12.399133+00:00",
+      "jobs": [
+        {
+          "id": 133557245732,
+          "name": "macOS arm64 SDK and application",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "started_at": "2026-11-16T19:34:28Z",
+          "completed_at": "2026-11-16T20:02:48Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/job/133557245732"
+        },
+        {
+          "id": 133557246268,
+          "name": "iOS ARM64 unsigned archive and native frameworks",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T19:43:35Z",
+          "completed_at": "2026-11-16T19:48:54Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/job/133557246268"
+        },
+        {
+          "id": 133557246397,
+          "name": "macOS x64 SDK and application",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-16T19:49:21Z",
+          "completed_at": "2026-11-16T19:59:02Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/job/133557246397"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14264831464,
+          "name": "native-macos-x64",
+          "size_in_bytes": 211390278,
+          "digest": "sha256:5572758d429a0f83b5d5e4f4c5268ee12cccd786c929ab86f1aca40f3355f009",
+          "expired": false,
+          "created_at": "2026-11-16T19:54:34Z",
+          "expires_at": "2026-12-16T19:54:17Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14264831464/zip"
+        },
+        {
+          "id": 14264670782,
+          "name": "app-ios-arm64-unsigned-xcarchive",
+          "size_in_bytes": 51004281,
+          "digest": "sha256:03012c162e1a37bf5f1547442425540da2929255628db98c4ee012070d68f71e",
+          "expired": false,
+          "created_at": "2026-11-16T19:48:47Z",
+          "expires_at": "2026-12-16T19:48:45Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14264670782/zip"
+        },
+        {
+          "id": 14264106077,
+          "name": "native-ios-arm64-frameworks",
+          "size_in_bytes": 13638711,
+          "digest": "sha256:0baab06904a24230d6fb52b3091b3a7d52b835dabab941c506c47b0f41cdf067",
+          "expired": false,
+          "created_at": "2026-11-16T19:48:49Z",
+          "expires_at": "2026-12-16T19:48:47Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14264106077/zip"
+        }
+      ],
+      "note": "Superseded run cancelled after iOS success and macOS x64 signing-script failure; successful uploaded artifacts retained."
+    },
+    {
+      "id": 43943142540,
+      "name": "OHOS application and native libraries",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "2f9243a78bd22d549518de7d4c03953a28c52ccb",
+      "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540",
+      "created_at": "2026-11-16T19:48:19Z",
+      "updated_at": "2026-11-16T19:58:15Z",
+      "observedAtUtc": "2026-11-16T20:01:48.856912+00:00",
+      "jobs": [
+        {
+          "id": 133565653606,
+          "name": "OHOS ARM64 unsigned HAP, APP and native libraries",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T19:48:23Z",
+          "completed_at": "2026-11-16T19:58:14Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540/job/133565653606",
+          "steps": [
+            {
+              "number": 1,
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:48:24Z",
+              "completed_at": "2026-11-16T19:48:27Z"
+            },
+            {
+              "number": 2,
+              "name": "Check out application",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:48:27Z",
+              "completed_at": "2026-11-16T19:48:32Z"
+            },
+            {
+              "number": 3,
+              "name": "Remove local signing configuration from the CI copy",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:48:32Z",
+              "completed_at": "2026-11-16T19:48:33Z"
+            },
+            {
+              "number": 4,
+              "name": "Install the verified HarmonyOS command line tools",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:48:33Z",
+              "completed_at": "2026-11-16T19:54:15Z"
+            },
+            {
+              "number": 5,
+              "name": "Select the runner's Java 21 runtime",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:54:15Z",
+              "completed_at": "2026-11-16T19:54:18Z"
+            },
+            {
+              "number": 6,
+              "name": "Check out pinned shared core",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:54:18Z",
+              "completed_at": "2026-11-16T19:54:20Z"
+            },
+            {
+              "number": 7,
+              "name": "Check out the official pinned Flutter OHOS release",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:54:20Z",
+              "completed_at": "2026-11-16T19:54:29Z"
+            },
+            {
+              "number": 8,
+              "name": "Initialize Flutter and resolve application dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:54:29Z",
+              "completed_at": "2026-11-16T19:55:34Z"
+            },
+            {
+              "number": 9,
+              "name": "Build unsigned ARM64 HAP and APP",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:55:34Z",
+              "completed_at": "2026-11-16T19:58:01Z"
+            },
+            {
+              "number": 10,
+              "name": "Inspect application packages and export native libraries",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:58:01Z",
+              "completed_at": "2026-11-16T19:58:02Z"
+            },
+            {
+              "number": 11,
+              "name": "Upload unsigned application packages",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:58:02Z",
+              "completed_at": "2026-11-16T19:58:06Z"
+            },
+            {
+              "number": 12,
+              "name": "Upload native libraries from the HAP",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:58:06Z",
+              "completed_at": "2026-11-16T19:58:09Z"
+            },
+            {
+              "number": 13,
+              "name": "Write artifact summary",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:58:09Z",
+              "completed_at": "2026-11-16T19:58:09Z"
+            },
+            {
+              "number": 25,
+              "name": "Post Check out pinned shared core",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:58:09Z",
+              "completed_at": "2026-11-16T19:58:09Z"
+            },
+            {
+              "number": 26,
+              "name": "Post Check out application",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:58:09Z",
+              "completed_at": "2026-11-16T19:58:09Z"
+            },
+            {
+              "number": 27,
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-11-16T19:58:09Z",
+              "completed_at": "2026-11-16T19:58:09Z"
+            }
+          ]
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14264177854,
+          "name": "app-ohos-arm64-unsigned",
+          "size_in_bytes": 34719102,
+          "digest": "sha256:38a94cd9853645a3265d970de67cd1d81585798a1ad66e385cd6417a0f184c6b",
+          "expired": false,
+          "created_at": "2026-11-16T19:58:06Z",
+          "expires_at": "2026-12-16T19:58:02Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14264177854/zip"
+        },
+        {
+          "id": 14263248969,
+          "name": "native-ohos-arm64-libraries",
+          "size_in_bytes": 14625255,
+          "digest": "sha256:0d3af0669a3836c607afa92cd25a5a6c264cf05c83534dbdede3665c6081ec1a",
+          "expired": false,
+          "created_at": "2026-11-16T19:58:09Z",
+          "expires_at": "2026-12-16T19:58:06Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14263248969/zip"
+        }
+      ],
+      "independentArtifactVerification": {
+        "method": "Downloaded both Actions ZIPs into memory. Compared SHA-256 with GitHub artifact digest and verified every internal SHA256SUMS entry.",
+        "verifiedManifestFiles": {
+          "app-ohos-arm64-unsigned": 5,
+          "native-ohos-arm64-libraries": 4
+        },
+        "applicationFiles": {
+          "entry-default-unsigned.hap": 45678274,
+          "ohos-default-unsigned.app": 18016445
+        },
+        "nativeFiles": {
+          "libs/arm64-v8a/libflutter.so": 16416376,
+          "libs/arm64-v8a/libapp.so": 18760624
+        },
+        "standaloneHapSha256": "6d3cdb2b3fba8ad5c9e10f9bec58f9010a3db085f52c6b07f40296d5330d38ae",
+        "nestedAppHapSha256": "5518cb0caaa3325269872fabd9c5ab8d340e7512db0d83e2cbcd5a7978ea6de6",
+        "inspectionReports": [
+          "hap-inspection.json",
+          "app-hap-0-inspection.json"
+        ],
+        "bothInspectionResults": {
+          "ok": true,
+          "immutableVerified": true,
+          "abi": "arm64-v8a",
+          "elfMachine": 183,
+          "elfLibraries": [
+            "libs/arm64-v8a/libflutter.so",
+            "libs/arm64-v8a/libapp.so"
+          ],
+          "bundle": "com.azurekiln.qfli.dart",
+          "versionName": "1.0.0",
+          "versionCode": 1,
+          "debug": false,
+          "buildMode": "release",
+          "releaseModeVerified": true,
+          "authoredAssetHashesMatched": true,
+          "tutorialTopics": 120,
+          "exampleTopics": 120,
+          "minAPIVersion": 50100018,
+          "targetAPIVersion": 60101024,
+          "signatureVerified": false,
+          "deviceVerified": false,
+          "nativeGuardVerified": false
+        },
+        "independentDartSdk": false,
+        "deviceRuntimeVerified": false,
+        "provenance": {
+          "applicationCommit": "2f9243a78bd22d549518de7d4c03953a28c52ccb",
+          "coreCommit": "573d1b6eecf1c2b392ad753264a5a09f62f8335e",
+          "flutterCommit": "62357a93d653bf844f730bb1f4b7cc9e2139d14e",
+          "flutterTag": "3.41.9+ohos-1.0.2",
+          "dartSdkVersion": "3.11.5",
+          "toolchainArchiveVersion": "26.0.0.821",
+          "toolchainArchiveSize": 2347882285,
+          "toolchainArchiveSha256": "58da7359019e9360a8bb82da0cd1d3b3b26fedc338379f257849f2162e3ac1fc",
+          "sdkVersion": "26.0.0.105",
+          "sdkApiVersion": 26
+        }
+      }
+    }
+  ]
+}

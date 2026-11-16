@@ -6,7 +6,7 @@
 - [x] Add standard-Flutter compatibility for disposable CI core checkout.
 - [x] Run Windows/Linux/Android complete app builds and desktop SDK exports.
 - [ ] Run macOS/iOS app builds and native dependency exports.
-- [ ] Establish an OHOS hosted toolchain and attempt HAP/APP builds.
+- [x] Establish an OHOS hosted toolchain and build HAP/APP plus native libraries.
 - [ ] Review actual job results, artifact manifests and platform limitations.
 - [ ] Record download URLs, cleanup guidance and executable specs.
 - [x] Align the GPL v3.0 notices with the main project and push commit d781661.
