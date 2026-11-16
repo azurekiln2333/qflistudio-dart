@@ -1,0 +1,166 @@
+name: Android Windows Linux applications
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/application-build.yml
+      - tool/ci/**
+      - lib/**
+      - vendor/**
+      - assets/**
+      - pubspec.*
+      - android/**
+      - windows/**
+      - linux/**
+      - native/dart-sdk/**
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: windows-x64, platform: windows, arch: x64, runner: windows-2022}
+          - {name: linux-x64, platform: linux, arch: x64, runner: ubuntu-24.04}
+          - {name: android-arm64-v8a, platform: android, arch: arm64, abi: arm64-v8a, runner: ubuntu-24.04}
+          - {name: android-x86_64, platform: android, arch: x64, abi: x86_64, runner: ubuntu-24.04}
+    defaults:
+      run:
+        shell: bash
+        working-directory: qfli_dart
+    env:
+      CI_PLATFORM: ${{ matrix.platform }}
+      CI_ARCH: ${{ matrix.arch }}
+      CI_NAME: ${{ matrix.name }}
+      CI_ABI: ${{ matrix.abi }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qfli_dart
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: azurekiln2333/qflistudio-core
+          ref: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
+          path: qfli_studio_core
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: flutter/flutter
+          ref: 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694 # 3.41.9
+          path: flutter
+          persist-credentials: false
+      - name: Bootstrap the pinned Flutter toolchain
+        run: |
+          git -C ../flutter tag 3.41.9 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694
+          echo "$GITHUB_WORKSPACE/flutter/bin" >> "$GITHUB_PATH"
+          ../flutter/bin/flutter --version
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev
+      - name: Verify and package the desktop native SDK
+        if: matrix.platform != 'android'
+        run: python tool/ci/package_desktop_sdk.py --sdk ../flutter/bin/cache/dart-sdk --platform "$CI_PLATFORM" --arch "$CI_ARCH" --output dist/native
+      - name: Upload the desktop native SDK
+        if: matrix.platform != 'android'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-${{ matrix.name }}
+          path: qfli_dart/dist/native/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Prepare the pinned core for standard Flutter
+        run: python tool/ci/prepare_core.py --core ../qfli_studio_core --flutter ../flutter
+      - name: Resolve app dependencies
+        run: flutter pub get
+      - name: Validate the Android native SDK
+        if: matrix.platform == 'android'
+        run: |
+          bash native/dart-sdk/android/prepare_sdk.sh "$CI_ABI" "$RUNNER_TEMP/android-input"
+          mkdir -p "$RUNNER_TEMP/android-sdk"
+          tar -xf "$RUNNER_TEMP/android-input/sdk.tar" -C "$RUNNER_TEMP/android-sdk"
+          pwsh -File native/dart-sdk/android/stage.ps1 -Abi "$CI_ABI" -Sdk "$RUNNER_TEMP/android-sdk"
+      - name: Analyze application and run host tests
+        if: matrix.platform == 'linux'
+        run: |
+          flutter analyze --no-pub
+          flutter test --no-pub
+      - name: Build application
+        run: |
+          if [[ "$CI_PLATFORM" == android ]]; then
+            flutter build apk --release --no-pub --target-platform "android-$CI_ARCH"
+          else
+            flutter build "$CI_PLATFORM" --release --no-pub
+          fi
+      - name: Archive application and build evidence
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          import tarfile
+          import zipfile
+
+          name = os.environ['CI_NAME']
+          platform = os.environ['CI_PLATFORM']
+          output = Path('dist/app')
+          output.mkdir(parents=True, exist_ok=True)
+          if platform == 'android':
+              source = Path('build/app/outputs/flutter-apk/app-release.apk')
+              target = output / f'qfli-dart-{name}-test-signed.apk'
+              shutil.copy2(source, target)
+              with zipfile.ZipFile(target) as package:
+                  names = package.namelist()
+                  abi = os.environ['CI_ABI']
+                  actual_abis = {n.split('/')[1] for n in names if n.startswith('lib/')}
+                  assert actual_abis == {abi}, f'Unexpected APK ABIs: {actual_abis}'
+                  for lib in ['libflutter.so', 'libapp.so', 'libqfli_dartvm.so']:
+                      assert f'lib/{abi}/{lib}' in names, f'Missing {lib}'
+          elif platform == 'windows':
+              source = Path('build/windows/x64/runner/Release')
+              assert (source / 'data/dart-sdk/bin/dart.exe').is_file()
+              target = output / f'qfli-dart-{name}.zip'
+              with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED) as package:
+                  for path in sorted(source.rglob('*')):
+                      if path.is_file(): package.write(path, name + '/' + path.relative_to(source).as_posix())
+          else:
+              source = Path('build/linux/x64/release/bundle')
+              assert (source / 'data/dart-sdk/bin/dart').is_file()
+              target = output / f'qfli-dart-{name}.tar.gz'
+              with tarfile.open(target, 'w:gz') as package:
+                  package.add(source, arcname=name)
+          with target.open('rb') as stream:
+              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+          (output / 'SHA256SUMS').write_text(f'{digest}  {target.name}\n')
+          evidence = {'commit': os.environ['GITHUB_SHA'], 'runId': os.environ['GITHUB_RUN_ID'],
+                      'coreCommit': '573d1b6eecf1c2b392ad753264a5a09f62f8335e',
+                      'flutterCommit': '00b0c91f06209d9e4a41f71b7a512d6eb3b9c694',
+                      'platform': platform, 'architecture': os.environ['CI_ARCH'],
+                      'signing': 'ephemeral debug key' if platform == 'android' else 'unsigned',
+                      'uiRuntimeVerified': False}
+          (output / 'provenance.json').write_text(json.dumps(evidence, indent=2) + '\n')
+          PY
+      - name: Upload application
+        id: app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-${{ matrix.name }}
+          path: qfli_dart/dist/app/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Write download summary
+        env:
+          ARTIFACT_URL: ${{ steps.app.outputs.artifact-url }}
+        run: |
+          printf '### %s\n\n[Download application](%s)\n\nArtifacts are retained for 30 days. See provenance.json for signing and validation scope.\n' "$CI_NAME" "$ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"

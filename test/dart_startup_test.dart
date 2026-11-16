@@ -15,6 +15,9 @@ void main() {
   final messenger = binding.defaultBinaryMessenger;
   const channel = MethodChannel('qflistudio/platform');
   const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
+  final ohosPlatforms = TargetPlatform.values
+      .where((platform) => platform.name == 'ohos')
+      .toSet();
   late Directory directory;
   StudioProfile? originalProfile;
 
@@ -112,7 +115,10 @@ void main() {
         expect(tester.takeException(), isNull);
         await unmountApp(tester);
       },
-      variant: TargetPlatformVariant({TargetPlatform.ohos}),
+      variant: TargetPlatformVariant(
+        ohosPlatforms.isEmpty ? {TargetPlatform.android} : ohosPlatforms,
+      ),
+      skip: ohosPlatforms.isEmpty,
     );
   }
 

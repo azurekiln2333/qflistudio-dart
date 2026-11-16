@@ -67,7 +67,7 @@ final StudioProfile dartProfile = StudioProfile(
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
-  final nativeStartup = !kIsWeb && defaultTargetPlatform == TargetPlatform.ohos;
+  final nativeStartup = !kIsWeb && defaultTargetPlatform.name == 'ohos';
   if (nativeStartup) binding.deferFirstFrame();
 
   // 在 runApp 之前定档。

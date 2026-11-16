@@ -1,0 +1,256 @@
+name: Apple applications and native dependencies
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/apple-build.yml
+      - tool/ci/**
+      - lib/**
+      - vendor/**
+      - assets/**
+      - curriculum/**
+      - pubspec.yaml
+      - pubspec.lock
+      - native/dart-sdk/bundle_macos.sh
+      - native/dart-sdk/DartVM.entitlements
+      - macos/**
+      - ios/**
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS ${{ matrix.arch }} SDK and application
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            xcode_arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+            xcode_arch: x86_64
+    defaults:
+      run:
+        shell: bash
+        working-directory: qfli_dart
+    env:
+      ARCH: ${{ matrix.arch }}
+      FLUTTER_XCODE_ARCHS: ${{ matrix.xcode_arch }}
+      FLUTTER_XCODE_ONLY_ACTIVE_ARCH: 'YES'
+      FLUTTER_XCODE_CODE_SIGN_IDENTITY: '-'
+      FLUTTER_XCODE_CODE_SIGN_STYLE: Manual
+      FLUTTER_XCODE_DEVELOPMENT_TEAM: ''
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qfli_dart
+          persist-credentials: false
+      - name: Check out pinned shared core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: azurekiln2333/qflistudio-core
+          ref: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
+          path: qfli_studio_core
+          persist-credentials: false
+      - name: Check out Flutter 3.41.9
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: flutter/flutter
+          ref: 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694
+          path: flutter
+          persist-credentials: false
+      - name: Initialize the native Flutter toolchain
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "$FLUTTER_XCODE_ARCHS"
+          echo "$GITHUB_WORKSPACE/flutter/bin" >> "$GITHUB_PATH"
+          echo "FLUTTER_ROOT=$GITHUB_WORKSPACE/flutter" >> "$GITHUB_ENV"
+          echo "QFLI_DART_SDK=$GITHUB_WORKSPACE/flutter/bin/cache/dart-sdk" >> "$GITHUB_ENV"
+          git -C ../flutter tag 3.41.9 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694
+          ../flutter/bin/flutter config --no-analytics --enable-macos-desktop
+          ../flutter/bin/flutter precache --macos
+          ../flutter/bin/flutter --version --machine > "$RUNNER_TEMP/flutter-version.json"
+      - name: Verify and archive the standalone native Dart SDK
+        run: |
+          set -euo pipefail
+          lipo -verify_arch "$FLUTTER_XCODE_ARCHS" "$QFLI_DART_SDK/bin/dart"
+          python3 tool/ci/package_desktop_sdk.py --sdk "$QFLI_DART_SDK" --platform macos --arch "$ARCH" --output dist/native
+          cp "$RUNNER_TEMP/flutter-version.json" dist/native/flutter-version.json
+      - name: Upload standalone native SDK
+        id: native
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-macos-${{ matrix.arch }}
+          path: qfli_dart/dist/native/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Resolve application dependencies
+        run: |
+          set -euo pipefail
+          python3 tool/ci/prepare_core.py --core ../qfli_studio_core --flutter ../flutter
+          flutter pub get
+      - name: Build the macOS application with ad hoc signing
+        run: flutter build macos --release --no-pub
+      - name: Verify and package the macOS application
+        run: |
+          set -euo pipefail
+          app=build/macos/Build/Products/Release/QFLIDartWing.app
+          test -d "$app"
+          lipo -verify_arch "$FLUTTER_XCODE_ARCHS" "$app/Contents/MacOS/QFLIDartWing"
+          lipo -verify_arch "$FLUTTER_XCODE_ARCHS" "$app/Contents/Helpers/dart-sdk/$ARCH/bin/dart"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          mkdir -p dist/app
+          tar -czf "dist/app/QFLIDartWing-macos-$ARCH.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
+          (cd dist/app && shasum -a 256 "QFLIDartWing-macos-$ARCH.tar.gz" > SHA256SUMS)
+          printf 'Ad hoc signed test application. Not notarized or signed for App Store distribution.\n' > dist/app/SIGNING.txt
+          cp "$RUNNER_TEMP/flutter-version.json" dist/app/flutter-version.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          evidence = {
+              'applicationCommit': os.environ['GITHUB_SHA'],
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'runId': os.environ['GITHUB_RUN_ID'],
+              'coreCommit': '573d1b6eecf1c2b392ad753264a5a09f62f8335e',
+              'flutterCommit': '00b0c91f06209d9e4a41f71b7a512d6eb3b9c694',
+              'platform': 'macos', 'architecture': os.environ['ARCH'],
+              'signing': 'ad hoc', 'notarized': False,
+              'applicationRuntimeVerified': False,
+              'validation': ['application-architecture', 'bundled-sdk-architecture', 'codesign-verification'],
+          }
+          Path('dist/app/provenance.json').write_text(json.dumps(evidence, indent=2) + '\n')
+          PY
+      - name: Upload macOS application
+        id: app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-macos-${{ matrix.arch }}
+          path: qfli_dart/dist/app/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Summarize macOS downloads
+        if: always()
+        env:
+          NATIVE_URL: ${{ steps.native.outputs.artifact-url }}
+          APP_URL: ${{ steps.app.outputs.artifact-url }}
+        run: |
+          {
+            printf '## macOS %s\n\n' "$ARCH"
+            if [ -n "$NATIVE_URL" ]; then printf '[Standalone native Dart SDK](%s)\n\n' "$NATIVE_URL"; fi
+            if [ -n "$APP_URL" ]; then printf '[Application bundle](%s)\n\n' "$APP_URL"; fi
+            printf 'Artifacts are retained for 30 days. Extract the inner tar.gz to preserve executable permissions and symlinks.\n\n'
+            printf 'The application uses ad hoc signing. It is not notarized or App Store signed. SDK smoke execution does not prove application sandbox execution.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ios:
+    name: iOS ARM64 unsigned archive and native frameworks
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: qfli_dart
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qfli_dart
+          persist-credentials: false
+      - name: Check out pinned shared core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: azurekiln2333/qflistudio-core
+          ref: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
+          path: qfli_studio_core
+          persist-credentials: false
+      - name: Check out Flutter 3.41.9
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: flutter/flutter
+          ref: 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694
+          path: flutter
+          persist-credentials: false
+      - name: Initialize Flutter and resolve dependencies
+        run: |
+          set -euo pipefail
+          echo "$GITHUB_WORKSPACE/flutter/bin" >> "$GITHUB_PATH"
+          git -C ../flutter tag 3.41.9 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694
+          ../flutter/bin/flutter config --no-analytics
+          ../flutter/bin/flutter precache --ios
+          ../flutter/bin/flutter --version --machine > "$RUNNER_TEMP/flutter-version.json"
+          python3 tool/ci/prepare_core.py --core ../qfli_studio_core --flutter ../flutter
+          ../flutter/bin/flutter pub get
+      - name: Build unsigned iOS device archive
+        run: flutter build ipa --release --no-codesign --no-pub
+      - name: Package the archive and native framework bundles
+        run: |
+          set -euo pipefail
+          archive=build/ios/archive/Runner.xcarchive
+          app="$archive/Products/Applications/Runner.app"
+          test -d "$app/Frameworks/App.framework"
+          test -d "$app/Frameworks/Flutter.framework"
+          lipo -verify_arch arm64 "$app/Runner"
+          lipo -verify_arch arm64 "$app/Frameworks/App.framework/App"
+          lipo -verify_arch arm64 "$app/Frameworks/Flutter.framework/Flutter"
+          mkdir -p dist/app dist/native
+          ditto -c -k --sequesterRsrc --keepParent "$archive" dist/app/QFLIDartWing-ios-arm64-unsigned.xcarchive.zip
+          tar -czf dist/native/ios-arm64-frameworks.tar.gz -C "$app" Frameworks
+          cp "$RUNNER_TEMP/flutter-version.json" dist/native/flutter-version.json
+          (cd dist/app && shasum -a 256 QFLIDartWing-ios-arm64-unsigned.xcarchive.zip > SHA256SUMS)
+          (cd dist/native && shasum -a 256 ios-arm64-frameworks.tar.gz > SHA256SUMS)
+          printf 'Unsigned Xcode archive. Requires Apple signing before device installation. This is not an installable IPA.\n' > dist/app/SIGNING.txt
+          printf 'Native framework bundles from the matching unsigned iOS archive. Includes the Flutter engine and application AOT code. There is no standalone iOS Dart VM SDK in this project.\n' > dist/native/CONTENTS.txt
+          cp "$RUNNER_TEMP/flutter-version.json" dist/app/flutter-version.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          evidence = {
+              'applicationCommit': os.environ['GITHUB_SHA'],
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'runId': os.environ['GITHUB_RUN_ID'],
+              'coreCommit': '573d1b6eecf1c2b392ad753264a5a09f62f8335e',
+              'flutterCommit': '00b0c91f06209d9e4a41f71b7a512d6eb3b9c694',
+              'platform': 'ios', 'architecture': 'arm64',
+              'signing': 'unsigned', 'standaloneDartVmSdk': False,
+              'deviceRuntimeVerified': False,
+              'validation': ['application-architecture', 'app-framework-architecture', 'flutter-framework-architecture'],
+          }
+          for directory in ['dist/app', 'dist/native']:
+              (Path(directory) / 'provenance.json').write_text(json.dumps(evidence, indent=2) + '\n')
+          PY
+      - name: Upload unsigned iOS archive
+        id: app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-ios-arm64-unsigned-xcarchive
+          path: qfli_dart/dist/app/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload iOS native frameworks
+        id: native
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-ios-arm64-frameworks
+          path: qfli_dart/dist/native/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Summarize iOS downloads
+        if: always()
+        env:
+          NATIVE_URL: ${{ steps.native.outputs.artifact-url }}
+          APP_URL: ${{ steps.app.outputs.artifact-url }}
+        run: |
+          {
+            printf '## iOS ARM64\n\n'
+            if [ -n "$APP_URL" ]; then printf '[Unsigned Xcode archive](%s)\n\n' "$APP_URL"; fi
+            if [ -n "$NATIVE_URL" ]; then printf '[Native framework bundles](%s)\n\n' "$NATIVE_URL"; fi
+            printf 'Artifacts are retained for 30 days. The archive requires Apple signing before device installation and is not an installable IPA.\n\n'
+            printf 'The frameworks are the Flutter engine and matching application AOT code. This project does not provide a standalone iOS Dart VM SDK. No device runtime test ran in this job.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
