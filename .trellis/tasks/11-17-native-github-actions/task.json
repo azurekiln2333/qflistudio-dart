@@ -1,8 +1,8 @@
 {
   "id": "native-github-actions",
   "name": "native-github-actions",
-  "title": "Build Android native SDK on GitHub Actions",
-  "description": "Run the pinned Android SDK packaging on GitHub, publish downloadable artifacts, and document disk usage and rebuild limitations.",
+  "title": "Build native dependencies and applications on GitHub Actions",
+  "description": "Build Android, Windows, Linux, macOS, iOS and OHOS in GitHub Actions, export native and application artifacts, and document downloads and local disk usage.",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

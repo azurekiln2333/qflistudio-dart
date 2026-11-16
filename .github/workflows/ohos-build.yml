@@ -1,0 +1,121 @@
+name: OHOS application and native libraries
+
+on:
+  workflow_dispatch:
+    inputs:
+      command_line_tools_url:
+        description: Official HarmonyOS Linux x64 Command Line Tools HTTPS URL
+        type: string
+        required: false
+      command_line_tools_sha256:
+        description: SHA-256 of the complete Command Line Tools archive
+        type: string
+        required: false
+  push:
+    paths:
+      - .github/workflows/ohos-build.yml
+      - tool/ci/ohos_build.py
+      - tool/ci/ohos-command-line-tools.lock.json
+      - tool/ohos/inspect_dart_hap.py
+      - lib/**
+      - vendor/**
+      - assets/**
+      - pubspec.*
+      - ohos/**
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: OHOS ARM64 unsigned HAP, APP and native libraries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: qfli_dart
+    env:
+      OHOS_COMMAND_LINE_TOOLS_URL: ${{ vars.OHOS_COMMAND_LINE_TOOLS_URL }}
+      OHOS_COMMAND_LINE_TOOLS_SHA256: ${{ vars.OHOS_COMMAND_LINE_TOOLS_SHA256 }}
+      FLUTTER_OHOS_REVISION: 62357a93d653bf844f730bb1f4b7cc9e2139d14e
+      FLUTTER_OHOS_TAG: 3.41.9+ohos-1.0.2
+      CORE_REVISION: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: qfli_dart
+          persist-credentials: false
+      - name: Remove local signing configuration from the CI copy
+        run: python3 tool/ci/ohos_build.py sanitize
+      - name: Install the verified HarmonyOS command line tools
+        env:
+          INPUT_TOOLS_URL: ${{ inputs.command_line_tools_url }}
+          INPUT_TOOLS_SHA256: ${{ inputs.command_line_tools_sha256 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$INPUT_TOOLS_URL" || -n "$INPUT_TOOLS_SHA256" ]]; then
+            export OHOS_COMMAND_LINE_TOOLS_URL="$INPUT_TOOLS_URL"
+            export OHOS_COMMAND_LINE_TOOLS_SHA256="$INPUT_TOOLS_SHA256"
+          fi
+          python3 tool/ci/ohos_build.py bootstrap
+      - name: Select the runner's Java 21 runtime
+        run: |
+          set -euo pipefail
+          test -x "$JAVA_HOME_21_X64/bin/java"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          "$JAVA_HOME_21_X64/bin/java" -version
+      - name: Check out pinned shared core
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: azurekiln2333/qflistudio-core
+          ref: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
+          path: qfli_studio_core
+          persist-credentials: false
+      - name: Check out the official pinned Flutter OHOS release
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --single-branch --branch "$FLUTTER_OHOS_TAG" \
+            https://gitcode.com/CPF-Flutter/flutter_flutter.git ../flutter_ohos
+          test "$(git -C ../flutter_ohos rev-parse HEAD)" = "$FLUTTER_OHOS_REVISION"
+          echo "$GITHUB_WORKSPACE/flutter_ohos/bin" >> "$GITHUB_PATH"
+          echo "FLUTTER_ROOT=$GITHUB_WORKSPACE/flutter_ohos" >> "$GITHUB_ENV"
+      - name: Initialize Flutter and resolve application dependencies
+        run: |
+          set -euo pipefail
+          flutter config --no-analytics --ohos-sdk "$DEVECO_SDK_HOME"
+          flutter --version --machine > "$RUNNER_TEMP/ohos-flutter-version.json"
+          flutter pub get
+      - name: Build unsigned ARM64 HAP and APP
+        env:
+          JAVA_TOOL_OPTIONS: -Xms32m -Xmx1536m -XX:+UseSerialGC
+        run: |
+          set -euo pipefail
+          flutter build hap --release --no-pub --no-codesign --target-platform ohos-arm64
+          flutter build app --release --no-pub --no-codesign --target-platform ohos-arm64
+      - name: Inspect application packages and export native libraries
+        run: python3 tool/ci/ohos_build.py package
+      - name: Upload unsigned application packages
+        id: app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-ohos-arm64-unsigned
+          path: qfli_dart/dist/ohos/app/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload native libraries from the HAP
+        id: native
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-ohos-arm64-libraries
+          path: qfli_dart/dist/ohos/native/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Write artifact summary
+        env:
+          APP_URL: ${{ steps.app.outputs.artifact-url }}
+          NATIVE_URL: ${{ steps.native.outputs.artifact-url }}
+        run: |
+          printf '## OHOS ARM64\n\n[Unsigned HAP and APP](%s)\n\n[Native libraries from the HAP](%s)\n\nArtifacts expire after 30 days. The library archive contains the Flutter engine, application AOT code and plugin libraries. It is not an independent Dart SDK. Packages require signing before installation. Device execution remains unverified.\n' "$APP_URL" "$NATIVE_URL" >> "$GITHUB_STEP_SUMMARY"

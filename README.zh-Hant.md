@@ -154,6 +154,8 @@ python scripts/ste-lint-zh.py README.md README.zh-Hant.md
 
 ## 構建
 
+雲端構建和下載見 [GitHub 構建說明](GITHUB_BUILD.zh-CN.md)。
+
 Android 構建前先鋪 SDK。
 替換兩個 SDK 目錄。
 

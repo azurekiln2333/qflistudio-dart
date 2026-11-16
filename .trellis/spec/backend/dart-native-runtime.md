@@ -54,6 +54,25 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   verifies the exact package bytes, and refuses to replace different assets.
   Keep this release when removing expired build outputs. Never bypass hashes
   or silently upgrade the SDK to repair an unavailable download.
+- `application-build.yml` builds Windows x64, Linux x64 and each Android ABI.
+  `apple-build.yml` builds macOS arm64/x64 and an unsigned iOS ARM64 archive.
+  Standard-platform CI pins Flutter 3.41.9 and a shared-core revision, checks
+  them out as sibling directories, and applies `tool/ci/stock-flutter-core.patch`
+  only to the clean disposable core checkout. `prepare_core.py` rejects a dirty
+  checkout, a different core commit and an OHOS-enabled Flutter checkout.
+  Never apply this patch to the developer's shared core or the OHOS CI build.
+- `tool/ci/package_desktop_sdk.py` exports the complete host SDK. Check the Dart
+  platform tag, compile real file-IO source to Kernel, remove the source and run
+  that Kernel before upload. Upload the native SDK before app compilation, so
+  an app failure does not hide a usable SDK. Desktop apps include their SDK.
+  Windows archives contain the whole Release directory; Linux archives contain
+  the whole bundle; macOS archives contain the whole .app. Unix tar archives
+  preserve permissions and symlinks inside the Actions artifact ZIP.
+- Android CI APKs use the existing ephemeral debug signing configuration.
+  macOS CI apps use ad hoc signing and are not notarized. iOS CI exports an
+  unsigned .xcarchive and its matching native frameworks, not an installable
+  IPA or a standalone Dart SDK. Provenance must distinguish compilation,
+  archive checks, SDK smoke execution and unverified application/device use.
 - Android Gradle uses the same `target-platform` list for SDK validation,
   build-type ABI filters and SDK data assets. Flutter supplies build-type ABI
   defaults, so changing only `defaultConfig.ndk.abiFilters` is insufficient.
@@ -65,6 +84,23 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   `--target-platform ohos-arm64` for Flutter builds. The module filter also
   applies when packaging through DevEco; the Flutter Hvigor plugin otherwise
   defaults to both ARM64 and x86_64.
+- `ohos-build.yml` pins Flutter OHOS 3.41.9+ohos-1.0.2 and uses the unpatched
+  shared core. `ohos_build.py sanitize` removes signingConfigs and each product's
+  signingConfig only in the disposable CI checkout, before any build command.
+  Bootstrap reads `tool/ci/ohos-command-line-tools.lock.json`; overrides require
+  both `OHOS_COMMAND_LINE_TOOLS_URL` and `OHOS_COMMAND_LINE_TOOLS_SHA256` from the
+  same dispatch or repository source. Verify the downloaded bytes before unzip.
+  Reject archive path traversal and unexpected SDK API metadata. The locked
+  official archive uses `sdk/default/`, `tool/node/`, root `ohpm/` and `hvigor/`,
+  with command wrappers in root `bin/`. Select Java 21 from the hosted runner.
+  A signed CDN URL may permit GET while rejecting HEAD; do not infer absence
+  from HEAD alone. Preserve the project's target API until build evidence
+  establishes whether the locked toolchain is compatible.
+- OHOS CI builds both unsigned HAP and APP with `--no-codesign`, checks the
+  standalone HAP and nested APP HAPs with `inspect_dart_hap.py`, and exports
+  matching ARM64 libraries separately. The library artifact is Flutter/app/
+  plugin code, not a standalone Dart VM SDK. Report signing and device runtime
+  as unverified in provenance. Never upload signing configuration or local keys.
 - OHOS store packages use bundle `com.azurekiln.qfli.dart` in
   `ohos/AppScope/app.json5` and the product's `signingConfig: "releaseKey"` in
   `ohos/build-profile.json5`. The local release profile must have `type: "release"`,
@@ -89,6 +125,8 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   binary architecture, sign Mach-O files before the outer application, and grant
   executable helpers sandbox inheritance and JIT rights. Apple execution is
   unverified until an Apple application build and runtime check pass.
+  Invoke the architecture check as `lipo <binary> -verify_arch <architecture>`.
+  Putting the binary after `-verify_arch` makes lipo parse it as an architecture.
 
 ## 4. Validation & Error Matrix
 
@@ -108,6 +146,11 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
 | Android unsupported ABI or incomplete image | Build fails with staging instructions |
 | SDK download missing or package size/SHA256 differs | Preparation fails; no uploaded SDK artifact |
 | Archived input already exists with different bytes | Archive workflow fails without replacing it |
+| Standard-platform core checkout is dirty or has a different revision | Compatibility helper fails before patching |
+| Standard-platform helper sees OHOS Flutter | Compatibility helper refuses the patch |
+| Desktop SDK platform tag differs from the requested artifact | SDK packaging fails before upload |
+| Only one OHOS toolchain override is supplied | Bootstrap fails instead of mixing sources |
+| OHOS download hash or locked API metadata differs | Bootstrap fails before application compilation |
 | OHOS profile authorizes a different bundle | Resolve the bundle/profile mismatch before signing |
 | OHOS release build uses a debug profile | Release runtime only; not a store-signed artifact |
 | Signed APP contains an unsigned nested HAP | Verify the outer APP signature; inspect nested bundle/ABI separately |
@@ -131,6 +174,10 @@ on preparation scripts, and inspect a real GitHub run. Both ABI jobs must pass
 package size/SHA256, ELF ABI and 16 KiB checks. Inspect the artifact inventory,
 the version in provenance, and the generated checksum manifest. Flutter-wide
 tests do not replace these checks and are unnecessary for CI-only changes.
+For standard Flutter compatibility changes, run `tool/ci/test_prepare_core.py`
+and the startup tests. Linux CI runs full application analysis and host tests.
+Check macOS application and bundled-SDK architectures and verify codesigning.
+Check the iOS executable, App.framework and Flutter.framework architectures.
 
 `native_dart_toolchain_test.dart` exercises VM IO, async code, native exit codes,
 compile failure, cancellation and source-independent Kernel execution.

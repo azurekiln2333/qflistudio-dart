@@ -155,6 +155,8 @@ python scripts/ste-lint-zh.py README.md README.zh-Hant.md
 
 ## Builds
 
+See [GitHub builds and downloads](GITHUB_BUILD.zh-CN.md) for cloud artifacts (Chinese).
+
 Stage the SDK before an Android build.
 Replace both SDK directory placeholders.
 

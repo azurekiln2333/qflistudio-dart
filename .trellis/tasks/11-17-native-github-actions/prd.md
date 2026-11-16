@@ -26,6 +26,15 @@ Unsigned iOS archives are not installable IPA files. macOS unsigned/ad-hoc
 bundles are not notarized releases. OHOS uses its portable runtime, so exported
 native libraries must not be labeled an independent Dart SDK.
 
+## License alignment (additional user instruction)
+
+The user requests GNU GPL v3.0 alignment with `../qflistudio`, followed by a
+conventional commit and push. The existing tracked LICENSE has the identical
+SHA256 in both repositories. Add the same project notice to all three READMEs,
+preserving the separately licensed vendored content. Commit d781661 completes
+this request on the existing trial branch. Do not modify the main project's
+unrelated working-tree changes or interpret alignment as a default-branch merge.
+
 ## Boundary
 
 The missing behavior is remote execution of existing native packaging scripts.
