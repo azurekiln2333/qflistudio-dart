@@ -21,8 +21,6 @@ jobs:
         abi: [arm64-v8a, x86_64]
     env:
       ABI: ${{ matrix.abi }}
-      SDK_WORK: ${{ runner.temp }}/dart-${{ matrix.abi }}
-      SDK_HOME: ${{ runner.temp }}/sdk-${{ matrix.abi }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,6 +31,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          SDK_WORK="$RUNNER_TEMP/dart-$ABI"
+          SDK_HOME="$RUNNER_TEMP/sdk-$ABI"
+          printf 'SDK_WORK=%s\nSDK_HOME=%s\n' "$SDK_WORK" "$SDK_HOME" >> "$GITHUB_ENV"
           bash native/dart-sdk/android/prepare_sdk.sh "$ABI" "$SDK_WORK"
           mkdir -p "$SDK_HOME"
           tar -xf "$SDK_WORK/sdk.tar" -C "$SDK_HOME"
