@@ -1,0 +1,79 @@
+name: Archive native SDK inputs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/native-android-sdk]
+    paths: [.github/workflows/archive-native-inputs.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: archive-native-inputs
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Preserve ${{ matrix.abi }} package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Download and verify the original Termux package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ABI: ${{ matrix.abi }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import zipfile
+
+          lock = json.loads(pathlib.Path('native/dart-sdk/android/packages.lock.json').read_text())
+          package = lock['packages'][os.environ['ABI']]
+          source = lock['archiveProvenance']
+          artifact_id = package['sourceArtifactId']
+          artifact_path = f"repos/{source['repository']}/actions/artifacts/{artifact_id}"
+          metadata = json.loads(subprocess.check_output(['gh', 'api', artifact_path]))
+          assert not metadata['expired'], 'Upstream artifact expired'
+          assert metadata['workflow_run']['id'] == source['runId'], 'Wrong upstream run'
+          assert metadata['workflow_run']['head_sha'] == source['commit'], 'Wrong upstream commit'
+          archive = pathlib.Path(os.environ['RUNNER_TEMP']) / 'upstream.zip'
+          with archive.open('wb') as target:
+              subprocess.run(['gh', 'api', artifact_path + '/zip'], stdout=target, check=True)
+          filename = pathlib.PurePosixPath(package['filename']).name
+          with zipfile.ZipFile(archive) as zipped:
+              members = [n for n in zipped.namelist() if pathlib.PurePosixPath(n).name == filename]
+              assert len(members) == 1, 'Expected exactly one source package'
+              data = zipped.read(members[0])
+          digest = hashlib.sha256(data).hexdigest()
+          assert len(data) == package['size'], 'Source package size differs from lock'
+          assert digest == package['sha256'], 'Source package SHA256 differs from lock'
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / filename
+          output.write_bytes(data)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write(f'PACKAGE_PATH={output}\n')
+              env.write(f'RELEASE_TAG=native-sdk-inputs-{lock["sdkVersion"]}\n')
+          print(f'Verified {filename}: {len(data)} bytes, SHA256 {digest}')
+          PY
+      - name: Archive verified package in the input release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" "$PACKAGE_PATH" --repo "$GITHUB_REPOSITORY"
+          printf 'Archived verified package: `%s`\n' "$(basename "$PACKAGE_PATH")" >> "$GITHUB_STEP_SUMMARY"
