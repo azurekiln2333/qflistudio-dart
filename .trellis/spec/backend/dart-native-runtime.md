@@ -95,7 +95,9 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   with command wrappers in root `bin/`. Select Java 21 from the hosted runner.
   A signed CDN URL may permit GET while rejecting HEAD; do not infer absence
   from HEAD alone. Preserve the project's target API until build evidence
-  establishes whether the locked toolchain is compatible.
+  establishes whether the locked toolchain is compatible. Run 43943142540
+  verified complete download hashing, unsigned HAP/APP compilation and package
+  inspection with the locked API 26 SDK and authored target API 24.
 - OHOS CI builds both unsigned HAP and APP with `--no-codesign`, checks the
   standalone HAP and nested APP HAPs with `inspect_dart_hap.py`, and exports
   matching ARM64 libraries separately. The library artifact is Flutter/app/
@@ -127,6 +129,9 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   unverified until an Apple application build and runtime check pass.
   Invoke the architecture check as `lipo <binary> -verify_arch <architecture>`.
   Putting the binary after `-verify_arch` makes lipo parse it as an architecture.
+  Keep command argument arrays nonempty when expanding them under `set -u`:
+  macOS Bash 3.2 rejects an empty array. Initialize signing arguments with
+  `--force --sign <identity>` and append optional flags per Mach-O file.
 
 ## 4. Validation & Error Matrix
 

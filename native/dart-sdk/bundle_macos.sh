@@ -5,7 +5,8 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 destination="${TARGET_BUILD_DIR:?}/${CONTENTS_FOLDER_PATH:?}/Helpers/dart-sdk"
 identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
 if [[ -z "$identity" ]]; then identity=-; fi
-sign_options=()
+# Keep the array nonempty: macOS Bash 3.2 rejects empty arrays with nounset.
+sign_options=(--force --sign "$identity")
 if [[ "$identity" != - ]]; then sign_options+=(--timestamp --options runtime); fi
 for arch in ${ARCHS:-$(uname -m)}; do
   case "$arch" in
@@ -25,13 +26,13 @@ for arch in ${ARCHS:-$(uname -m)}; do
   ditto "$source" "$destination/$target"
   while IFS= read -r -d '' file; do
     if /usr/bin/file -b "$file" | /usr/bin/grep -q 'Mach-O'; then
-      entitlements=()
+      codesign_args=("${sign_options[@]}")
       if [[ "$file" == "$destination/$target/bin/dart" ||
             "$file" == "$destination/$target/bin/dartvm" ||
             "$file" == "$destination/$target/bin/dartaotruntime" ]]; then
-        entitlements=(--entitlements "$root/native/dart-sdk/DartVM.entitlements")
+        codesign_args+=(--entitlements "$root/native/dart-sdk/DartVM.entitlements")
       fi
-      codesign --force --sign "$identity" "${sign_options[@]}" "${entitlements[@]}" "$file"
+      codesign "${codesign_args[@]}" "$file"
     fi
   done < <(find "$destination/$target" -type f -print0)
 done
