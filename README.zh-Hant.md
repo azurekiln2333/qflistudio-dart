@@ -211,6 +211,12 @@ tool/ohos/verify_dart_hap.ps1 -HapPath <hap>
 全量 300 組內容驗證仍開放。
 共享核心的最終修訂仍待評審。
 
+## 許可證
+
+本倉庫程式碼採用 GNU GPL v3.0 許可證。
+單獨聲明許可證的內容沿用原許可證。
+許可證全文見 [LICENSE](LICENSE)。
+
 ## 第三方許可證
 
 內置 tom_d4rt 用 MIT。

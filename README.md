@@ -211,6 +211,12 @@ tool/ohos/verify_dart_hap.ps1 -HapPath <hap>
 全量 300 组内容验证仍开放。
 共享核心的最终修订仍待评审。
 
+## 许可证
+
+本仓库代码采用 GNU GPL v3.0 许可证。
+单独声明许可证的内容沿用原许可证。
+许可证全文见 [LICENSE](LICENSE)。
+
 ## 第三方许可证
 
 内置 tom_d4rt 用 MIT。

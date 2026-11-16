@@ -212,6 +212,12 @@ Promotion of the 180 drafts remains open.
 Full verification of all 300 content pairs remains open.
 The final shared-core revision still needs review.
 
+## License
+
+The code in this repository is licensed under GNU GPL v3.0.
+Content with a separate license retains that license.
+See [LICENSE](LICENSE) for the full license text.
+
 ## Third-party license
 
 The bundled `tom_d4rt` uses MIT.
