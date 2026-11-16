@@ -80,7 +80,7 @@ jobs:
       - name: Verify and archive the standalone native Dart SDK
         run: |
           set -euo pipefail
-          lipo -verify_arch "$FLUTTER_XCODE_ARCHS" "$QFLI_DART_SDK/bin/dart"
+          lipo "$QFLI_DART_SDK/bin/dart" -verify_arch "$FLUTTER_XCODE_ARCHS"
           python3 tool/ci/package_desktop_sdk.py --sdk "$QFLI_DART_SDK" --platform macos --arch "$ARCH" --output dist/native
           cp "$RUNNER_TEMP/flutter-version.json" dist/native/flutter-version.json
       - name: Upload standalone native SDK
@@ -103,8 +103,8 @@ jobs:
           set -euo pipefail
           app=build/macos/Build/Products/Release/QFLIDartWing.app
           test -d "$app"
-          lipo -verify_arch "$FLUTTER_XCODE_ARCHS" "$app/Contents/MacOS/QFLIDartWing"
-          lipo -verify_arch "$FLUTTER_XCODE_ARCHS" "$app/Contents/Helpers/dart-sdk/$ARCH/bin/dart"
+          lipo "$app/Contents/MacOS/QFLIDartWing" -verify_arch "$FLUTTER_XCODE_ARCHS"
+          lipo "$app/Contents/Helpers/dart-sdk/$ARCH/bin/dart" -verify_arch "$FLUTTER_XCODE_ARCHS"
           codesign --verify --deep --strict --verbose=2 "$app"
           mkdir -p dist/app
           tar -czf "dist/app/QFLIDartWing-macos-$ARCH.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
@@ -196,9 +196,9 @@ jobs:
           app="$archive/Products/Applications/Runner.app"
           test -d "$app/Frameworks/App.framework"
           test -d "$app/Frameworks/Flutter.framework"
-          lipo -verify_arch arm64 "$app/Runner"
-          lipo -verify_arch arm64 "$app/Frameworks/App.framework/App"
-          lipo -verify_arch arm64 "$app/Frameworks/Flutter.framework/Flutter"
+          lipo "$app/Runner" -verify_arch arm64
+          lipo "$app/Frameworks/App.framework/App" -verify_arch arm64
+          lipo "$app/Frameworks/Flutter.framework/Flutter" -verify_arch arm64
           mkdir -p dist/app dist/native
           ditto -c -k --sequesterRsrc --keepParent "$archive" dist/app/QFLIDartWing-ios-arm64-unsigned.xcarchive.zip
           tar -czf dist/native/ios-arm64-frameworks.tar.gz -C "$app" Frameworks
