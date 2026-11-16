@@ -12,16 +12,17 @@ import json
 import sys
 with open(sys.argv[1], encoding='utf-8') as source:
     package = json.load(source)['packages'][sys.argv[2]]
-for field in ('filename', 'size', 'sha256'):
+for field in ('filename', 'size', 'sha256', 'url'):
     print(package[field])
 PY
 )
-test "${#package[@]}" -eq 3
+test "${#package[@]}" -eq 4
 archive="$output/package.deb"
 curl --fail --location --retry 2 --output "$archive" \
-  "https://mirrors.ustc.edu.cn/termux/apt/termux-main/${package[0]}"
+  "${package[3]}"
 test "$(stat -c %s "$archive")" = "${package[1]}"
 printf '%s  %s\n' "${package[2]}" "$archive" | sha256sum --check
+printf '%s\n' "${package[3]}" > "$output/source-url.txt"
 dpkg-deb --extract "$archive" "$output/package"
 sdk="$output/package/data/data/com.termux/files/usr/lib/dart-sdk"
 # The package's absolute Termux alias would be dangling outside its original prefix.

@@ -1,0 +1,142 @@
+name: Android native SDK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/native-android-sdk.yml
+      - native/dart-sdk/android/**
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.abi }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    env:
+      ABI: ${{ matrix.abi }}
+      SDK_WORK: ${{ runner.temp }}/dart-${{ matrix.abi }}
+      SDK_HOME: ${{ runner.temp }}/sdk-${{ matrix.abi }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare the pinned Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash native/dart-sdk/android/prepare_sdk.sh "$ABI" "$SDK_WORK"
+          mkdir -p "$SDK_HOME"
+          tar -xf "$SDK_WORK/sdk.tar" -C "$SDK_HOME"
+
+      - name: Validate and stage native libraries and SDK data
+        shell: pwsh
+        run: ./native/dart-sdk/android/stage.ps1 -Abi $env:ABI -Sdk $env:SDK_HOME
+
+      - name: Record provenance and file checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          abi = os.environ["ABI"]
+          output = Path("native/build/android")
+          lock_path = Path("native/dart-sdk/android/packages.lock.json")
+          lock = json.loads(lock_path.read_text(encoding="utf-8"))
+          package = Path(os.environ["SDK_WORK"]) / "package.deb"
+          source = package.parent / "source-url.txt"
+          manifest_path = output / "assets" / f"dart-sdk-{abi}.json"
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          with package.open("rb") as stream:
+              actual_hash = hashlib.file_digest(stream, "sha256").hexdigest()
+          actual_size = package.stat().st_size
+          expected = lock["packages"][abi]
+          if actual_hash != expected["sha256"] or actual_size != expected["size"]:
+              raise SystemExit("Downloaded package differs from packages.lock.json")
+          if manifest["sdkVersion"] != lock["sdkVersion"]:
+              raise SystemExit("Staged SDK version differs from packages.lock.json")
+          run_url = (
+              f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}'
+              f'/actions/runs/{os.environ["GITHUB_RUN_ID"]}'
+          )
+          provenance = {
+              "schemaVersion": 1,
+              "abi": abi,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "commit": os.environ["GITHUB_SHA"],
+              "runUrl": run_url,
+              "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "packageLock": lock,
+              "packageLockSha256": hashlib.sha256(lock_path.read_bytes()).hexdigest(),
+              "packageSha256": actual_hash,
+              "packageSize": actual_size,
+              "packageSourceUrl": source.read_text(encoding="utf-8").strip(),
+              "sdkManifest": manifest,
+              "validation": ["package-size-and-sha256", "elf-abi", "elf-16k-load-alignment"],
+              "deviceRuntimeVerified": False,
+          }
+          (output / f"provenance-{abi}.json").write_text(
+              json.dumps(provenance, indent=2) + "\n", encoding="utf-8"
+          )
+          checksums = []
+          for path in sorted(output.rglob("*")):
+              if path.is_file() and not path.name.startswith("SHA256SUMS-"):
+                  with path.open("rb") as stream:
+                      digest = hashlib.file_digest(stream, "sha256").hexdigest()
+                  checksums.append(f"{digest}  {path.relative_to(output).as_posix()}")
+          (output / f"SHA256SUMS-{abi}").write_text(
+              "\n".join(checksums) + "\n", encoding="utf-8"
+          )
+          PY
+          (cd native/build/android && sha256sum --check "SHA256SUMS-$ABI")
+
+      - name: Upload SDK artifact
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-android-${{ matrix.abi }}
+          path: native/build/android/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Write download summary
+        shell: bash
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          abi = os.environ["ABI"]
+          summary = f"""## Android native SDK: {abi}
+
+          [Download native-android-{abi}]({os.environ['ARTIFACT_URL']})
+
+          The artifact expires after 30 days. Sign in to GitHub to download it.
+
+          Extract the artifact into `native/build/android/` in the project checkout.
+          It contains `jniLibs/{abi}/`, SDK data under `assets/`,
+          `provenance-{abi}.json`, and `SHA256SUMS-{abi}`.
+
+          This run packages the pinned upstream Android SDK and validates its files.
+          It does not compile the VM from source, build an APK, or run an Android device test.
+
+          Artifact SHA-256: `{os.environ['ARTIFACT_DIGEST']}`
+          """
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as stream:
+              stream.write(summary)
+          PY

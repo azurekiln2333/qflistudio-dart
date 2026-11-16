@@ -22,6 +22,11 @@ Android channel `qfli_dartwing/sdk.prepare` returns absolute `home`, `vm` and
 `libraryDirectory` paths, or `DART_SDK_PREPARE_FAILED`. `AndroidDartSdk.prepare`
 shares concurrent preparation and caches only a successful native version probe.
 
+Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
+<output>`. It reads `packages.lock.json` and writes `package.deb`, `sdk.tar` and
+`source-url.txt`. Staging is `pwsh -File native/dart-sdk/android/stage.ps1 -Abi
+<abi> -Sdk <extracted-sdk>`. Supported ABI values are `arm64-v8a` and `x86_64`.
+
 ## 3. Contracts
 
 - SDK discovery: explicit executable, QFLI_DART_SDK, DART_SDK, packaged SDK,
@@ -37,6 +42,18 @@ shares concurrent preparation and caches only a successful native version probe.
   The actual VM ELF determines the data ABI, and background Kotlin installation
   creates SDK-native symlinks to installed code. Missing inputs fail packaging;
   unsupported 32-bit targets fail rather than packaging an evaluator.
+- `.github/workflows/native-android-sdk.yml` packages these two Android SDK
+  images on Ubuntu. It publishes per-ABI Actions artifacts for 30 days, with
+  `jniLibs/`, `assets/`, provenance and file SHA256 manifests. Restore artifacts
+  into `native/build/android/`. This is SDK staging, not a C++ rebuild, APK
+  build or device execution check. It requires neither Flutter nor shared core.
+- `packages.lock.json` owns package URLs, byte sizes, hashes and upstream
+  artifact provenance. The fixed 3.13.5 mirror URLs disappeared. Preserve the
+  verified original packages in the `native-sdk-inputs-3.13.5` input release.
+  The archive workflow unwraps the official artifact ZIP and its inner TAR,
+  verifies the exact package bytes, and refuses to replace different assets.
+  Keep this release when removing expired build outputs. Never bypass hashes
+  or silently upgrade the SDK to repair an unavailable download.
 - Android Gradle uses the same `target-platform` list for SDK validation,
   build-type ABI filters and SDK data assets. Flutter supplies build-type ABI
   defaults, so changing only `defaultConfig.ndk.abiFilters` is insufficient.
@@ -89,6 +106,8 @@ shares concurrent preparation and caches only a successful native version probe.
 | macOS SDK of wrong architecture | Architecture check fails |
 | Android SDK layout/probe fails | Report platform/format/native error; no fallback |
 | Android unsupported ABI or incomplete image | Build fails with staging instructions |
+| SDK download missing or package size/SHA256 differs | Preparation fails; no uploaded SDK artifact |
+| Archived input already exists with different bytes | Archive workflow fails without replacing it |
 | OHOS profile authorizes a different bundle | Resolve the bundle/profile mismatch before signing |
 | OHOS release build uses a debug profile | Release runtime only; not a store-signed artifact |
 | Signed APP contains an unsigned nested HAP | Verify the outer APP signature; inspect nested bundle/ABI separately |
@@ -101,7 +120,17 @@ program. Base: a single-file template prints its actual output. Bad: call EVC
 native Kernel, silently use dart_eval on desktop, or return a byte-read Future
 while the finally block deletes the artifact.
 
+For CI, good is a verified source package plus downloadable artifacts from both
+ABI jobs. A base case stages one requested ABI. Bad is treating a green archive
+job as proof of SDK staging or Android runtime execution.
+
 ## 6. Tests Required
+
+For native CI changes, parse workflow YAML and embedded Python, run `bash -n`
+on preparation scripts, and inspect a real GitHub run. Both ABI jobs must pass
+package size/SHA256, ELF ABI and 16 KiB checks. Inspect the artifact inventory,
+the version in provenance, and the generated checksum manifest. Flutter-wide
+tests do not replace these checks and are unnecessary for CI-only changes.
 
 `native_dart_toolchain_test.dart` exercises VM IO, async code, native exit codes,
 compile failure, cancellation and source-independent Kernel execution.
@@ -135,6 +164,10 @@ with the configured release certificate. Inspect packaged `app.debug == false`
 and intermediate `app.buildMode == "release"` independently of signature checks.
 
 ## 7. Wrong vs Correct
+
+Wrong: assume an upstream Actions ZIP directly contains `.deb` files.
+Correct: follow the pinned Termux workflow's ZIP -> TAR -> exact package member
+layout, then verify the existing package size and SHA256 before archiving.
 
 Wrong: `return artifact.readAsBytes();` in a try whose finally deletes its parent.
 Correct: `return await artifact.readAsBytes();` so cleanup occurs after the read.

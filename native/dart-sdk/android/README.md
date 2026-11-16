@@ -9,8 +9,14 @@ The application never substitutes the portable evaluator on Android.
 `packages.lock.json` pins both package sizes/hashes, the Termux recipe commit,
 and the upstream source archive hash. The recipe is
 `https://github.com/termux/termux-packages/blob/d0f94da1e578a0c9550a84d408bc8ed0003882ec/packages/dart/build.sh`.
-Packages are downloaded from the USTC Termux mirror. SDK licenses and notices
-remain in the packaged data; no third-party SDK binary is tracked in Git.
+The original USTC mirror removed these pinned package versions. Packages now
+download from this repository's `native-sdk-inputs-3.13.5` prerelease assets.
+The **Archive native SDK inputs** workflow recovers the original packages from
+Termux run `36575536133`, then checks the existing sizes and SHA-256 hashes
+before uploading them. `archiveProvenance` and `sourceArtifactId` in the lock
+record the upstream evidence. The SDK version and package bytes stay unchanged.
+SDK licenses and notices remain in the packaged data; no third-party SDK binary
+is tracked in Git. `prepare_sdk.sh` records its download URL in `source-url.txt`.
 
 On Linux or WSL, with Python 3, curl, dpkg-deb and GNU tar:
 
@@ -42,6 +48,53 @@ must advertise only `arm64-v8a`, with `libflutter.so`, `libapp.so` and
 `libqfli_dartvm.so` present, and must omit the x86_64 SDK ZIP/manifest. A combined
 ARM64/x64 build must contain all three libraries for both ABIs. Check the APK
 itself, because Flutter's build-type filters can override default-config filters.
+
+## GitHub Actions
+
+Chinese instructions: [GitHub native build and local disk usage](./GITHUB_BUILD.zh-CN.md).
+
+The **Android native SDK** workflow runs preparation and staging on
+`ubuntu-24.04` for `arm64-v8a` and `x86_64`. It starts when the Android SDK
+scripts or workflow change. After this workflow reaches the default branch,
+**Run workflow** is also available in the Actions tab. Until then, use a push
+that changes these paths on the trial branch to trigger it. It uses the
+version, package sizes and SHA-256 hashes in
+`packages.lock.json`. No local Flutter installation or sibling core checkout
+is needed for this workflow.
+
+Open the completed run in **Actions → Android native SDK**. Download
+`native-android-arm64-v8a` or `native-android-x86_64` from **Artifacts**, or use
+the direct link in the job summary. GitHub requires sign-in for these downloads.
+Artifacts expire after 30 days; run the workflow again when needed.
+
+Extract each downloaded ZIP into `native/build/android/` at the project root.
+Each artifact contains:
+
+- `jniLibs/<abi>/`: the Dart VM, launchers and executable SDK snapshots.
+- `assets/dart-sdk-<abi>.zip`: SDK data, libraries, licenses and notices.
+- `assets/dart-sdk-<abi>.json`: the installed-layout manifest.
+- `provenance-<abi>.json`: the source commit, run, package lock and validation scope.
+- `SHA256SUMS-<abi>`: SHA-256 checksums for every other artifact file.
+
+On Linux or WSL, verify the extracted files from `native/build/android/`.
+Run the command only for the ABI you downloaded:
+
+```bash
+sha256sum --check SHA256SUMS-arm64-v8a
+sha256sum --check SHA256SUMS-x86_64
+```
+
+Download only the ABI required by your APK build. Download both for a combined
+ARM64/x64 APK. The artifacts replace local SDK preparation and staging; a local
+APK build still needs the downloaded files, Flutter and the Android build tools.
+The workflow packages a prebuilt upstream SDK. It does not compile the C++ VM
+from source, produce an APK, or establish Android device runtime verification.
+
+The input prerelease keeps the original `.deb` files beyond Actions artifact
+retention. The archive workflow requires that prerelease to exist before it
+runs. Repeating it checks an existing asset's size and digest and skips an
+identical upload. It never replaces a different asset. Preserve this release
+when cleaning old build outputs.
 
 ## Installed layout and execution
 
