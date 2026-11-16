@@ -108,6 +108,28 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           mkdir -p dist/app
           tar -czf "dist/app/QFLIDartWing-macos-$ARCH.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
+          archive_check="$(mktemp -d "$RUNNER_TEMP/qfli-macos-archive.XXXXXX")"
+          tar -xzf "dist/app/QFLIDartWing-macos-$ARCH.tar.gz" -C "$archive_check"
+          restored_app="$archive_check/$(basename "$app")"
+          codesign --verify --deep --strict --verbose=2 "$restored_app"
+          python3 - "$restored_app" "$ARCH" <<'PY'
+          import sys
+          from pathlib import Path
+          app = Path(sys.argv[1]).resolve()
+          sdk = app / 'Contents/Helpers/dart-sdk' / sys.argv[2]
+          resources = app / 'Contents/Resources/dart-sdk' / sys.argv[2]
+          links = [path for path in sdk.rglob('*') if path.is_symlink()]
+          if not links:
+              raise SystemExit('The restored SDK has no resource links')
+          for link in links:
+              if not link.resolve(strict=True).is_relative_to(app):
+                  raise SystemExit(f'SDK link escapes the restored application: {link}')
+          for relative in ['LICENSE', 'lib/core/core.dart', 'bin/snapshots/analysis_server.dart.snapshot']:
+              entry = sdk / relative
+              if not entry.is_file() or entry.resolve() != (resources / relative).resolve():
+                  raise SystemExit(f'SDK resource lookup failed after extraction: {relative}')
+          print(f'Validated {len(links)} SDK links in the restored application')
+          PY
           (cd dist/app && shasum -a 256 "QFLIDartWing-macos-$ARCH.tar.gz" > SHA256SUMS)
           printf 'Ad hoc signed test application. Not notarized or signed for App Store distribution.\n' > dist/app/SIGNING.txt
           cp "$RUNNER_TEMP/flutter-version.json" dist/app/flutter-version.json
@@ -123,7 +145,7 @@ jobs:
               'platform': 'macos', 'architecture': os.environ['ARCH'],
               'signing': 'ad hoc', 'notarized': False,
               'applicationRuntimeVerified': False,
-              'validation': ['application-architecture', 'bundled-sdk-architecture', 'codesign-verification'],
+              'validation': ['application-architecture', 'bundled-sdk-architecture', 'codesign-verification', 'archive-codesign-verification', 'archive-sdk-resource-links'],
           }
           Path('dist/app/provenance.json').write_text(json.dumps(evidence, indent=2) + '\n')
           PY

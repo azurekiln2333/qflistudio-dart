@@ -33,6 +33,12 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   FLUTTER_ROOT, then native executable/Flutter SDK candidates in PATH.
 - Windows/Linux package the complete SDK under `data/dart-sdk/`. macOS uses
   `Contents/Helpers/dart-sdk/{arm64,x64}` selected by the current ABI.
+  Keep Mach-O files in Helpers and sign them before the application. Store
+  non-Mach-O SDK files under the matching `Contents/Resources/dart-sdk/` tree,
+  with relative symlinks at their original SDK paths. Preserve every SDK file
+  and relative lookup; do not discard snapshots or sign data through xattrs.
+  Apple TN2206 treats files in Helpers as nested code. Data there can make the
+  outer signature fail even when every Mach-O file was signed correctly.
 - Run validates canonical project/entry containment, executes the SDK, captures
   stdout and stderr independently, preserves native exit codes and uses 130 for
   cancelled runs. Never switch to a portable interpreter after an Android/desktop SDK failure.
@@ -147,6 +153,8 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
 | Native Kernel compile fails | StateError; no successful artifact |
 | SDK missing core library or VM | Packaging fails |
 | macOS SDK of wrong architecture | Architecture check fails |
+| macOS SDK data stored as loose files under Helpers | Outer application signing can reject unsigned nested code |
+| macOS SDK resource link is broken or escapes the application | Packaging validation fails |
 | Android SDK layout/probe fails | Report platform/format/native error; no fallback |
 | Android unsupported ABI or incomplete image | Build fails with staging instructions |
 | SDK download missing or package size/SHA256 differs | Preparation fails; no uploaded SDK artifact |
@@ -182,6 +190,9 @@ tests do not replace these checks and are unnecessary for CI-only changes.
 For standard Flutter compatibility changes, run `tool/ci/test_prepare_core.py`
 and the startup tests. Linux CI runs full application analysis and host tests.
 Check macOS application and bundled-SDK architectures and verify codesigning.
+Check SDK resource symlinks and verify the application again after extracting
+the uploaded inner tar archive. Archive validation must not depend on extended
+attributes carrying signatures for non-Mach-O data.
 Check the iOS executable, App.framework and Flutter.framework architectures.
 `bash -n` on Windows checks grammar only. Apple command behavior and Bash 3.2
 runtime compatibility require the real Apple workflow; a Git Bash pass is not
@@ -224,6 +235,11 @@ and intermediate `app.buildMode == "release"` independently of signature checks.
 Wrong: assume an upstream Actions ZIP directly contains `.deb` files.
 Correct: follow the pinned Termux workflow's ZIP -> TAR -> exact package member
 layout, then verify the existing package size and SHA256 before archiving.
+
+Wrong: put SDK snapshots and libraries in Helpers and sign only the Mach-O files.
+Correct: keep SDK data in Resources and preserve the SDK lookup paths with
+relative symlinks. Apple TN2206's Nested Code and FAQ sections describe this
+layout: https://developer.apple.com/library/archive/technotes/tn2206/_index.html.
 
 Wrong: `return artifact.readAsBytes();` in a try whose finally deletes its parent.
 Correct: `return await artifact.readAsBytes();` so cleanup occurs after the read.
