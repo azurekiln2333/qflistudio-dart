@@ -20,7 +20,7 @@ for arch in ${ARCHS:-$(uname -m)}; do
     printf 'Provide the complete %s SDK using QFLI_DART_SDK_ARM64 or QFLI_DART_SDK_X64\n' "$arch" >&2
     exit 1
   fi
-  lipo -verify_arch "$arch" "$source/bin/dart"
+  lipo "$source/bin/dart" -verify_arch "$arch"
   mkdir -p "$destination/$target"
   ditto "$source" "$destination/$target"
   while IFS= read -r -d '' file; do
