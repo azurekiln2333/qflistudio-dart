@@ -138,24 +138,7 @@ jobs:
           tar -xzf "dist/app/QFLIDartWing-macos-$ARCH.tar.gz" -C "$archive_check"
           restored_app="$archive_check/$(basename "$app")"
           codesign --verify --deep --strict --verbose=2 "$restored_app"
-          python3 - "$restored_app" "$ARCH" <<'PY'
-          import os, sys
-          from pathlib import Path
-          app = Path(sys.argv[1]).resolve()
-          sdk = app / 'Contents/Helpers/dart-sdk' / sys.argv[2]
-          resources = app / 'Contents/Resources/dart-sdk' / sys.argv[2]
-          links = [path for root in (sdk, resources) for path in root.rglob('*') if path.is_symlink()]
-          if not links:
-              raise SystemExit('The restored SDK has no resource links')
-          for link in links:
-              if os.path.isabs(os.readlink(link)) or not link.resolve(strict=True).is_relative_to(app):
-                  raise SystemExit(f'SDK link escapes the restored application: {link}')
-          for relative in ['LICENSE', 'lib/core/core.dart', 'bin/snapshots/analysis_server.dart.snapshot']:
-              entry = sdk / relative
-              if not entry.is_file() or entry.resolve() != (resources / relative).resolve():
-                  raise SystemExit(f'SDK resource lookup failed after extraction: {relative}')
-          print(f'Validated {len(links)} SDK links in the restored application')
-          PY
+          python3 tool/ci/package_installer.py check-macos-sdk-links --app "$restored_app" --arch "$ARCH"
           (cd dist/app && shasum -a 256 "QFLIDartWing-macos-$ARCH.tar.gz" > SHA256SUMS)
           printf 'Ad hoc signed test application. Not notarized or signed for App Store distribution.\n' > dist/app/SIGNING.txt
           cp "$RUNNER_TEMP/flutter-version.json" dist/app/flutter-version.json
@@ -183,16 +166,28 @@ jobs:
           path: qfli_dart/dist/app/
           if-no-files-found: error
           retention-days: 30
+      - name: Build and verify the macOS disk image
+        run: python3 tool/ci/package_installer.py macos --app build/macos/Build/Products/Release/QFLIDartWing.app --arch "$ARCH" --output dist/installer
+      - name: Upload the macOS disk image
+        id: installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-macos-${{ matrix.arch }}
+          path: qfli_dart/dist/installer/
+          if-no-files-found: error
+          retention-days: 30
       - name: Summarize macOS downloads
         if: always()
         env:
           NATIVE_URL: ${{ steps.native.outputs.artifact-url }}
           APP_URL: ${{ steps.app.outputs.artifact-url }}
+          INSTALLER_URL: ${{ steps.installer.outputs.artifact-url }}
         run: |
           {
             printf '## macOS %s\n\n' "$ARCH"
             if [ -n "$NATIVE_URL" ]; then printf '[Standalone native Dart SDK](%s)\n\n' "$NATIVE_URL"; fi
             if [ -n "$APP_URL" ]; then printf '[Application bundle](%s)\n\n' "$APP_URL"; fi
+            if [ -n "$INSTALLER_URL" ]; then printf '[Disk image](%s)\n\n' "$INSTALLER_URL"; fi
             printf 'Artifacts are retained for 30 days. Extract the inner tar.gz to preserve executable permissions and symlinks.\n\n'
             printf 'The application uses ad hoc signing. It is not notarized or App Store signed. SDK smoke execution does not prove application sandbox execution.\n'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -289,16 +284,28 @@ jobs:
           path: qfli_dart/dist/native/
           if-no-files-found: error
           retention-days: 30
+      - name: Build and verify the unsigned IPA
+        run: python3 tool/ci/package_installer.py ios --archive build/ios/archive/Runner.xcarchive --output dist/installer
+      - name: Upload the unsigned IPA
+        id: installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-ios-arm64-unsigned
+          path: qfli_dart/dist/installer/
+          if-no-files-found: error
+          retention-days: 30
       - name: Summarize iOS downloads
         if: always()
         env:
           NATIVE_URL: ${{ steps.native.outputs.artifact-url }}
           APP_URL: ${{ steps.app.outputs.artifact-url }}
+          INSTALLER_URL: ${{ steps.installer.outputs.artifact-url }}
         run: |
           {
             printf '## iOS ARM64\n\n'
             if [ -n "$APP_URL" ]; then printf '[Unsigned Xcode archive](%s)\n\n' "$APP_URL"; fi
+            if [ -n "$INSTALLER_URL" ]; then printf '[Unsigned IPA](%s)\n\n' "$INSTALLER_URL"; fi
             if [ -n "$NATIVE_URL" ]; then printf '[Native framework bundles](%s)\n\n' "$NATIVE_URL"; fi
-            printf 'Artifacts are retained for 30 days. The archive requires Apple signing before device installation and is not an installable IPA.\n\n'
+            printf 'Artifacts are retained for 30 days. The archive and the IPA are unsigned. Both require Apple signing before device installation.\n\n'
             printf 'The frameworks are the Flutter engine and matching application AOT code. This project does not provide a standalone iOS Dart VM SDK. No device runtime test ran in this job.\n'
           } >> "$GITHUB_STEP_SUMMARY"

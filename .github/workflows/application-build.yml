@@ -159,8 +159,27 @@ jobs:
           path: qfli_dart/dist/app/
           if-no-files-found: error
           retention-days: 30
+      - name: Build and verify the installer package
+        if: matrix.platform != 'android'
+        run: python tool/ci/package_installer.py "$CI_PLATFORM" --name "$CI_NAME" --output dist/installer
+      - name: Upload the installer package
+        id: installer
+        if: matrix.platform != 'android'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-${{ matrix.name }}
+          path: qfli_dart/dist/installer/
+          if-no-files-found: error
+          retention-days: 30
       - name: Write download summary
+        if: ${{ !cancelled() }}
         env:
           ARTIFACT_URL: ${{ steps.app.outputs.artifact-url }}
+          INSTALLER_URL: ${{ steps.installer.outputs.artifact-url }}
         run: |
-          printf '### %s\n\n[Download application](%s)\n\nArtifacts are retained for 30 days. See provenance.json for signing and validation scope.\n' "$CI_NAME" "$ARTIFACT_URL" >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf '### %s\n\n' "$CI_NAME"
+            if [ -n "$ARTIFACT_URL" ]; then printf '[Download application](%s)\n\n' "$ARTIFACT_URL"; fi
+            if [ -n "$INSTALLER_URL" ]; then printf '[Download installer package](%s)\n\n' "$INSTALLER_URL"; fi
+            printf 'Artifacts are retained for 30 days. See provenance.json for signing and validation scope.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
