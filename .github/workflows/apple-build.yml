@@ -96,6 +96,32 @@ jobs:
           set -euo pipefail
           python3 tool/ci/prepare_core.py --core ../qfli_studio_core --flutter ../flutter
           flutter pub get
+      - name: Verify SDK signing in a minimal application bundle
+        run: |
+          set -euo pipefail
+          signing_check="$(mktemp -d "$RUNNER_TEMP/qfli-sdk-signing.XXXXXX")"
+          probe_app="$signing_check/DartSdkSigningProbe.app"
+          mkdir -p "$probe_app/Contents/MacOS"
+          printf 'int main(void) { return 0; }\n' > "$signing_check/main.c"
+          xcrun clang -arch "$FLUTTER_XCODE_ARCHS" "$signing_check/main.c" -o "$probe_app/Contents/MacOS/DartSdkSigningProbe"
+          python3 - "$probe_app/Contents/Info.plist" <<'PY'
+          import plistlib, sys
+          from pathlib import Path
+          Path(sys.argv[1]).write_bytes(plistlib.dumps({
+              'CFBundleExecutable': 'DartSdkSigningProbe',
+              'CFBundleIdentifier': 'com.azurekiln.qfli.dart.sdk-signing-probe',
+              'CFBundleName': 'DartSdkSigningProbe',
+              'CFBundlePackageType': 'APPL',
+              'CFBundleVersion': '1',
+          }))
+          PY
+          TARGET_BUILD_DIR="$signing_check" \
+            CONTENTS_FOLDER_PATH=DartSdkSigningProbe.app/Contents \
+            ARCHS="$FLUTTER_XCODE_ARCHS" EXPANDED_CODE_SIGN_IDENTITY=- \
+            bash native/dart-sdk/bundle_macos.sh
+          codesign --force --sign - "$probe_app/Contents/MacOS/DartSdkSigningProbe"
+          codesign --force --sign - "$probe_app"
+          codesign --verify --deep --strict --verbose=2 "$probe_app"
       - name: Build the macOS application with ad hoc signing
         run: flutter build macos --release --no-pub
       - name: Verify and package the macOS application
@@ -113,16 +139,16 @@ jobs:
           restored_app="$archive_check/$(basename "$app")"
           codesign --verify --deep --strict --verbose=2 "$restored_app"
           python3 - "$restored_app" "$ARCH" <<'PY'
-          import sys
+          import os, sys
           from pathlib import Path
           app = Path(sys.argv[1]).resolve()
           sdk = app / 'Contents/Helpers/dart-sdk' / sys.argv[2]
           resources = app / 'Contents/Resources/dart-sdk' / sys.argv[2]
-          links = [path for path in sdk.rglob('*') if path.is_symlink()]
+          links = [path for root in (sdk, resources) for path in root.rglob('*') if path.is_symlink()]
           if not links:
               raise SystemExit('The restored SDK has no resource links')
           for link in links:
-              if not link.resolve(strict=True).is_relative_to(app):
+              if os.path.isabs(os.readlink(link)) or not link.resolve(strict=True).is_relative_to(app):
                   raise SystemExit(f'SDK link escapes the restored application: {link}')
           for relative in ['LICENSE', 'lib/core/core.dart', 'bin/snapshots/analysis_server.dart.snapshot']:
               entry = sdk / relative

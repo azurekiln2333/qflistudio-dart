@@ -37,6 +37,9 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   non-Mach-O SDK files under the matching `Contents/Resources/dart-sdk/` tree,
   with relative symlinks at their original SDK paths. Preserve every SDK file
   and relative lookup; do not discard snapshots or sign data through xattrs.
+  Move entire pure-data directories, not just their files. Only Mach-O files
+  and their ancestor directories may remain as real entries in Helpers; a data
+  directory containing a period can otherwise be interpreted as a code bundle.
   Apple TN2206 treats files in Helpers as nested code. Data there can make the
   outer signature fail even when every Mach-O file was signed correctly.
 - Run validates canonical project/entry containment, executes the SDK, captures
@@ -190,9 +193,16 @@ tests do not replace these checks and are unnecessary for CI-only changes.
 For standard Flutter compatibility changes, run `tool/ci/test_prepare_core.py`
 and the startup tests. Linux CI runs full application analysis and host tests.
 Check macOS application and bundled-SDK architectures and verify codesigning.
+Before the full Flutter build, embed the same SDK using the same script in a
+temporary minimal .app and sign its Mach-O main executable, then its outer
+bundle. Verify with `codesign --verify --deep --strict`; never use deep signing
+to hide missing nested signatures. This is a packaging preflight only.
 Check SDK resource symlinks and verify the application again after extracting
 the uploaded inner tar archive. Archive validation must not depend on extended
 attributes carrying signatures for non-Mach-O data.
+Inspect links in both the Helpers SDK and Resources mirror, because directory
+symlinks are not traversed by `Path.rglob`. All links must be relative, resolve
+successfully and remain inside the application.
 Check the iOS executable, App.framework and Flutter.framework architectures.
 `bash -n` on Windows checks grammar only. Apple command behavior and Bash 3.2
 runtime compatibility require the real Apple workflow; a Git Bash pass is not

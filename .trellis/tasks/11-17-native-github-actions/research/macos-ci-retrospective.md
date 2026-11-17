@@ -21,6 +21,11 @@
 4. Run 43945574938 reached outer signing, then rejected the unsigned
    `analysis_server.dart.snapshot` under Helpers. The next fix separates SDK
    code and resources, preserving SDK-relative lookup through symbolic links.
+5. Commit 9fb8164 moved files but left pure-data directories in Helpers.
+   Run 43950204148 rejected the dotted DevTools directory
+   `bin/resources/devtools/assets/packages/perfetto_ui_compiled/dist/v34.0-16f63abe3`
+   as an invalid code bundle. The complete fix must relocate entire pure-data
+   directories, leaving only Mach-O files and their ancestor directories.
 
 `bash -n` passed because these were runtime semantics and Apple command errors,
 not Bash grammar errors. The new real Apple run remains the acceptance gate.
@@ -32,6 +37,7 @@ not Bash grammar errors. The new real Apple run remains the acceptance gate.
 | P0 | Complete call-site review | Search workflows and packaging scripts for lipo calls | Done |
 | P0 | Script structure | Keep the signing argument array nonempty | Done |
 | P0 | Bundle layout | Put non-Mach-O data in Resources and link its original SDK paths | In progress |
+| P0 | Early platform gate | Sign a minimal .app with the same SDK bundling script before Flutter compilation | In progress |
 | P0 | Platform validation | Run the actual macOS build and codesign verification | In progress |
 | P1 | Executable spec | Record argument order and Bash 3.2 constraints | Done |
 
