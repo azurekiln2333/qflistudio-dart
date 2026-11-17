@@ -28,7 +28,8 @@
    directories, leaving only Mach-O files and their ancestor directories.
 
 `bash -n` passed because these were runtime semantics and Apple command errors,
-not Bash grammar errors. The new real Apple run remains the acceptance gate.
+not Bash grammar errors. Run 43999548702 passed the actual Apple acceptance
+gate for both architectures at commit a08421d.
 
 ## 3. Prevention mechanisms
 
@@ -36,9 +37,9 @@ not Bash grammar errors. The new real Apple run remains the acceptance gate.
 | --- | --- | --- | --- |
 | P0 | Complete call-site review | Search workflows and packaging scripts for lipo calls | Done |
 | P0 | Script structure | Keep the signing argument array nonempty | Done |
-| P0 | Bundle layout | Put non-Mach-O data in Resources and link its original SDK paths | In progress |
-| P0 | Early platform gate | Sign a minimal .app with the same SDK bundling script before Flutter compilation | In progress |
-| P0 | Platform validation | Run the actual macOS build and codesign verification | In progress |
+| P0 | Bundle layout | Put non-Mach-O data in Resources and link its original SDK paths | Done |
+| P0 | Early platform gate | Sign a minimal .app with the same SDK bundling script before Flutter compilation | Done |
+| P0 | Platform validation | Run the actual macOS build and codesign verification | Done |
 | P1 | Executable spec | Record argument order and Bash 3.2 constraints | Done |
 
 ## 4. Systematic expansion
@@ -61,6 +62,14 @@ Keep the executable files and their entitlements in Helpers. Preserve the full
 SDK data under a Resources mirror. Verify links and codesigning after extracting
 the inner tar archive as well as before packaging. Actual macOS CI remains the
 acceptance gate; host syntax checks cannot establish Apple signing behavior.
+
+## 7. Final platform result
+
+Run 43999548702 succeeded for macOS ARM64, macOS x64 and iOS ARM64. The two
+macOS jobs passed preflight signing and full .app signing. Both extracted
+application archives passed strict codesign verification and SDK-link checks.
+This verifies packaging and archive integrity, not installed application
+execution, inherited-sandbox SDK operation, notarization or store signing.
 
 ## 5. Knowledge capture
 

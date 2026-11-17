@@ -209,7 +209,9 @@ tool/ohos/verify_dart_hap.ps1 -HapPath <hap>
 
 ## Pending evidence
 
-Original OHOS packaging and device acceptance remain open.
+GitHub has built unsigned OHOS HAP and APP packages.
+Both package types passed structural inspection.
+OHOS release signing and device acceptance remain open.
 Promotion of the 180 drafts remains open.
 Full verification of all 300 content pairs remains open.
 The final shared-core revision still needs review.

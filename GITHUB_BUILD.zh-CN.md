@@ -7,6 +7,8 @@
 ## 构建状态
 
 以下记录来自 2026 年 11 月 17 日的试构建。
+六个平台均已完成。
+八种平台与架构组合共导出 16 份产物。
 
 | 平台 | 原生依赖 | 完整应用 | 状态 |
 | --- | --- | --- | --- |
@@ -14,16 +16,16 @@
 | Android x86_64 | [native-android-x86_64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43922631253/artifacts/14253868977) | [app-android-x86_64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14262206372) | 两项成功 |
 | Windows x64 | [native-windows-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14261461227) | [app-windows-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14261441637) | 两项成功 |
 | Linux x64 | [native-linux-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14260781767) | [app-linux-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780/artifacts/14262651489) | 两项成功 |
-| macOS ARM64 | `native-macos-arm64` | `app-macos-arm64` | 构建中 |
-| macOS x64 | [native-macos-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/artifacts/14264831464) | `app-macos-x64` | SDK 成功，应用重新构建中 |
-| iOS ARM64 | [native-ios-arm64-frameworks](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/artifacts/14264106077) | [app-ios-arm64-unsigned-xcarchive](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490/artifacts/14264670782) | 两项成功 |
+| macOS ARM64 | [native-macos-arm64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/artifacts/14291671596) | [app-macos-arm64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/artifacts/14290809979) | 两项成功 |
+| macOS x64 | [native-macos-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/artifacts/14291557777) | [app-macos-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/artifacts/14291443933) | 两项成功 |
+| iOS ARM64 | [native-ios-arm64-frameworks](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/artifacts/14291273590) | [app-ios-arm64-unsigned-xcarchive](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/artifacts/14291881728) | 两项成功 |
 | OHOS ARM64 | [native-ohos-arm64-libraries](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540/artifacts/14263248969) | [app-ohos-arm64-unsigned](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540/artifacts/14264177854) | 两项成功 |
 
 构建与下载入口：
 
 - [Android 原生 SDK](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43922631253)
 - [Android、Windows、Linux 应用](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43937445780)
-- [iOS 归档与 Apple 构建](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43940734490)
+- [macOS 与 iOS 构建](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702)
 - [OHOS 构建](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43943142540)
 
 ## 下载方法
@@ -67,6 +69,9 @@ Linux CI 的静态分析通过。
 标准 Flutter 跳过 3 个 OHOS 专用测试。
 桌面 SDK 通过 Kernel 编译和文件读写验证。
 验证时先删除源码，再运行 Kernel 文件。
+两种 macOS 架构均通过应用签名校验。
+归档解压后也通过签名和 SDK 链接校验。
+应用沙盒内的 SDK 运行仍待验证。
 
 ## 工作流
 

@@ -9,8 +9,9 @@ The GitHub REST API reports success for these exact commits:
 | 43922631253 | ac8dadd3d66a5cf85486b3e22bc6f747563f8b89 | Android arm64-v8a and x86_64 SDK staging |
 | 43937445780 | 11eba01af51446554aab21a09958b65d803b84a2 | Android ARM64/x64 apps, Windows x64 app/SDK, Linux x64 app/SDK |
 | 43943142540 | 2f9243a78bd22d549518de7d4c03953a28c52ccb | OHOS ARM64 unsigned HAP/APP and extracted native libraries |
+| 43999548702 | a08421d | macOS ARM64/x64 SDKs and applications, unsigned iOS archive and native frameworks |
 
-`github-run-evidence.json` records job outcomes and thirteen downloadable artifacts.
+`github-run-evidence.json` records job outcomes and downloadable artifact metadata.
 Each artifact record includes its ID, byte count, GitHub SHA-256 digest, creation
 time and expiry. The metadata was read from the public GitHub REST API. This
 review downloaded and independently checked both OHOS artifact archives. It did
@@ -21,7 +22,62 @@ Apple run 43940734490 was cancelled after its iOS job succeeded and its macOS
 x64 app failed in the signing script. Its three uploaded artifacts remain
 available: the iOS archive, iOS frameworks and standalone macOS x64 SDK.
 The whole Apple run is not marked successful. Commit 7776c35 fixes the Bash 3.2
-signing-array failure; replacement Apple run 43945574938 is pending.
+signing-array failure. Run 43945574938 then completed iOS and both standalone
+macOS SDKs, but both macOS apps failed outer signing on SDK data in Helpers.
+Commit 9fb8164 moves non-Mach-O data into Resources and preserves original SDK
+paths with relative links. Run 43950204148 then rejected a dotted pure-data
+directory still left in Helpers. Commit a08421d relocates the highest pure-data
+directories, rebases original links and validates both trees. It adds a real
+minimal .app signing preflight before the full application build. Run 43999548702
+is the acceptance attempt for the complete layout fix.
+It completed successfully. Both macOS architectures passed the minimal bundle
+signing preflight, full application compilation and signing, architecture
+checks, tar extraction, repeated strict codesign verification and SDK resource
+link validation. iOS also completed with its unsigned archive and frameworks.
+The four recommended runs now provide sixteen artifacts. Prior failed or
+cancelled Apple runs remain in the JSON only as historical evidence.
+
+## Final scope review
+
+The independent final reviewer checked the complete task changes, platform
+contracts, artifact layouts, license notices and documented evidence boundaries.
+At commit 9fb8164, changes since the successful Android/Windows/Linux app run
+are limited to Apple/OHOS build support and documentation. The application code,
+standard-platform compatibility helper and those platforms' build definitions
+remain unchanged. Since the OHOS success, only Apple support and documentation
+changed. The Android native staging scripts and workflow are unchanged from
+their successful run. Earlier successful artifacts therefore still represent
+the final code affecting their respective platforms; their provenance retains
+the actual source commits rather than claiming the latest branch commit.
+The final review matched all sixteen download URLs and artifact names exactly
+against the four recommended successful runs. Every recommended job succeeded
+and every artifact was unexpired. All eight platform/architecture rows show
+completion. Chinese lint reported zero hard violations, and the final diff
+passed whitespace checks. No further implementation or documentation blocker
+remained before task archival.
+All thirteen links present before the final Apple attempt matched the recorded
+artifact IDs. No additional implementation blocker was found. Three READMEs
+still listed OHOS packaging as pending; they now distinguish completed unsigned
+HAP/APP packaging from unverified signing and device acceptance.
+
+The resource-layout fix passed independent YAML, embedded Python and shell
+syntax checks. A fixture used actual files and symbolic links, with a stubbed
+file classifier, to verify complete resource relocation and unchanged Mach-O
+paths. A second helper run moved zero files and retained readable SDK paths.
+The fixture rejects absolute links and links outside the application. These
+checks do not claim macOS ditto or Apple signing behavior on Windows.
+The directory fix also passed fixtures for dotted pure-data directories, mixed
+Mach-O/data directories, paths with spaces, links from Resources to code in
+Helpers, directory aliases and repeated packaging after source additions and
+deletions. Both output paths are validated before rebuilding their generated
+architecture directories, including rejection of symlink roots and any overlap
+with the source SDK. The complete source SDK remains read-only.
+
+The new workflow validates the unpacked application with strict codesign
+verification. It also verifies SDK links and required resource paths after tar
+extraction. The signed embedded helpers have sandbox-inheritance entitlements;
+the workflow does not mistake direct execution from an unsandboxed CI shell
+for application sandbox runtime verification.
 
 ## OHOS completed build and artifacts
 

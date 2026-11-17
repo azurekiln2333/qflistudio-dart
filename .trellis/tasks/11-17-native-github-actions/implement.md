@@ -5,10 +5,10 @@
 - [x] Run Android native staging for both ABIs on GitHub.
 - [x] Add standard-Flutter compatibility for disposable CI core checkout.
 - [x] Run Windows/Linux/Android complete app builds and desktop SDK exports.
-- [ ] Run macOS/iOS app builds and native dependency exports.
+- [x] Run macOS/iOS app builds and native dependency exports.
 - [x] Establish an OHOS hosted toolchain and build HAP/APP plus native libraries.
-- [ ] Review actual job results, artifact manifests and platform limitations.
-- [ ] Record download URLs, cleanup guidance and executable specs.
+- [x] Review actual job results, artifact manifests and platform limitations.
+- [x] Record download URLs, cleanup guidance and executable specs.
 - [x] Align the GPL v3.0 notices with the main project and push commit d781661.
 
 Validate YAML/Python/shell syntax before pushing. Run app analysis/tests after

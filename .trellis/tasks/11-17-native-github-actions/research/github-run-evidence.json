@@ -1,7 +1,7 @@
 {
-  "retrievedAtUtc": "2026-11-16T20:10:12.399133+00:00",
+  "retrievedAtUtc": "2026-11-17T02:09:45.103956+00:00",
   "source": "GitHub REST API; no log or credential content",
-  "scope": "Successful Android native, Android/Windows/Linux application and OHOS application/native-library runs. Apple remains a dated observation only.",
+  "scope": "Successful Android, Windows, Linux, macOS, iOS and OHOS native/application runs, with dated prior Apple attempts retained as failure evidence.",
   "runs": [
     {
       "id": 43922631253,
@@ -473,6 +473,644 @@
           "sdkApiVersion": 26
         }
       }
+    },
+    {
+      "id": 43945574938,
+      "name": "Apple applications and native dependencies",
+      "status": "completed",
+      "conclusion": "failure",
+      "head_sha": "7776c35091eab128183779c3907c3e8137c82b4a",
+      "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43945574938",
+      "created_at": "2026-11-16T20:02:20Z",
+      "updated_at": "2026-11-16T20:23:30Z",
+      "observedAtUtc": "2026-11-16T20:30:28.557322+00:00",
+      "successClaimed": false,
+      "jobs": [
+        {
+          "id": 133574206405,
+          "name": "macOS arm64 SDK and application",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-16T20:14:18Z",
+          "completed_at": "2026-11-16T20:21:17Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43945574938/job/133574206405"
+        },
+        {
+          "id": 133574206739,
+          "name": "macOS x64 SDK and application",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-16T20:13:31Z",
+          "completed_at": "2026-11-16T20:23:30Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43945574938/job/133574206739"
+        },
+        {
+          "id": 133574207007,
+          "name": "iOS ARM64 unsigned archive and native frameworks",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-16T20:15:40Z",
+          "completed_at": "2026-11-16T20:21:30Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43945574938/job/133574207007"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14266985626,
+          "name": "native-ios-arm64-frameworks",
+          "size_in_bytes": 13638832,
+          "digest": "sha256:261ed68b3a7934f11319f97c1a470527149ed174f979814cab3910d6cd35bf5c",
+          "expired": false,
+          "created_at": "2026-11-16T20:21:26Z",
+          "expires_at": "2026-12-16T20:21:24Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14266985626/zip"
+        },
+        {
+          "id": 14266895361,
+          "name": "native-macos-x64",
+          "size_in_bytes": 211393048,
+          "digest": "sha256:b45ae1973ccff89c863b11ecfd400152872152a70160530eb6be76d21328d07e",
+          "expired": false,
+          "created_at": "2026-11-16T20:18:49Z",
+          "expires_at": "2026-12-16T20:18:34Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14266895361/zip"
+        },
+        {
+          "id": 14266365943,
+          "name": "app-ios-arm64-unsigned-xcarchive",
+          "size_in_bytes": 51004109,
+          "digest": "sha256:5504433a98966437a5c166356811861510d1367898ebc93a258de4ae63905be7",
+          "expired": false,
+          "created_at": "2026-11-16T20:21:24Z",
+          "expires_at": "2026-12-16T20:21:21Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14266365943/zip"
+        },
+        {
+          "id": 14266210741,
+          "name": "native-macos-arm64",
+          "size_in_bytes": 210474256,
+          "digest": "sha256:229ff332eb4eae5ab4aaa8fa2dc6613d5ef33aee560e0d1252beab028acc8e53",
+          "expired": false,
+          "created_at": "2026-11-16T20:16:27Z",
+          "expires_at": "2026-12-16T20:16:16Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14266210741/zip"
+        }
+      ],
+      "note": "iOS and both standalone macOS SDKs succeeded. macOS apps failed because loose SDK data in Helpers was treated as unsigned nested code. Commit 9fb8164 separates resources and adds post-extraction validation."
+    },
+    {
+      "id": 43950204148,
+      "name": "Apple applications and native dependencies",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "head_sha": "9fb81649587633e5e55ca216ef78efdd95fdba8f",
+      "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43950204148",
+      "created_at": "2026-11-16T20:28:52Z",
+      "updated_at": "2026-11-16T21:03:03Z",
+      "observedAtUtc": "2026-11-17T01:54:57.395946+00:00",
+      "successClaimed": false,
+      "jobs": [
+        {
+          "id": 133590358982,
+          "name": "macOS x64 SDK and application",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-16T20:44:58Z",
+          "completed_at": "2026-11-16T20:58:55Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43950204148/job/133590358982"
+        },
+        {
+          "id": 133590359499,
+          "name": "iOS ARM64 unsigned archive and native frameworks",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "started_at": "2026-11-16T20:58:59Z",
+          "completed_at": "2026-11-16T21:03:03Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43950204148/job/133590359499"
+        },
+        {
+          "id": 133590359588,
+          "name": "macOS arm64 SDK and application",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "started_at": "2026-11-16T20:28:52Z",
+          "completed_at": "2026-11-16T21:02:42Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43950204148/job/133590359588"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14272235444,
+          "name": "native-macos-x64",
+          "size_in_bytes": 211393076,
+          "digest": "sha256:2cca2f162b2ccf768e3b72ae151288be70dab83d8e83fd363a604bedd5adf999",
+          "expired": false,
+          "created_at": "2026-11-16T20:51:35Z",
+          "expires_at": "2026-12-16T20:51:19Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14272235444/zip"
+        }
+      ],
+      "note": "macOS x64 rejected a dotted pure-data SDK directory left in Helpers after files were moved to Resources. Cancelled remaining jobs before a complete directory-relocation fix; native x64 artifact retained."
+    },
+    {
+      "id": 43999548702,
+      "name": "Apple applications and native dependencies",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "a08421daf565d7af59aeebd88caba6f3d0e53c44",
+      "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702",
+      "created_at": "2026-11-17T01:58:36Z",
+      "updated_at": "2026-11-17T02:07:17Z",
+      "observedAtUtc": "2026-11-17T02:09:45.103956+00:00",
+      "jobs": [
+        {
+          "id": 133759901436,
+          "name": "macOS x64 SDK and application",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-17T01:58:40Z",
+          "completed_at": "2026-11-17T02:07:16Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/job/133759901436",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-17T01:58:40Z",
+              "completed_at": "2026-11-17T01:58:41Z"
+            },
+            {
+              "name": "Check out application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-17T01:58:41Z",
+              "completed_at": "2026-11-17T01:58:44Z"
+            },
+            {
+              "name": "Check out pinned shared core",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-17T01:58:44Z",
+              "completed_at": "2026-11-17T01:58:48Z"
+            },
+            {
+              "name": "Check out Flutter 3.41.9",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-17T01:58:48Z",
+              "completed_at": "2026-11-17T01:59:06Z"
+            },
+            {
+              "name": "Initialize the native Flutter toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-17T01:59:06Z",
+              "completed_at": "2026-11-17T02:00:45Z"
+            },
+            {
+              "name": "Verify and archive the standalone native Dart SDK",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-17T02:00:45Z",
+              "completed_at": "2026-11-17T02:02:22Z"
+            },
+            {
+              "name": "Upload standalone native SDK",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-17T02:02:22Z",
+              "completed_at": "2026-11-17T02:02:34Z"
+            },
+            {
+              "name": "Resolve application dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8,
+              "started_at": "2026-11-17T02:02:34Z",
+              "completed_at": "2026-11-17T02:02:43Z"
+            },
+            {
+              "name": "Verify SDK signing in a minimal application bundle",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9,
+              "started_at": "2026-11-17T02:02:43Z",
+              "completed_at": "2026-11-17T02:03:07Z"
+            },
+            {
+              "name": "Build the macOS application with ad hoc signing",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-17T02:03:07Z",
+              "completed_at": "2026-11-17T02:06:16Z"
+            },
+            {
+              "name": "Verify and package the macOS application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11,
+              "started_at": "2026-11-17T02:06:16Z",
+              "completed_at": "2026-11-17T02:06:58Z"
+            },
+            {
+              "name": "Upload macOS application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12,
+              "started_at": "2026-11-17T02:06:58Z",
+              "completed_at": "2026-11-17T02:07:11Z"
+            },
+            {
+              "name": "Summarize macOS downloads",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13,
+              "started_at": "2026-11-17T02:07:11Z",
+              "completed_at": "2026-11-17T02:07:11Z"
+            },
+            {
+              "name": "Post Check out Flutter 3.41.9",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 24,
+              "started_at": "2026-11-17T02:07:11Z",
+              "completed_at": "2026-11-17T02:07:12Z"
+            },
+            {
+              "name": "Post Check out pinned shared core",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 25,
+              "started_at": "2026-11-17T02:07:12Z",
+              "completed_at": "2026-11-17T02:07:13Z"
+            },
+            {
+              "name": "Post Check out application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26,
+              "started_at": "2026-11-17T02:07:13Z",
+              "completed_at": "2026-11-17T02:07:13Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27,
+              "started_at": "2026-11-17T02:07:13Z",
+              "completed_at": "2026-11-17T02:07:14Z"
+            }
+          ]
+        },
+        {
+          "id": 133759901614,
+          "name": "iOS ARM64 unsigned archive and native frameworks",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-17T01:58:40Z",
+          "completed_at": "2026-11-17T02:04:02Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/job/133759901614",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-17T01:58:40Z",
+              "completed_at": "2026-11-17T01:58:41Z"
+            },
+            {
+              "name": "Check out application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-17T01:58:41Z",
+              "completed_at": "2026-11-17T01:58:43Z"
+            },
+            {
+              "name": "Check out pinned shared core",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-17T01:58:43Z",
+              "completed_at": "2026-11-17T01:58:46Z"
+            },
+            {
+              "name": "Check out Flutter 3.41.9",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-17T01:58:46Z",
+              "completed_at": "2026-11-17T01:58:55Z"
+            },
+            {
+              "name": "Initialize Flutter and resolve dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-17T01:58:55Z",
+              "completed_at": "2026-11-17T02:00:07Z"
+            },
+            {
+              "name": "Build unsigned iOS device archive",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-17T02:00:07Z",
+              "completed_at": "2026-11-17T02:03:36Z"
+            },
+            {
+              "name": "Package the archive and native framework bundles",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-17T02:03:36Z",
+              "completed_at": "2026-11-17T02:03:49Z"
+            },
+            {
+              "name": "Upload unsigned iOS archive",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8,
+              "started_at": "2026-11-17T02:03:49Z",
+              "completed_at": "2026-11-17T02:03:53Z"
+            },
+            {
+              "name": "Upload iOS native frameworks",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9,
+              "started_at": "2026-11-17T02:03:53Z",
+              "completed_at": "2026-11-17T02:03:56Z"
+            },
+            {
+              "name": "Summarize iOS downloads",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-17T02:03:56Z",
+              "completed_at": "2026-11-17T02:03:56Z"
+            },
+            {
+              "name": "Post Check out Flutter 3.41.9",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 18,
+              "started_at": "2026-11-17T02:03:56Z",
+              "completed_at": "2026-11-17T02:03:56Z"
+            },
+            {
+              "name": "Post Check out pinned shared core",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-11-17T02:03:56Z",
+              "completed_at": "2026-11-17T02:03:57Z"
+            },
+            {
+              "name": "Post Check out application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20,
+              "started_at": "2026-11-17T02:03:57Z",
+              "completed_at": "2026-11-17T02:03:57Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21,
+              "started_at": "2026-11-17T02:03:57Z",
+              "completed_at": "2026-11-17T02:04:00Z"
+            }
+          ]
+        },
+        {
+          "id": 133759901791,
+          "name": "macOS arm64 SDK and application",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-17T01:58:41Z",
+          "completed_at": "2026-11-17T02:07:07Z",
+          "html_url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/43999548702/job/133759901791",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-11-17T01:58:42Z",
+              "completed_at": "2026-11-17T01:58:44Z"
+            },
+            {
+              "name": "Check out application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-11-17T01:58:44Z",
+              "completed_at": "2026-11-17T01:58:48Z"
+            },
+            {
+              "name": "Check out pinned shared core",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-11-17T01:58:48Z",
+              "completed_at": "2026-11-17T01:58:52Z"
+            },
+            {
+              "name": "Check out Flutter 3.41.9",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-11-17T01:58:52Z",
+              "completed_at": "2026-11-17T01:59:03Z"
+            },
+            {
+              "name": "Initialize the native Flutter toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-11-17T01:59:03Z",
+              "completed_at": "2026-11-17T02:00:19Z"
+            },
+            {
+              "name": "Verify and archive the standalone native Dart SDK",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-11-17T02:00:19Z",
+              "completed_at": "2026-11-17T02:00:53Z"
+            },
+            {
+              "name": "Upload standalone native SDK",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-11-17T02:00:53Z",
+              "completed_at": "2026-11-17T02:01:03Z"
+            },
+            {
+              "name": "Resolve application dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8,
+              "started_at": "2026-11-17T02:01:03Z",
+              "completed_at": "2026-11-17T02:01:09Z"
+            },
+            {
+              "name": "Verify SDK signing in a minimal application bundle",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9,
+              "started_at": "2026-11-17T02:01:09Z",
+              "completed_at": "2026-11-17T02:01:27Z"
+            },
+            {
+              "name": "Build the macOS application with ad hoc signing",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-11-17T02:01:27Z",
+              "completed_at": "2026-11-17T02:06:08Z"
+            },
+            {
+              "name": "Verify and package the macOS application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11,
+              "started_at": "2026-11-17T02:06:08Z",
+              "completed_at": "2026-11-17T02:06:47Z"
+            },
+            {
+              "name": "Upload macOS application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12,
+              "started_at": "2026-11-17T02:06:47Z",
+              "completed_at": "2026-11-17T02:06:59Z"
+            },
+            {
+              "name": "Summarize macOS downloads",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13,
+              "started_at": "2026-11-17T02:06:59Z",
+              "completed_at": "2026-11-17T02:06:59Z"
+            },
+            {
+              "name": "Post Check out Flutter 3.41.9",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 24,
+              "started_at": "2026-11-17T02:06:59Z",
+              "completed_at": "2026-11-17T02:07:00Z"
+            },
+            {
+              "name": "Post Check out pinned shared core",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 25,
+              "started_at": "2026-11-17T02:07:00Z",
+              "completed_at": "2026-11-17T02:07:01Z"
+            },
+            {
+              "name": "Post Check out application",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26,
+              "started_at": "2026-11-17T02:07:01Z",
+              "completed_at": "2026-11-17T02:07:02Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27,
+              "started_at": "2026-11-17T02:07:02Z",
+              "completed_at": "2026-11-17T02:07:05Z"
+            }
+          ]
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14291881728,
+          "name": "app-ios-arm64-unsigned-xcarchive",
+          "size_in_bytes": 51003945,
+          "digest": "sha256:4ba3eacb6cd6ed5981df682ca7292168365ca648578cb47a9abf50e33c815c94",
+          "expired": false,
+          "created_at": "2026-11-17T02:03:53Z",
+          "expires_at": "2026-12-17T02:03:49Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14291881728/zip"
+        },
+        {
+          "id": 14291671596,
+          "name": "native-macos-arm64",
+          "size_in_bytes": 210474442,
+          "digest": "sha256:58d1292f88d382149e2faec612c227564f910047e43f4e851748ca3080c30410",
+          "expired": false,
+          "created_at": "2026-11-17T02:01:03Z",
+          "expires_at": "2026-12-17T02:00:54Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14291671596/zip"
+        },
+        {
+          "id": 14291557777,
+          "name": "native-macos-x64",
+          "size_in_bytes": 211393535,
+          "digest": "sha256:cdf2d7c26d26bc6e088c5bc02a3f13b90f06b9df76bcd694fb7947923ed91ba4",
+          "expired": false,
+          "created_at": "2026-11-17T02:02:34Z",
+          "expires_at": "2026-12-17T02:02:22Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14291557777/zip"
+        },
+        {
+          "id": 14291443933,
+          "name": "app-macos-x64",
+          "size_in_bytes": 227839723,
+          "digest": "sha256:cbaa4ae557c537be85470a1a04e36927cb1fb41f4d2b580b584c00947d2e023d",
+          "expired": false,
+          "created_at": "2026-11-17T02:07:12Z",
+          "expires_at": "2026-12-17T02:07:00Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14291443933/zip"
+        },
+        {
+          "id": 14291273590,
+          "name": "native-ios-arm64-frameworks",
+          "size_in_bytes": 13638714,
+          "digest": "sha256:b0a7ec5c8a81433875c0e07a6db0a38bcc605288fb2e7d96760798ef48110e57",
+          "expired": false,
+          "created_at": "2026-11-17T02:03:56Z",
+          "expires_at": "2026-12-17T02:03:54Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14291273590/zip"
+        },
+        {
+          "id": 14290809979,
+          "name": "app-macos-arm64",
+          "size_in_bytes": 224314999,
+          "digest": "sha256:35216e5e6e79d5936bac6eba7beae016df014cdae09d0c3ed1f756498fee7772",
+          "expired": false,
+          "created_at": "2026-11-17T02:06:59Z",
+          "expires_at": "2026-12-17T02:06:48Z",
+          "archive_download_url": "https://api.github.com/repos/azurekiln2333/qflistudio-dart/actions/artifacts/14290809979/zip"
+        }
+      ],
+      "note": "All Apple jobs succeeded. Both macOS jobs passed minimal bundle signing, full application architecture/signature validation and post-extraction signature/resource-link validation. App sandbox/device execution and notarization were not tested."
     }
-  ]
+  ],
+  "recommendedRunIds": [
+    43922631253,
+    43937445780,
+    43943142540,
+    43999548702
+  ],
+  "recommendedArtifactCount": 16
 }

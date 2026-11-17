@@ -208,7 +208,9 @@ tool/ohos/verify_dart_hap.ps1 -HapPath <hap>
 
 ## 待办证据
 
-原有 OHOS 打包与真机验收仍开放。
+GitHub 已生成未签名 OHOS HAP 和 APP。
+这两类产物已通过包结构检查。
+OHOS 发布签名与真机验收仍待完成。
 180 组草稿的提升仍开放。
 全量 300 组内容验证仍开放。
 共享核心的最终修订仍待评审。
