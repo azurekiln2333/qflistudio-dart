@@ -52,3 +52,44 @@ Three verified Dart Pi sessions completed terminal, curriculum and offline audit
 - Respect Web/Python/SQL Android device queue; install final reduced APK and confirm launch/SDK after release.
 - Restore matching or new DartWing OHOS signing identity; sign current HAP and complete portable execution on device.
 - Configure Android store signing; preserve43/120 portable lesson compatibility labels and77 official-SDK requirements.
+
+
+## Session 2: Cross-platform GitHub builds and GPL alignment
+<!-- trellis-session: v=2 fp=282a19e82ee50948 -->
+
+**Date**: 2026-11-17
+**Task**: Cross-platform GitHub builds and GPL alignment
+**Branch**: `ci/native-android-sdk`
+
+### Summary
+
+Built native dependencies and applications for Android, Windows, Linux, macOS, iOS and OHOS on GitHub. Published 16 verified artifact links and aligned GPL v3.0 notices with qflistudio.
+
+### Main Changes
+
+- Pinned official inputs and toolchains; retained local signing credentials and existing build caches.
+- Fixed macOS Bash, lipo and SDK resource layout; verified signatures after archive extraction.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d781661` | chore(license): align GNU GPL v3.0 with main project |
+| `2f9243a` | ci(ohos): build unsigned apps with a pinned Huawei toolchain |
+| `a08421d` | fix(macos): relocate SDK data directories before signing |
+| `edcf9ca` | docs(ci): record successful builds and downloads for all platforms |
+
+### Testing
+
+- [OK] Four recommended GitHub runs succeeded across eight platform/architecture combinations.
+- [OK] Linux analysis passed; 221 host tests passed and three OHOS-only tests skipped.
+- [OK] OHOS HAP/APP structure and artifact hashes verified; all 16 download links matched API metadata.
+- [OK] Chinese lint and final diff checks passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Distribution signing, macOS notarization and device/application sandbox runtime acceptance remain separate follow-up work.
