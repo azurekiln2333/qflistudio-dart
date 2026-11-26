@@ -397,19 +397,22 @@ def verify_ios(package):
                          'Frameworks/Flutter.framework/Flutter']:
             if prefix + required not in names:
                 raise SystemExit(f'The IPA lacks {required}')
-        for signed in ['embedded.mobileprovision', '_CodeSignature/CodeResources']:
-            if prefix + signed in names:
-                raise SystemExit(f'The IPA is labelled unsigned but contains {signed}')
+        for name in names:
+            parts = Path(name).parts
+            if '_CodeSignature' in parts or Path(name).name == 'embedded.mobileprovision':
+                raise SystemExit(f'The IPA is labelled unsigned but contains {name}')
         info = plistlib.loads(archive.read(prefix + 'Info.plist'))
     return {
         'format': 'ipa',
         'signing': 'unsigned',
         'bundleIdentifier': info.get('CFBundleIdentifier'),
-        'bundleVersion': info.get('CFBundleShortVersionString'),
+        'bundleShortVersion': info.get('CFBundleShortVersionString'),
+        'bundleVersion': info.get('CFBundleVersion'),
+        'machOSignatureVerified': False,
         'installVerified': False,
         'deviceRuntimeVerified': False,
         'validation': ['payload-layout', 'application-executable', 'app-framework',
-                       'flutter-framework', 'no-signature-or-profile'],
+                       'flutter-framework', 'no-signature-resources-or-profiles'],
     }
 
 

@@ -8,7 +8,7 @@
 
 `qfli_dart` is a Flutter app. It does **not** re-implement the shared editor,
 terminal, catalog, or settings UI — those live in the sibling
-`../qfli_studio_core` package and are composed through `StudioProfile`. This
+`../qflistudio-core` package and are composed through `StudioProfile`. This
 repository supplies only the Dart-specific screens and wiring.
 
 Before adding UI, check whether the core already provides the page/widget. The
@@ -32,7 +32,7 @@ qfli_dart/
 └── test/                         # widget + unit tests
 ```
 
-The core package (`../qfli_studio_core/lib`) owns: `pages/` (home, editor,
+The core package (`../qflistudio-core/lib`) owns: `pages/` (home, editor,
 local content detail, settings), `widgets/` (`CodeSnippet`), `store/`,
 `services/`, `terminal/`, `theme/`, `i18n/`.
 
@@ -79,7 +79,7 @@ local content detail, settings), `widgets/` (`CodeSnippet`), `store/`,
 - Repository implementing a core content interface:
   `lib/dart_content_repository.dart`.
 - Core widget showing optional-dependency + `key` conventions (read-only):
-  `../qfli_studio_core/lib/widgets/code_snippet.dart`.
+  `../qflistudio-core/lib/widgets/code_snippet.dart`.
 
 ## Where new UI goes
 

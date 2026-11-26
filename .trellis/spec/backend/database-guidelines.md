@@ -34,7 +34,7 @@ directory, resolved through `AppPaths.storageDirectory()`.
 
 The shared core resolves the writable root and probes it for real writability
 (candidate order: app support → documents → external storage → env vars →
-cwd). Read `../qfli_studio_core/lib/services/app_paths.dart`
+cwd). Read `../qflistudio-core/lib/services/app_paths.dart`
 (`AppPaths.storageDirectory`, `AppPaths._isWritable`) before adding a new
 persisted file. Never hard-code a path or assume `path_provider` succeeds on
 OHOS/Android.

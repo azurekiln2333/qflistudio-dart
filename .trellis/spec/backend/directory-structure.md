@@ -13,7 +13,7 @@ runner, content, and platform-packaging code** — everything that is not a
 widget. There is no HTTP server, no routing layer, and no database.
 
 The shared, non-Dart UI/editor/terminal chrome lives in the sibling package
-`../qfli_studio_core` (see [README.md](../../../README.md)); this repository
+`../qflistudio-core` (see [README.md](../../../README.md)); this repository
 depends on it by path and does not vendor it.
 
 ---

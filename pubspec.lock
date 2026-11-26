@@ -504,7 +504,7 @@ packages:
   qfli_studio_core:
     dependency: "direct main"
     description:
-      path: "../qfli_studio_core"
+      path: "../qflistudio-core"
       relative: true
     source: path
     version: "1.0.0+1"
@@ -519,7 +519,7 @@ packages:
   re_editor:
     dependency: "direct overridden"
     description:
-      path: "../qfli_studio_core/vendor/re_editor"
+      path: "../qflistudio-core/vendor/re_editor"
       relative: true
     source: path
     version: "0.10.0"

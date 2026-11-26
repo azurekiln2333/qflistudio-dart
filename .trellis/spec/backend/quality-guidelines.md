@@ -27,7 +27,7 @@ For curriculum/runtime-specific gates see
 - **Duplicating core policy.** Do not re-implement content parsing, filtering,
   import, or run dispatch. Reuse `ContentCatalog.fromJson`, `ContentRepository`,
   `CodeImportService`, `RunnerService`. This repo owns only Dart-specific policy.
-- **Writing to `../qfli_studio_core`.** It is a shared sibling package; changes
+- **Writing to `../qflistudio-core`.** It is a shared sibling package; changes
   there require coordination (see task design). This repo's writable surface is
   `lib/`, `curriculum/`, `assets/`, `tool/`, `test/`.
 - **Faking execution.** Never report success when a run failed or an SDK is

@@ -6,7 +6,7 @@
 
 ## Overview
 
-`qfli_dart` composes the shared Material 3 UI from `../qfli_studio_core` and adds
+`qfli_dart` composes the shared Material 3 UI from `../qflistudio-core` and adds
 only Dart-specific screens and wiring. This is Flutter, not React: there are no
 JSX props and no hooks. State uses `State<T>` + `setState` and core
 `ChangeNotifier` stores; "effects" are `initState`/`dispose`; "validation" is

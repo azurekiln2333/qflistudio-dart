@@ -10,7 +10,7 @@
 no HTTP layer, no database, and no logging framework. "Backend" here means the
 Dart runtime, SDK toolchain, process runner, generated content, and platform
 packaging that live outside the widget tree. The shared UI/editor/terminal core
-is the sibling package `../qfli_studio_core`.
+is the sibling package `../qflistudio-core`.
 
 ---
 

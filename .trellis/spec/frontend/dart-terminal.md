@@ -6,9 +6,9 @@ Use this contract when changing the embedded terminal's `dart` command, the
 `StudioProfile.terminalCommandDelegate` wiring, or the VM/Kernel argument
 assembly. It covers **both terminal surfaces**:
 
-- the editor terminal — `TerminalPane` (`../qfli_studio_core/lib/editor/terminal_pane.dart`);
+- the editor terminal — `TerminalPane` (`../qflistudio-core/lib/editor/terminal_pane.dart`);
 - the app-level terminal — `TerminaxTerminalPage`
-  (`../qfli_studio_core/lib/pages/terminax_terminal_page.dart`).
+  (`../qflistudio-core/lib/pages/terminax_terminal_page.dart`).
 
 Both read the profile hook, so one delegate serves both:
 

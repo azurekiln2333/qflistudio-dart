@@ -1,5 +1,20 @@
 # Native Dart Runtime Contract
 
+## Cloud-only validation policy (2026-11-26)
+
+All build, test, analyzer, formatter, dependency-resolution and packaging
+commands in this contract must run in GitHub Actions on hosted runners.
+They are command specifications for CI, not permission to execute locally.
+AGENTS.md owns this policy for every clone. Local work is limited to editing,
+Git, metadata/hash inspection and Herdr coordination. Do not use WSL or a
+self-hosted runner as a workaround.
+
+The shared checkout directory is `../qflistudio-core`; the imported Dart
+package is still `qfli_studio_core`. Keep pubspec.yaml, pubspec.lock and all
+workflow checkout/helper paths aligned. Changing the checkout directory does
+not change the pinned core revision or authorize applying the CI patch to a
+developer's core tree.
+
 ## 1. Scope / Trigger
 
 Use this contract for Android/desktop run, compilation, SDK discovery or packaging,

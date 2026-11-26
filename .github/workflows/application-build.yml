@@ -2,6 +2,7 @@ name: Android Windows Linux applications
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
     paths:
       - .github/workflows/application-build.yml
@@ -9,6 +10,9 @@ on:
       - lib/**
       - vendor/**
       - assets/**
+      - curriculum/**
+      - test/**
+      - analysis_options.yaml
       - pubspec.*
       - android/**
       - windows/**
@@ -49,7 +53,7 @@ jobs:
         with:
           repository: azurekiln2333/qflistudio-core
           ref: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
-          path: qfli_studio_core
+          path: qflistudio-core
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,7 +83,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Prepare the pinned core for standard Flutter
-        run: python tool/ci/prepare_core.py --core ../qfli_studio_core --flutter ../flutter
+        run: python tool/ci/prepare_core.py --core ../qflistudio-core --flutter ../flutter
       - name: Resolve app dependencies
         run: flutter pub get
       - name: Validate the Android native SDK
@@ -171,6 +175,24 @@ jobs:
           path: qfli_dart/dist/installer/
           if-no-files-found: error
           retention-days: 30
+      - name: Archive native and Flutter intermediates
+        id: intermediates
+        if: ${{ always() && !cancelled() }}
+        env:
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          if [ -f tool/ci/archive_intermediates.py ]; then
+            python tool/ci/archive_intermediates.py --name "intermediates-$CI_NAME" --output dist/intermediates --job-status "$BUILD_STATUS"
+          fi
+      - name: Upload intermediate archive
+        if: ${{ always() && steps.intermediates.outputs.created == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: intermediates-${{ matrix.name }}
+          path: qfli_dart/dist/intermediates/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
       - name: Write download summary
         if: ${{ !cancelled() }}
         env:

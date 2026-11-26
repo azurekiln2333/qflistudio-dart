@@ -1,0 +1,67 @@
+name: Cloud source and tooling checks
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned workflow parser in the cloud
+        run: |
+          python3 -m venv "$RUNNER_TEMP/cloud-check"
+          "$RUNNER_TEMP/cloud-check/bin/python" -m pip install --disable-pip-version-check --no-deps PyYAML==6.0.2
+      - name: Validate workflow and Python syntax
+        run: |
+          "$RUNNER_TEMP/cloud-check/bin/python" - <<'PY'
+          import ast
+          from pathlib import Path
+          import yaml
+          for path in Path('.github/workflows').glob('*.yml'):
+              workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+              assert isinstance(workflow, dict) and workflow.get('jobs'), path
+              assert workflow.get('on'), path
+          for directory in ('tool/ci', 'tool/ohos', 'scripts'):
+              for path in Path(directory).glob('*.py'):
+                  ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+          PY
+          bash -n native/dart-sdk/android/prepare_sdk.sh
+          bash -n native/dart-sdk/bundle_macos.sh
+      - name: Reject tracked build outputs and broken Trellis manifests
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          generated = {'build', 'dist', '.dart_tool', '.pytest_cache', '__pycache__', '.gradle', '.cxx', 'node_modules', 'oh_modules', 'ephemeral'}
+          forbidden = [name for name in paths if name and generated.intersection(Path(name).parts)]
+          assert not forbidden, f'Tracked generated output: {forbidden}'
+          missing = []
+          for path in Path('.trellis/tasks').rglob('*.jsonl'):
+              for line in path.read_text(encoding='utf-8').splitlines():
+                  if not line.strip():
+                      continue
+                  record = json.loads(line)
+                  target = record.get('file')
+                  if target and not Path(target).exists():
+                      missing.append(f'{path}: {target}')
+          assert not missing, f'Broken Trellis context paths: {missing}'
+          PY
+      - name: Test CI packaging and archive helpers
+        run: python3 -m unittest discover -s tool/ci -p 'test_*.py' -v
+      - name: Test OHOS package inspection
+        run: python3 tool/ohos/test_inspect_dart_hap.py
+      - name: Check controlled Chinese documents
+        run: python3 scripts/ste-lint-zh.py GITHUB_BUILD.zh-CN.md WORKSPACE_MIGRATION.zh-CN.md README.md README.zh-Hant.md

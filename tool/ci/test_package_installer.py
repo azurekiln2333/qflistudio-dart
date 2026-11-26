@@ -76,7 +76,8 @@ class PackageInstallerTest(unittest.TestCase):
     def write_ipa(self, directory, extra=()):
         package = Path(directory) / 'app.ipa'
         info = plistlib.dumps({'CFBundleIdentifier': 'com.example.app',
-                               'CFBundleShortVersionString': '1.0.0'}, fmt=plistlib.FMT_BINARY)
+                               'CFBundleShortVersionString': '1.0.0',
+                               'CFBundleVersion': '1'}, fmt=plistlib.FMT_BINARY)
         with zipfile.ZipFile(package, 'w') as archive:
             archive.writestr('Payload/Runner.app/Info.plist', info)
             for name in ['Runner', 'Frameworks/App.framework/App',
@@ -90,7 +91,9 @@ class PackageInstallerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             details = package_installer.verify_ios(self.write_ipa(directory))
         self.assertEqual(details['bundleIdentifier'], 'com.example.app')
-        self.assertEqual(details['bundleVersion'], '1.0.0')
+        self.assertEqual(details['bundleShortVersion'], '1.0.0')
+        self.assertEqual(details['bundleVersion'], '1')
+        self.assertFalse(details['machOSignatureVerified'])
         self.assertEqual(details['signing'], 'unsigned')
         self.assertFalse(details['installVerified'])
 
@@ -98,6 +101,8 @@ class PackageInstallerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for extra in ['Payload/Runner.app/embedded.mobileprovision',
                           'Payload/Runner.app/_CodeSignature/CodeResources',
+                          'Payload/Runner.app/Frameworks/App.framework/_CodeSignature/CodeResources',
+                          'Payload/Runner.app/PlugIns/Extension.appex/embedded.mobileprovision',
                           'Symbols/Runner.symbols']:
                 with self.assertRaises(SystemExit):
                     package_installer.verify_ios(self.write_ipa(directory, [extra]))

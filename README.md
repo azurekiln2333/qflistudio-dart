@@ -98,15 +98,20 @@ OHOS 便携目标没有官方 SDK。
 
 ```text
 checkout-parent/
-  qfli_studio_core/
-  qfli_dart/
+  qflistudio-core/
+  qflistudio-dart/
 ```
 
-然后在本仓库运行 flutter pub get。
-编辑器补丁来自 ../qfli_studio_core/vendor/re_editor。
+Dart 包名仍为 qfli_studio_core。
+本机不安装依赖或运行检查。
+GitHub Actions 在临时目录解析依赖。
+编辑器补丁来自 ../qflistudio-core/vendor/re_editor。
 pubspec.yaml 用路径覆盖指向它。
 
 ## 开发与测试
+
+以下命令只在 GitHub Actions 执行。
+本机不运行构建、测试和静态分析。
 
 生成内容资产。
 
@@ -153,6 +158,9 @@ python scripts/ste-lint-zh.py README.md README.zh-Hant.md
 ```
 
 ## 构建
+
+以下命令只供云端工作流使用。
+本机不下载 SDK 或安装依赖。
 
 云端构建和下载见 [GitHub 构建说明](GITHUB_BUILD.zh-CN.md)。
 

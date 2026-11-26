@@ -22,7 +22,7 @@ missing types, and unsafe casts. Prefer the type system over runtime assertions:
 
 ## Type Organization
 
-- **Domain models live in the core** (`../qfli_studio_core/lib/models/`):
+- **Domain models live in the core** (`../qflistudio-core/lib/models/`):
   `Project`, `ExampleCode`, `TutorialContent`, `ExampleContent`. This repo
   consumes them; it does not fork them.
 - **Repo-local value types** are small immutable classes with a `const`

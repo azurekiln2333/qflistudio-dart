@@ -36,6 +36,14 @@ migrate_working_dir/
 **/build/
 **/.dart_tool/
 /coverage/
+/dist/
+**/.pytest_cache/
+**/.gradle/
+**/.kotlin/
+**/.cxx/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/Testing/Temporary/
 
 # Symbolication related
 app.*.symbols

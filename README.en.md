@@ -99,15 +99,20 @@ Check it out next to this repository first.
 
 ```text
 checkout-parent/
-  qfli_studio_core/
-  qfli_dart/
+  qflistudio-core/
+  qflistudio-dart/
 ```
 
-Then run `flutter pub get` in this repository.
-The editor patch comes from `../qfli_studio_core/vendor/re_editor`.
-`pubspec.yaml` points to it with a path override.
+The Dart package name remains `qfli_studio_core`.
+Do not install dependencies or run checks locally.
+GitHub Actions resolves dependencies in a temporary workspace.
+The editor patch comes from `../qflistudio-core/vendor/re_editor`.
+`pubspec.yaml` declares that path.
 
 ## Development and tests
+
+Run the following commands only in GitHub Actions.
+Do not build, test, or analyze locally.
 
 Generate the content assets.
 
@@ -154,6 +159,9 @@ python scripts/ste-lint-zh.py README.md README.zh-Hant.md
 ```
 
 ## Builds
+
+Use these commands only in cloud workflows.
+Do not download SDKs or install dependencies locally.
 
 See [GitHub builds and downloads](GITHUB_BUILD.zh-CN.md) for cloud artifacts (Chinese).
 
