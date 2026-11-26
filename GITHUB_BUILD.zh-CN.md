@@ -60,7 +60,8 @@ iOS 与 OHOS 的原生库包不是独立 Dart SDK。
 
 Linux 和 macOS 的内层归档保留 Unix 文件权限。
 请解压内层 tar.gz 后运行。
-Windows 包是完整目录，不是安装向导。
+Windows 应用 ZIP 是完整目录，不是安装程序。
+Windows 安装程序见下文“安装包”。
 iOS 归档不能直接安装到手机。
 构建成功不代表通过真机验收。
 
@@ -73,13 +74,143 @@ Linux CI 的静态分析通过。
 归档解压后也通过签名和 SDK 链接校验。
 应用沙盒内的 SDK 运行仍待验证。
 
+## 安装包
+
+安装包构建位于分支 `ci/installer-packages`。
+工作流先上传应用产物，再构建安装包。
+每个安装包作为独立产物上传。
+安装包失败不影响已上传的应用产物。
+安装包版本取自 `pubspec.yaml`。
+
+<!-- installer-run-links -->
+
+| 平台 | 产物 | 文件 | 格式 |
+| --- | --- | --- | --- |
+| Windows x64 | `installer-windows-x64` | `qfli-dart-windows-x64-setup.exe` | Inno Setup 安装程序 |
+| Linux x64 | `installer-linux-x64` | `qfli-dart-linux-x64.deb` | Debian 软件包 |
+| macOS ARM64 | `installer-macos-arm64` | `QFLIDartWing-macos-arm64.dmg` | UDZO 磁盘映像 |
+| macOS x64 | `installer-macos-x64` | `QFLIDartWing-macos-x64.dmg` | UDZO 磁盘映像 |
+| iOS ARM64 | `installer-ios-arm64-unsigned` | `QFLIDartWing-ios-arm64-unsigned.ipa` | 未签名 IPA |
+| Android | `app-android-<abi>` | `qfli-dart-android-<abi>-test-signed.apk` | 测试签名 APK |
+| OHOS ARM64 | `app-ohos-arm64-unsigned` | HAP 和 APP | 未签名 HAP 和 APP |
+
+Android 和 OHOS 沿用现有应用产物。
+这两个平台没有新增产物。
+
+每份 `installer-` 产物还包含三个文件：
+
+- `SHA256SUMS` 记录安装包的 SHA256。
+- `SIGNING.txt` 说明签名状态。
+- `provenance.json` 是来源记录。
+
+`provenance.json` 保留应用产物的来源字段。
+它新增 `installer` 对象。
+该对象包含以下字段：
+
+```text
+file
+sha256
+applicationVersion
+format
+signing
+installVerified
+validation
+```
+
+### 安装包验证
+
+工作流在上传前验证每个安装包。
+
+| 平台 | 验证步骤 |
+| --- | --- |
+| Windows x64 | 静默安装。比对已安装的文件清单。运行已安装的 `dart.exe --version`。静默卸载。 |
+| Linux x64 | 用 apt 安装。校验启动链接和共享库。运行已安装的 SDK。删除软件包。 |
+| macOS | 校验磁盘映像。只读挂载磁盘映像。校验应用架构、签名和 SDK 链接。 |
+| iOS ARM64 | 校验 Payload 结构、应用主程序和 Framework。确认不含签名和描述文件。 |
+
+这些验证不启动应用窗口。
+`installVerified` 仅在 Windows 和 Linux 为 `true`。
+工作流不运行磁盘映像内的应用。
+工作流不做 iOS 真机测试。
+
+### 安装方法
+
+Windows：
+
+1. 运行 `qfli-dart-windows-x64-setup.exe`。
+2. 按安装程序的提示完成安装。
+
+安装程序未签名。
+SmartScreen 可能在启动前显示警告。
+安装程序默认为当前用户安装。
+此方式无须管理员权限。
+在系统的应用列表中卸载。
+
+Linux：
+
+```bash
+sudo apt install ./qfli-dart-linux-x64.deb
+sudo apt remove qfli-dart-wing
+```
+
+第一条命令安装软件包。
+第二条命令删除软件包。
+软件包名是 `qfli-dart-wing`。
+应用位于 `/opt/qfli-dart-wing`。
+启动命令是 `/usr/bin/qfli-dart-wing`。
+软件包附带桌面入口和图标。
+`dpkg-shlibdeps` 在 Ubuntu 24.04 上计算依赖。
+工作流只在 Ubuntu 24.04 上验证安装。
+
+macOS：
+
+1. 按处理器架构选择磁盘映像。
+2. 打开磁盘映像。
+3. 把 QFLIDartWing 拖到 Applications。
+
+磁盘映像内含 `/Applications` 链接。
+应用采用临时签名，未公证。
+Gatekeeper 可能阻止首次打开。
+
+iOS：
+
+1. 用 Apple 证书和描述文件给 IPA 签名。
+2. 把已签名的 IPA 安装到设备。
+
+未签名 IPA 不能直接安装到手机。
+
+Android：
+
+1. 按设备架构选择 APK。
+2. 在设备上安装 APK。
+
+APK 使用测试密钥签名。
+
+OHOS：
+
+1. 用华为证书和 Profile 给 HAP 或 APP 签名。
+2. 把已签名的包安装到设备。
+
+### 签名限制
+
+本仓库没有签名凭据。
+以下安装包需要仓库机密中的签名凭据：
+
+- 已签名的 Windows 安装程序需要代码签名证书。
+- 已公证的 macOS 磁盘映像需要 Developer ID 证书和公证凭据。
+- 可安装的 iOS IPA 需要 Apple 证书和描述文件。
+- 可安装的 OHOS 包需要华为证书和 Profile。
+
+工作流不上传本地签名材料。
+添加签名凭据须由仓库所有者决定。
+
 ## 工作流
 
 | 工作流 | 作用 |
 | --- | --- |
 | `Android native SDK` | 打包锁定的 Android SDK |
-| `Android Windows Linux applications` | 构建三个平台的应用，导出桌面 SDK |
-| `Apple applications and native dependencies` | 构建 macOS、iOS 应用，导出原生依赖 |
+| `Android Windows Linux applications` | 构建三个平台的应用，导出桌面 SDK 和桌面安装包 |
+| `Apple applications and native dependencies` | 构建 macOS、iOS 应用，导出原生依赖和安装包 |
 | `OHOS application and native libraries` | 构建 OHOS HAP、APP，导出原生库 |
 
 推送对应源码或工作流改动可触发构建。

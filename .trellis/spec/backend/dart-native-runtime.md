@@ -79,9 +79,43 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   preserve permissions and symlinks inside the Actions artifact ZIP.
 - Android CI APKs use the existing ephemeral debug signing configuration.
   macOS CI apps use ad hoc signing and are not notarized. iOS CI exports an
-  unsigned .xcarchive and its matching native frameworks, not an installable
-  IPA or a standalone Dart SDK. Provenance must distinguish compilation,
-  archive checks, SDK smoke execution and unverified application/device use.
+  unsigned .xcarchive, its matching native frameworks and an unsigned IPA.
+  None is device-installable before Apple signing, and none is a standalone
+  Dart SDK. Provenance must distinguish compilation, archive checks, SDK smoke
+  execution and unverified application/device use.
+- `tool/ci/package_installer.py` owns installer creation and verification. Its
+  subcommands are `windows`, `linux`, `macos`, `ios` and
+  `check-macos-sdk-links`; the last one also checks the restored macOS tar
+  archive. Workflows call it after the application artifact upload, write to
+  `dist/installer/` and upload a separate `installer-<name>` artifact, so an
+  installer failure does not hide a usable application. Each artifact holds the
+  installer, `SHA256SUMS`, `SIGNING.txt` and `provenance.json`. Provenance
+  copies the job's `dist/app/provenance.json` and adds an `installer` object;
+  the version comes from `pubspec.yaml`. Keep one source for toolchain pins.
+- Installer formats: Windows x64 is an Inno Setup program built from
+  `tool/ci/windows_installer.iss`, installed per user without elevation. Never
+  change its `AppId`; it links upgrades and the uninstall entry. Start
+  `ISCC.exe` from Python, because Git Bash rewrites `/D` arguments as paths.
+  Linux x64 is the Debian package `qfli-dart-wing` with dependencies from
+  `dpkg-shlibdeps`. Keep the bundle intact under `/opt/qfli-dart-wing`: the
+  SDK is found beside the resolved executable, so `/usr/bin/qfli-dart-wing`
+  must be a symlink, not a copy or wrapper in another directory. macOS is a
+  UDZO disk image with the ad hoc signed .app and an `/Applications` link.
+  iOS is `Payload/Runner.app` zipped with symlinks preserved and labelled
+  unsigned. Android and OHOS keep their existing packages.
+- Installer builds use only tools shipped on the pinned runner images: Inno
+  Setup on `windows-2022`, dpkg-dev on `ubuntu-24.04`, `hdiutil` and `ditto` on
+  `macos-15`. Fail clearly when a tool is absent; never download one.
+- Installer verification: Windows installs silently, compares the installed
+  file list, runs the installed `dart.exe --version` and uninstalls. Linux
+  installs through apt, checks the launcher link and shared libraries, runs the
+  installed SDK and removes the package. macOS verifies the image, mounts it
+  read-only and checks architecture, codesigning and SDK links. Never execute
+  the bundled macOS helpers from the mounted image: they carry sandbox
+  inheritance entitlements and fail outside the sandboxed application. iOS
+  reads the IPA back and rejects a signature or provisioning profile.
+  `installVerified` is true only for Windows and Linux. No check starts the
+  application window; UI and device runtime remain unverified in provenance.
 - Android Gradle uses the same `target-platform` list for SDK validation,
   build-type ABI filters and SDK data assets. Flutter supplies build-type ABI
   defaults, so changing only `defaultConfig.ndk.abiFilters` is insufficient.
@@ -165,6 +199,10 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
 | Standard-platform core checkout is dirty or has a different revision | Compatibility helper fails before patching |
 | Standard-platform helper sees OHOS Flutter | Compatibility helper refuses the patch |
 | Desktop SDK platform tag differs from the requested artifact | SDK packaging fails before upload |
+| Installer tool is absent from the runner image | Installer step fails; the application artifact is already uploaded |
+| Installed Windows file list differs from the Release directory | Installer verification fails before upload |
+| Debian package launcher resolves outside `/opt/qfli-dart-wing` | Installer verification fails before upload |
+| Unsigned IPA contains a signature or provisioning profile | Installer verification fails before upload |
 | Only one OHOS toolchain override is supplied | Bootstrap fails instead of mixing sources |
 | OHOS download hash or locked API metadata differs | Bootstrap fails before application compilation |
 | OHOS profile authorizes a different bundle | Resolve the bundle/profile mismatch before signing |
@@ -204,6 +242,9 @@ Inspect links in both the Helpers SDK and Resources mirror, because directory
 symlinks are not traversed by `Path.rglob`. All links must be relative, resolve
 successfully and remain inside the application.
 Check the iOS executable, App.framework and Flutter.framework architectures.
+After changing the installer helper, run `python tool/ci/test_package_installer.py`.
+Inno Setup, `hdiutil` and Apple signing behavior require the real workflows;
+record the run that produced each `installer-<name>` artifact.
 `bash -n` on Windows checks grammar only. Apple command behavior and Bash 3.2
 runtime compatibility require the real Apple workflow; a Git Bash pass is not
 that verification. Search both workflow steps and Xcode packaging scripts when
