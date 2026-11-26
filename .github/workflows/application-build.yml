@@ -6,7 +6,7 @@ on:
   push:
     paths:
       - .github/workflows/application-build.yml
-      - tool/ci/**
+      - tool/**
       - lib/**
       - vendor/**
       - assets/**
@@ -93,12 +93,32 @@ jobs:
           mkdir -p "$RUNNER_TEMP/android-sdk"
           tar -xf "$RUNNER_TEMP/android-input/sdk.tar" -C "$RUNNER_TEMP/android-sdk"
           pwsh -File native/dart-sdk/android/stage.ps1 -Abi "$CI_ABI" -Sdk "$RUNNER_TEMP/android-sdk"
+      - name: Verify generated curriculum assets
+        if: matrix.platform == 'linux'
+        run: |
+          dart run tool/build_dart_content.dart
+          git diff --exit-code -- assets/content/dart_tutorials.json assets/content/dart_examples.json
+      - name: Audit curriculum compatibility and portable execution
+        if: matrix.platform == 'linux'
+        run: |
+          mkdir -p dist/host-checks
+          dart run tool/verify_dart_content.dart
+          dart run tool/audit_compat.dart | tee dist/host-checks/compat-audit.txt
+          grep -Fx 'unlabeled: 0 []' dist/host-checks/compat-audit.txt
+          dart run tool/verify_portable_content.dart --report dist/host-checks/portable-report.json
+      - name: Check the native offline channel on the host
+        if: matrix.platform == 'linux'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qfli-node-gate" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund typescript@5.9.3
+          QFLI_TYPESCRIPT="$RUNNER_TEMP/qfli-node-gate/node_modules/typescript" \
+            node --max-old-space-size=128 --test test/native_entry_ability_test.cjs
       - name: Analyze application and run host tests
         if: matrix.platform == 'linux'
         run: |
           flutter analyze --no-pub
           flutter test --no-pub
       - name: Build application
+        id: build
         run: |
           if [[ "$CI_PLATFORM" == android ]]; then
             flutter build apk --release --no-pub --target-platform "android-$CI_ARCH"
@@ -179,11 +199,9 @@ jobs:
         id: intermediates
         if: ${{ always() && !cancelled() }}
         env:
-          BUILD_STATUS: ${{ job.status }}
-        run: |
-          if [ -f tool/ci/archive_intermediates.py ]; then
-            python tool/ci/archive_intermediates.py --name "intermediates-$CI_NAME" --output dist/intermediates --job-status "$BUILD_STATUS"
-          fi
+          JOB_STATUS: ${{ job.status }}
+          BUILD_STATUS: ${{ steps.build.outcome }}
+        run: python tool/ci/archive_intermediates.py --name "intermediates-$CI_NAME" --output dist/intermediates --job-status "$JOB_STATUS" --build-status "$BUILD_STATUS"
       - name: Upload intermediate archive
         if: ${{ always() && steps.intermediates.outputs.created == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -193,6 +211,14 @@ jobs:
           if-no-files-found: error
           retention-days: 3
           compression-level: 0
+      - name: Upload Linux host gate diagnostics
+        if: ${{ always() && matrix.platform == 'linux' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: host-checks-${{ matrix.name }}
+          path: qfli_dart/dist/host-checks/
+          if-no-files-found: warn
+          retention-days: 3
       - name: Write download summary
         if: ${{ !cancelled() }}
         env:

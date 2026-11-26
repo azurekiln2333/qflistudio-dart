@@ -1,37 +1,9 @@
 {
   "app": {
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_H2qDWxivKxY12fnfT5oAKNge6BdccvdWue_ElLyFlFw=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001BD7C6790A697EEF20E11761C74F5CF132737F0DBAADD2E940370E1D707E2D60917187B5C9B6A2B9",
-          "profile": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_H2qDWxivKxY12fnfT5oAKNge6BdccvdWue_ElLyFlFw=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\lichengyu\\.ohos\\config\\default_ohos_H2qDWxivKxY12fnfT5oAKNge6BdccvdWue_ElLyFlFw=.p12",
-          "storePassword": "0000001B365F5776287C1D874E074DDF08D9FC01726F4F2E0AB3D85824681B1904EF91751CD3069D499DAD"
-        }
-      },
-      {
-        "name": "releaseKey",
-        "type": "HarmonyOS",
-        "material": {
-          "storeFile": "D:/Keystore/suanxiwanjie.p12",
-          "storePassword": "000000203FB996974D4ACDC85E1C53C506F0872481C17BC901E514F1205D4CF20626248692646B0C498E6E883646264C",
-          "keyAlias": "suanxiwanjie",
-          "keyPassword": "00000020531BB6349A004B31E182D5E447DC893C3299DB6D8C52ED3E87265BD8D4C7BF9BB546382C90339EFF0B1A3D46",
-          "signAlg": "SHA256withECDSA",
-          "profile": "D:/Keystore/Profile/dartRelease.p7b",
-          "certpath": "D:/Keystore/suanxiwanjie_release.cer"
-        }
-      }
-    ],
+    "signingConfigs": [],
     "products": [
       {
         "name": "default",
-        "signingConfig" : "releaseKey",
         "compatibleSdkVersion": "5.1.0(18)",
         "runtimeOS": "HarmonyOS",
         "targetSdkVersion": "6.1.1(24)"

@@ -37,7 +37,9 @@
 
 GitHub 下载的是外层 ZIP。
 应用安装包或内层归档位于其中。
-工作流将产物保留 30 天。
+原生依赖、应用和安装包产物保留 30 天。
+`intermediates-*` 中间归档保留 3 天。
+中间归档用于排查构建问题。
 运行摘要也提供下载链接。
 过期后须重新运行构建。
 
@@ -76,13 +78,38 @@ Linux CI 的静态分析通过。
 
 ## 安装包
 
-安装包工作流随源码保存在 `main`。
+安装包工作流随源码保存在仓库。
 工作流先上传应用产物，再构建安装包。
 每个安装包作为独立产物上传。
 安装包失败不影响已上传的应用产物。
 安装包版本取自 `pubspec.yaml`。
 
 <!-- installer-run-links -->
+
+以下安装包来自 2026 年 11 月 26 日的云端构建。
+分支为 `ci/installer-packages`。
+应用提交为：
+
+```text
+70c7a62d950b6f0e31ce73df9b4dcb6bec4b72fe
+```
+
+- [应用运行 45807875409](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45807875409)：第 2 次尝试成功。
+- [Apple 运行 45807875426](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45807875426)：第 1 次尝试成功。
+
+五份安装包产物均已上传。
+API 记录的到期日均为 2026 年 12 月 26 日（UTC）。
+以下链接对应上述提交，不代表后续源码已通过验证。
+
+| 平台 | 安装包下载 | 产物 ID |
+| --- | --- | --- |
+| Windows x64 | [installer-windows-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45807875409/artifacts/15109934015) | `15109934015` |
+| Linux x64 | [installer-linux-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45807875409/artifacts/15110409280) | `15110409280` |
+| macOS ARM64 | [installer-macos-arm64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45807875426/artifacts/15109934492) | `15109934492` |
+| macOS x64 | [installer-macos-x64](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45807875426/artifacts/15112630861) | `15112630861` |
+| iOS ARM64 | [installer-ios-arm64-unsigned](https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45807875426/artifacts/15110258334) | `15110258334` |
+
+这两次运行尚未包含新版云端校验和中间归档步骤。
 
 | 平台 | 产物 | 文件 | 格式 |
 | --- | --- | --- | --- |
@@ -126,11 +153,13 @@ validation
 | Windows x64 | 静默安装。比对已安装的文件清单。运行已安装的 `dart.exe --version`。静默卸载。 |
 | Linux x64 | 用 apt 安装。校验启动链接和共享库。运行已安装的 SDK。删除软件包。 |
 | macOS | 校验磁盘映像。只读挂载磁盘映像。校验应用架构、签名和 SDK 链接。 |
-| iOS ARM64 | 校验 Payload 结构、应用主程序和 Framework。确认不含签名和描述文件。 |
+| iOS ARM64 | 校验 Payload 结构。确认应用主程序和 Framework 文件存在。确认包内没有签名资源和描述文件。 |
 
 这些验证不启动应用窗口。
 `installVerified` 仅在 Windows 和 Linux 为 `true`。
 工作流不运行磁盘映像内的应用。
+iOS 步骤仅确认包内没有签名资源和描述文件。
+该步骤未校验 Mach-O 内嵌签名。
 工作流不做 iOS 真机测试。
 
 ### 安装方法
@@ -217,6 +246,7 @@ OHOS：
 | `Android Windows Linux applications` | 构建三个平台的应用，导出桌面 SDK 和桌面安装包 |
 | `Apple applications and native dependencies` | 构建 macOS、iOS 应用，导出原生依赖和安装包 |
 | `OHOS application and native libraries` | 构建 OHOS HAP、APP，导出原生库 |
+| `Cloud source and tooling checks` | 校验语法、跟踪文件和 Trellis 清单。运行 Python 测试。校验受控中文规则。 |
 
 推送对应源码或工作流改动可触发构建。
 工作流进入默认分支后，可在网页手动启动。

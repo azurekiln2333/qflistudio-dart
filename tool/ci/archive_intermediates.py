@@ -12,7 +12,9 @@ import tarfile
 
 GENERATED_ROOTS = (
     "native/build", ".dart_tool/flutter_build",
-    "build/app/intermediates", "build/linux/x64/CMakeFiles",
+    "build/app/intermediates", "build/linux/x64/release/CMakeFiles",
+    "build/linux/x64/release/runner/CMakeFiles",
+    "build/linux/x64/release/flutter/CMakeFiles",
     "build/windows/x64/CMakeFiles",
     "build/macos/Build/Intermediates.noindex",
     "build/ios/Build/Intermediates.noindex",
@@ -45,8 +47,28 @@ def excluded(relative):
     )
 
 
+def is_reparse(info):
+    """Windows junctions are directory reparse points, not ordinary symlinks."""
+    return bool(getattr(info, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def has_link_ancestor(root, path):
+    """Inspect each input component without following a link or junction."""
+    current = root
+    for part in path.relative_to(root).parts:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            return False
+        if stat.S_ISLNK(info.st_mode) or is_reparse(info):
+            return True
+    return False
+
+
 def collect(root):
-    """Select real generated roots once; never traverse a directory symlink."""
+    """Select real generated roots once; never traverse directory redirects."""
     members = {}
     roots = []
     skipped = 0
@@ -57,7 +79,11 @@ def collect(root):
         if excluded(relative):
             skipped += 1
             return
-        mode = path.lstat().st_mode
+        info = path.lstat()
+        mode = info.st_mode
+        if is_reparse(info) and not stat.S_ISLNK(mode):
+            skipped += 1
+            return
         if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode) or stat.S_ISLNK(mode)):
             skipped += 1
             return
@@ -68,8 +94,8 @@ def collect(root):
 
     for name in GENERATED_ROOTS:
         path = root / name
-        # A symlinked root/ancestor could reach a sibling SDK or a signing tree.
-        if any(parent.is_symlink() for parent in (path, *path.parents) if parent != root):
+        # Redirected roots/ancestors could reach a sibling SDK or signing tree.
+        if has_link_ancestor(root, path):
             skipped += 1
             continue
         if not path.is_dir():
@@ -100,7 +126,7 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def archive_outputs(root, output, name, job_status="unknown"):
+def archive_outputs(root, output, name, job_status="unknown", build_status=None):
     root = Path(root).resolve()
     output = Path(output).resolve()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
@@ -109,8 +135,20 @@ def archive_outputs(root, output, name, job_status="unknown"):
         if output.is_relative_to(root / relative):
             raise ValueError("Archive output must be outside generated input directories")
     roots, members, skipped = collect(root)
-    if not members:
-        print("No allowlisted intermediate outputs exist; nothing to upload.")
+    build_status = job_status if build_status is None else build_status
+    if not any(not path.is_dir() or path.is_symlink() for path in members.values()):
+        message = (
+            "No allowlisted intermediate files exist. Searched: "
+            + ", ".join(GENERATED_ROOTS)
+        )
+        if build_status == "success":
+            raise RuntimeError(message + "; a successful build must produce an archive.")
+        print(f"::warning::{message}; build status: {build_status}; job status: {job_status}. Nothing to upload.")
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as stream:
+                stream.write(f"### Intermediate archive unavailable\n\n{message}\n\n"
+                             f"Job status before archiving: {job_status}. "
+                             f"Build step outcome: {build_status}.\n\n")
         return None
     output.mkdir(parents=True, exist_ok=True)
     target = output / f"{name}.tar.gz"
@@ -134,6 +172,7 @@ def archive_outputs(root, output, name, job_status="unknown"):
         "runAttempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
         "job": os.environ.get("GITHUB_JOB"),
         "jobStatusBeforeArchiving": job_status,
+        "buildStepOutcome": build_status,
         "name": name,
         "allowlistedRoots": list(GENERATED_ROOTS),
         "includedRoots": [path.as_posix() for path in roots],
@@ -157,7 +196,8 @@ def archive_outputs(root, output, name, job_status="unknown"):
         f"{record['archiveBytes']:,} compressed bytes; {source_bytes:,} source bytes; "
         f"{len(members)} entries. Retention: 3 days.\n\n"
         f"Roots: {', '.join(record['includedRoots'])}. "
-        f"Excluded entries: {skipped}. Build status before archiving: {job_status}.\n\n"
+        f"Excluded entries: {skipped}. Job status before archiving: {job_status}. "
+        f"Build step outcome: {build_status}.\n\n"
         "SDK caches, signing material and links outside the selected payload are excluded. "
         "Extract the inner tar.gz to preserve modes and links. This is not device evidence.\n\n"
     )
@@ -174,8 +214,10 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--job-status", default="unknown")
+    parser.add_argument("--build-status", help="Outcome of the build step, before later packaging/upload steps")
     arguments = parser.parse_args()
-    record = archive_outputs(arguments.root, arguments.output, arguments.name, arguments.job_status)
+    record = archive_outputs(arguments.root, arguments.output, arguments.name,
+                             arguments.job_status, arguments.build_status)
     if os.environ.get("GITHUB_OUTPUT"):
         with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
             stream.write(f"created={'true' if record else 'false'}\n")

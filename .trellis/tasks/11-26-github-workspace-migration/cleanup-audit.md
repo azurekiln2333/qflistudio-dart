@@ -21,7 +21,11 @@ Nested source review is in `remote-audit.md`. Core history and patch preservatio
 
 Keep these existing historical evidence directories until the target coordinator decides retention: `build/dart-audit`, `build/dart-host-gate`, `build/reports`, `build/legacy-artifacts`, `build/releases`. Signing certificates/profiles occur in `build/dart-audit` and loose `build/*chain.cer` / `build/*profile.p7b` files. Preserve these privately. They are not staged into GitHub. Do not use blanket `git clean -fdx` or recursively remove the whole build directory.
 
-## Shared WSL inventory
+## Private OHOS signing configuration
+
+The tracked OHOS build profile previously contained two machine-specific signing records, including nonempty password fields. The source profile now uses the same unsigned configuration used in hosted builds. The original bytes are preserved privately at `.git/local-signing-backup/ohos-build-profile.json5` in the D clone. Transfer that private file to the signing owner's protected storage before removing the D clone. Earlier GitHub commits already contained those fields. The signing owner must assess exposure and rotate affected credentials. No signing key, historical rewrite, or credential rotation was performed by this migration.
+
+## WSL registrations
 
 The current-user registry contains five WSL2 registrations. Only exact registry-derived host paths and file metadata were inspected.
 

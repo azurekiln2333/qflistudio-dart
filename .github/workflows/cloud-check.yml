@@ -65,3 +65,16 @@ jobs:
         run: python3 tool/ohos/test_inspect_dart_hap.py
       - name: Check controlled Chinese documents
         run: python3 scripts/ste-lint-zh.py GITHUB_BUILD.zh-CN.md WORKSPACE_MIGRATION.zh-CN.md README.md README.zh-Hant.md
+
+  windows-archive:
+    name: Windows archive and NTFS junction boundaries
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test archive boundaries with real Windows junctions
+        run: python -m unittest discover -s tool/ci -p 'test_archive_intermediates.py' -v

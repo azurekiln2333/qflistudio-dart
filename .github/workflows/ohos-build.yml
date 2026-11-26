@@ -91,6 +91,7 @@ jobs:
           flutter --version --machine > "$RUNNER_TEMP/ohos-flutter-version.json"
           flutter pub get
       - name: Build unsigned ARM64 HAP and APP
+        id: build
         env:
           JAVA_TOOL_OPTIONS: -Xms32m -Xmx1536m -XX:+UseSerialGC
         run: |
@@ -119,11 +120,9 @@ jobs:
         id: intermediates
         if: ${{ always() && !cancelled() }}
         env:
-          BUILD_STATUS: ${{ job.status }}
-        run: |
-          if [ -f tool/ci/archive_intermediates.py ]; then
-            python3 tool/ci/archive_intermediates.py --name intermediates-ohos-arm64 --output dist/intermediates --job-status "$BUILD_STATUS"
-          fi
+          JOB_STATUS: ${{ job.status }}
+          BUILD_STATUS: ${{ steps.build.outcome }}
+        run: python3 tool/ci/archive_intermediates.py --name intermediates-ohos-arm64 --output dist/intermediates --job-status "$JOB_STATUS" --build-status "$BUILD_STATUS"
       - name: Upload OHOS intermediate archive
         if: ${{ always() && steps.intermediates.outputs.created == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
