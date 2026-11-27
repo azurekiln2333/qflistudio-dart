@@ -373,6 +373,25 @@ def verify_macos(image, arch):
     }
 
 
+def remove_ios_bundle_signatures(app):
+    """Remove inherited bundle signatures from the disposable IPA staging copy."""
+    # --no-codesign leaves a pre-signed upstream Flutter.framework unchanged.
+    # Keep the original xcarchive intact and use codesign before removing any
+    # remaining resource directory. Do not merely delete the signature seal.
+    app = app.resolve(strict=True)
+    signatures = sorted(app.rglob('_CodeSignature'), key=lambda path: len(path.parts),
+                        reverse=True)
+    for signature in signatures:
+        bundle = signature.parent
+        if (signature.is_symlink() or not signature.is_dir()
+                or not signature.resolve(strict=True).is_relative_to(app)
+                or bundle.suffix not in {'.app', '.framework', '.appex'}):
+            raise SystemExit(f'Unexpected iOS signature location: {signature}')
+        run(['codesign', '--remove-signature', bundle])
+        if signature.exists():
+            shutil.rmtree(signature)
+
+
 def build_ios(archive, output):
     app = archive / 'Products/Applications/Runner.app'
     require_files(app, ['Info.plist', 'Runner'])
@@ -381,6 +400,7 @@ def build_ios(archive, output):
         payload = Path(directory) / 'Payload'
         payload.mkdir()
         run(['ditto', app, payload / app.name])
+        remove_ios_bundle_signatures(payload / app.name)
         target.unlink(missing_ok=True)
         run(['zip', '-qry', target, 'Payload'], cwd=directory)
     return target

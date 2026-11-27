@@ -2,9 +2,12 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
+import subprocess
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 import package_installer
 
@@ -96,6 +99,51 @@ class PackageInstallerTest(unittest.TestCase):
         self.assertFalse(details['machOSignatureVerified'])
         self.assertEqual(details['signing'], 'unsigned')
         self.assertFalse(details['installVerified'])
+
+    def test_ios_packaging_removes_inherited_signatures_only_in_staging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / 'Runner.xcarchive'
+            source = archive / 'Products/Applications/Runner.app'
+            source.mkdir(parents=True)
+            (source / 'Info.plist').write_bytes(plistlib.dumps({}))
+            (source / 'Runner').write_bytes(b'application')
+            signature = Path('Frameworks/Flutter.framework/_CodeSignature')
+            (source / signature).mkdir(parents=True)
+            (source / signature / 'CodeResources').write_bytes(b'upstream seal')
+            commands = []
+
+            def command(arguments, **options):
+                commands.append(arguments)
+                if arguments[0] == 'ditto':
+                    shutil.copytree(arguments[1], arguments[2])
+                elif arguments[0] == 'codesign':
+                    self.assertNotEqual(arguments[-1], source / signature.parent)
+                    self.assertEqual(arguments[1], '--remove-signature')
+                elif arguments[0] == 'zip':
+                    staged = Path(options['cwd']) / 'Payload/Runner.app'
+                    self.assertFalse((staged / signature).exists())
+                    self.assertEqual((staged / 'Runner').read_bytes(), b'application')
+                else:
+                    self.fail(f'Unexpected packaging command: {arguments}')
+
+            with patch.object(package_installer, 'run', side_effect=command):
+                package_installer.build_ios(archive, root)
+            self.assertEqual([command[0] for command in commands], ['ditto', 'codesign', 'zip'])
+            self.assertEqual((source / signature / 'CodeResources').read_bytes(), b'upstream seal')
+
+    def test_ios_signature_removal_failure_keeps_the_resource_seal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / 'Runner.app'
+            signature = app / 'Frameworks/Flutter.framework/_CodeSignature'
+            signature.mkdir(parents=True)
+            seal = signature / 'CodeResources'
+            seal.write_bytes(b'upstream seal')
+            with patch.object(package_installer, 'run',
+                              side_effect=subprocess.CalledProcessError(1, 'codesign')):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    package_installer.remove_ios_bundle_signatures(app)
+            self.assertEqual(seal.read_bytes(), b'upstream seal')
 
     def test_rejects_an_ipa_with_a_profile_or_stray_entries(self):
         with tempfile.TemporaryDirectory() as directory:

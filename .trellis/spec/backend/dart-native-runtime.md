@@ -128,7 +128,12 @@ Android input preparation is `bash native/dart-sdk/android/prepare_sdk.sh <abi>
   read-only and checks architecture, codesigning and SDK links. Never execute
   the bundled macOS helpers from the mounted image: they carry sandbox
   inheritance entitlements and fail outside the sandboxed application. iOS
-  reads the IPA back and rejects a signature or provisioning profile.
+  removes inherited upstream bundle signatures with `codesign --remove-signature`
+  only in the disposable IPA staging copy. A `--no-codesign` build can still
+  contain an upstream signed Flutter.framework. Keep the original xcarchive
+  unchanged. Signature-removal failure must stop packaging. The ZIP readback
+  rejects signature resources and provisioning profiles; it does not inspect
+  Mach-O embedded signatures or prove device installation.
   `installVerified` is true only for Windows and Linux. No check starts the
   application window; UI and device runtime remain unverified in provenance.
 - Android Gradle uses the same `target-platform` list for SDK validation,
