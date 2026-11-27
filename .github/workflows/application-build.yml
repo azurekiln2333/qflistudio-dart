@@ -45,6 +45,10 @@ jobs:
       CI_NAME: ${{ matrix.name }}
       CI_ABI: ${{ matrix.abi }}
     steps:
+      - name: Enable long Git paths for preserved dependency history
+        if: matrix.platform == 'windows'
+        working-directory: .
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: qfli_dart
