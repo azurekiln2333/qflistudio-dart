@@ -91,3 +91,9 @@ The unified directive supersedes the earlier deletion plan. Preserve private/gen
 - Target Codex w6M:p1 acknowledged read-only standby and parent policy. This is not final handoff acceptance.
 
 The reviewed fixes still require exact-SHA cloud validation after main publication. Final parity, preservation moves and target handoff remain open. No local builds, tests, analyzers, dependency installations or artifact downloads were run.
+
+## Published main and hosted follow-up, 2026-11-27
+
+The orchestra gate fast-forwarded GitHub main to `f6cc154dbc196bb96ce23258c04cfadc77610362` with no exceptions, problems or warnings. Both source branches and all six audited remote heads were contained; all branches and the native input tag remain. The hosted Android SDK run `45946616268`, application run `45946616239`, Apple run `45946616273` and OHOS run `45946616235` succeeded on that commit. This includes the unsigned IPA staging change. In source/tooling run `45946616388`, Windows archive/junction checks succeeded; the only failed step reported one synonym pair in GITHUB_BUILD.zh-CN.md. The follow-up uses the same verb for generation throughout that document.
+
+For the closing commit, look up Actions by the full GitHub main SHA, including manually dispatched platform workflows when only documentation changes. The acceptance receipt is the orchestra status file `qflistudio-dart.done.json`; an incomplete run uses `qflistudio-dart.blocked.json`. The receipt records the exact SHA, target acknowledgement and preservation results outside the repository so recording those results does not change the tested commit. On another PC, verify the five hosted workflows against the cloned commit before relying on its packages. Release signing, notarization and physical-device acceptance remain separate.

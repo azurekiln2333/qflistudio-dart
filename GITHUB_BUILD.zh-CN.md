@@ -158,7 +158,7 @@ validation
 这些验证不启动应用窗口。
 `installVerified` 仅在 Windows 和 Linux 为 `true`。
 工作流不运行磁盘映像内的应用。
-IPA 打包先创建一次性暂存副本。
+IPA 打包先生成一次性暂存副本。
 打包脚本仅在副本中运行 `codesign --remove-signature`。
 原始 `.xcarchive` 保持不变。
 iOS 步骤仅确认包内没有签名资源和描述文件。
