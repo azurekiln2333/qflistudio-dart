@@ -40,3 +40,7 @@ The current-user registry contains five WSL2 registrations. Only exact registry-
 The four located VHD files total 125,398,155,264 bytes (116.786133 GiB). The default Ubuntu base exists but is empty; no VhdFileName value or conventional ext4.vhdx was found. This is unresolved registration state, not proof of zero size or permission to delete. Physical allocation, running state, other-user/unregistered images and guest contents were not inspected.
 
 Shared WSL cleanup remains outside Dart ownership. Core coordinator w63:p1 confirmed inventory-only coordination. Each owning product must preserve its independent sources/configuration and agree readiness before distribution-specific unregister. Never delete a registered VHD directly.
+
+## Superseding preservation directive - 2026-11-27
+
+The unified QFLI directive overrides every earlier conditional deletion statement in this historical inventory. No deletion or WSL unregister is authorized for this migration. Root will preserve private and generated content by moving exact audited roots/files into `D:/MyNewProjects/_migration-backup/qflistudio-dart-20261127`. See `ignored-input-audit.md` for the nonoverlapping manifest. Preserve the two nested core repositories, their Git metadata, local signing recovery file, SDK inputs and historical device evidence intact in the private backup. Keep the old source clone itself. Any later storage reclamation requires a separate owner decision.

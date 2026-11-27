@@ -77,3 +77,17 @@ The two installer runs precede candidate 1f63032 and do not cover its new cloud 
 Final acceptance has NOT passed. Root must retain exact final-SHA cloud evidence, finish GitHub main integration, synchronize and compare both workspaces, commit the completed Trellis evidence, and obtain target Codex acknowledgement. Failed, cancelled or unfinished candidate runs require explicit follow-up; historical successes cannot replace them.
 
 Distribution signing, macOS notarization, installed-device execution and application-sandbox SDK acceptance remain distinct external gates. Build/package success does not prove those gates. Cleanup inventory is not deletion approval. Keep this task in progress until the migration acceptance and handoff are complete.
+
+## Unified migration checkpoint - 2026-11-27
+
+The unified directive supersedes the earlier deletion plan. Preserve private/generated content under `D:/MyNewProjects/_migration-backup/qflistudio-dart-20261127`; do not delete files, branches, worktrees or WSL distributions. All future publication goes through `_orchestra/push/qflistudio-dart.json`, never a direct push by this root.
+
+- Refreshed all five remote audits and per-branch dispositions in `branch-disposition.md`. No remote-unique work was found; retain all remote branches.
+- Copied the parent QFLI workspace rules verbatim into tracked AGENTS.md. Fixed cloud-reported Chinese terminology without running the linter locally.
+- `candidate-cloud-evidence.json` records exact 24b6e11 run metadata and artifact IDs/checksums. Native Android, Android/Windows/Linux and OHOS succeeded. Both macOS jobs succeeded; iOS IPA failed on an inherited Flutter framework signature. Cloud checks failed the Windows relative-link fixture and six Chinese findings.
+- Commit `593b1a2` repairs native Windows link targets in fixtures and emits POSIX tar link headers only after the existing strict selection checks. Real Windows junction checks remain intact.
+- Commit `1cd9785` removes inherited iOS bundle signatures only from the disposable IPA staging copy. The original xcarchive remains untouched. Failures stop packaging; archive readback still only proves resource/profile absence, not arbitrary Mach-O signature absence or device acceptance.
+- Commit `418ef9a` retains the portable public OHOS root lock as source. Nested machine-specific locks remain ignored. Unverified local Gradle wrapper originals will be preserved privately; pinned clean-cloud wrapper regeneration is documented in `ignored-input-audit.md`.
+- Target Codex w6M:p1 acknowledged read-only standby and parent policy. This is not final handoff acceptance.
+
+The reviewed fixes still require exact-SHA cloud validation after main publication. Final parity, preservation moves and target handoff remain open. No local builds, tests, analyzers, dependency installations or artifact downloads were run.

@@ -110,7 +110,7 @@ pubspec.yaml 用路径覆盖指向它。
 
 ## 开发与测试
 
-以下命令只在 GitHub Actions 执行。
+以下命令只在 GitHub Actions 运行。
 本机不运行构建、测试和静态分析。
 
 生成内容资产。

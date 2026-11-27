@@ -158,6 +158,9 @@ validation
 这些验证不启动应用窗口。
 `installVerified` 仅在 Windows 和 Linux 为 `true`。
 工作流不运行磁盘映像内的应用。
+IPA 打包先创建一次性暂存副本。
+打包脚本仅在副本中运行 `codesign --remove-signature`。
+原始 `.xcarchive` 保持不变。
 iOS 步骤仅确认包内没有签名资源和描述文件。
 该步骤未校验 Mach-O 内嵌签名。
 工作流不做 iOS 真机测试。
@@ -237,7 +240,7 @@ OHOS：
 
 本机禁止构建、测试和静态分析。
 本机禁止安装依赖和下载构建产物。
-所有验证都在 GitHub Actions 执行。
+所有验证都在 GitHub Actions 运行。
 迁移步骤见 `WORKSPACE_MIGRATION.zh-CN.md`。
 
 | 工作流 | 作用 |
@@ -289,21 +292,29 @@ OHOS 构建使用未经此补丁修改的核心。
 | 目录 | 逻辑字节 | 处理说明 |
 | --- | ---: | --- |
 | `build/` | 6,465,525,036 | 保留嵌套仓库、审计和发布证据 |
-| `.dart_tool/` | 1,091,755,810 | 依赖缓存，交接后再清理 |
+| `.dart_tool/` | 1,091,755,810 | 依赖缓存，移入备份目录 |
 | `native/build/` | 584,434,321 | 先保留 SDK 输入和原生文件 |
 | `ohos/entry/build/` | 249,678,423 | 构建中间文件 |
 | `ohos/build/` | 94,216,372 | 构建中间文件 |
-| `ohos/oh_modules/` | 80,363,408 | 依赖缓存，不跟随目录链接清理 |
+| `ohos/oh_modules/` | 80,363,408 | 依赖缓存，不跟随目录链接移动 |
 
 `build/` 混有源码、审计、发布和签名证据。
-不要删除整个 `build/` 目录。
+本次迁移禁止任何删除。
+私有文件和生成文件须移入备份目录。
+备份目录如下：
 
-Core 临时克隆的九文件修改已与补丁核对。
+```text
+D:/MyNewProjects/_migration-backup/qflistudio-dart-20261127
+```
+
+保留受控源码、嵌套仓库和迁移证据。
+
+Core 临时克隆的九文件修改已与补丁校验。
 两份克隆当前仍保留在原目录。
 原生 SDK 输入和签名材料也继续保留。
-完整清理清单见 Trellis 迁移任务中的 `cleanup-audit.md`。
+完整盘点清单见 Trellis 迁移任务中的 `cleanup-audit.md`。
 
-云端构建不会自动清理本地文件。
+云端构建不会自动移动本地文件。
 请勿下载中间产物到工作区。
 
 Android SDK 的恢复路径和输入归档见：
