@@ -1,0 +1,386 @@
+{
+  "commit": "59236e3885fc1c11e3c2ac3d75c6584e2668f70e",
+  "observed_at": "2026-11-27T14:45:45.3369743+08:00",
+  "source": "GitHub Actions API, metadata only; no artifact downloads",
+  "runs": [
+    {
+      "workflow": "Android native SDK",
+      "path": ".github/workflows/native-android-sdk.yml",
+      "run_id": "45951786422",
+      "attempt": 1,
+      "head_sha": "59236e3885fc1c11e3c2ac3d75c6584e2668f70e",
+      "event": "workflow_dispatch",
+      "conclusion": "success",
+      "url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45951786422",
+      "jobs": [
+        {
+          "id": 140349085755,
+          "name": "Package x86_64",
+          "conclusion": "success"
+        },
+        {
+          "id": 140349086132,
+          "name": "Package arm64-v8a",
+          "conclusion": "success"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 15176608931,
+          "name": "native-android-arm64-v8a",
+          "size_in_bytes": 149880583,
+          "digest": "sha256:c7a71711c8d36e52e3f0ecb0d9b4b5f6a2226fe8c096a63c77a93e07135b7319",
+          "created_at": "2026-11-27T06:26:04Z",
+          "expires_at": "2026-12-27T06:25:58Z"
+        },
+        {
+          "id": 15176499391,
+          "name": "native-android-x86_64",
+          "size_in_bytes": 208302631,
+          "digest": "sha256:951e140b44876fa978514664834d1addbdbb34d1e1db787968a755d3b32be9b8",
+          "created_at": "2026-11-27T06:26:18Z",
+          "expires_at": "2026-12-27T06:26:06Z"
+        }
+      ]
+    },
+    {
+      "workflow": "OHOS application and native libraries",
+      "path": ".github/workflows/ohos-build.yml",
+      "run_id": "45951779258",
+      "attempt": 1,
+      "head_sha": "59236e3885fc1c11e3c2ac3d75c6584e2668f70e",
+      "event": "workflow_dispatch",
+      "conclusion": "success",
+      "url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45951779258",
+      "jobs": [
+        {
+          "id": 140349062616,
+          "name": "OHOS ARM64 unsigned HAP, APP and native libraries",
+          "conclusion": "success"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 15177341701,
+          "name": "native-ohos-arm64-libraries",
+          "size_in_bytes": 14625253,
+          "digest": "sha256:1cabf4b3c8800e88fd0e433e4b7368750cbd34a32fb1aa5330871b00b0e2a765",
+          "created_at": "2026-11-27T06:30:29Z",
+          "expires_at": "2026-12-27T06:30:28Z"
+        },
+        {
+          "id": 15176992020,
+          "name": "app-ohos-arm64-unsigned",
+          "size_in_bytes": 34719577,
+          "digest": "sha256:565df71e27178779d02d112592bc22610d27ac10d277a5435d43b8530c6da49f",
+          "created_at": "2026-11-27T06:30:27Z",
+          "expires_at": "2026-12-27T06:30:25Z"
+        },
+        {
+          "id": 15176962182,
+          "name": "intermediates-ohos-arm64",
+          "size_in_bytes": 134186825,
+          "digest": "sha256:56b24984feb20e7b9ed69a9d2fc0027b5cfc82c156838f336ddfa380610112af",
+          "created_at": "2026-11-27T06:30:34Z",
+          "expires_at": "2026-11-30T06:30:33Z"
+        }
+      ]
+    },
+    {
+      "workflow": "Apple applications and native dependencies",
+      "path": ".github/workflows/apple-build.yml",
+      "run_id": "45951769696",
+      "attempt": 1,
+      "head_sha": "59236e3885fc1c11e3c2ac3d75c6584e2668f70e",
+      "event": "workflow_dispatch",
+      "conclusion": "success",
+      "url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45951769696",
+      "jobs": [
+        {
+          "id": 140349032192,
+          "name": "macOS x64 SDK and application",
+          "conclusion": "success"
+        },
+        {
+          "id": 140349032539,
+          "name": "iOS ARM64 unsigned archive and native frameworks",
+          "conclusion": "success"
+        },
+        {
+          "id": 140349032581,
+          "name": "macOS arm64 SDK and application",
+          "conclusion": "success"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 15178140561,
+          "name": "installer-macos-x64",
+          "size_in_bytes": 257734018,
+          "digest": "sha256:73924ed459e8d3ccfe8edbf5e16e80f4580a2f3f5f34c1262779212427d7a935",
+          "created_at": "2026-11-27T06:41:22Z",
+          "expires_at": "2026-12-27T06:41:05Z"
+        },
+        {
+          "id": 15178106261,
+          "name": "app-macos-x64",
+          "size_in_bytes": 227839181,
+          "digest": "sha256:eef3ec5da2fb0224f0cf5fe55e78467bdb0e4c9917ae883575cd608972b00cf6",
+          "created_at": "2026-11-27T06:38:53Z",
+          "expires_at": "2026-12-27T06:38:37Z"
+        },
+        {
+          "id": 15177951088,
+          "name": "intermediates-macos-x64",
+          "size_in_bytes": 91782881,
+          "digest": "sha256:817aa895f1a64e93abdf0d01c181b48927afa03ab3edc864757d5e97027d2799",
+          "created_at": "2026-11-27T06:41:31Z",
+          "expires_at": "2026-11-30T06:41:28Z"
+        },
+        {
+          "id": 15177646088,
+          "name": "native-macos-x64",
+          "size_in_bytes": 211391087,
+          "digest": "sha256:f154f205efa6c496a3ed7ebd8a21d65751a1aabeb522a57b6b60ca81698650c9",
+          "created_at": "2026-11-27T06:31:36Z",
+          "expires_at": "2026-12-27T06:31:20Z"
+        },
+        {
+          "id": 15177307795,
+          "name": "app-ios-arm64-unsigned-xcarchive",
+          "size_in_bytes": 51004194,
+          "digest": "sha256:3342aa852c5a0163b0ec4c069cf4c5c241720c7199ca08bc6add45d97dea47ef",
+          "created_at": "2026-11-27T06:31:21Z",
+          "expires_at": "2026-12-27T06:31:18Z"
+        },
+        {
+          "id": 15177267447,
+          "name": "app-macos-arm64",
+          "size_in_bytes": 224315248,
+          "digest": "sha256:37f8fe9c79e38c0a265c68b282c0beb537cb4767bcad45d90c81a3060a54288b",
+          "created_at": "2026-11-27T06:35:46Z",
+          "expires_at": "2026-12-27T06:35:36Z"
+        },
+        {
+          "id": 15177073013,
+          "name": "installer-ios-arm64-unsigned",
+          "size_in_bytes": 13502997,
+          "digest": "sha256:f2c16f85aba69d6dd694890d6abddbdcd3696ff6bc19807b92c3437fae3a73b1",
+          "created_at": "2026-11-27T06:31:28Z",
+          "expires_at": "2026-12-27T06:31:26Z"
+        },
+        {
+          "id": 15177013567,
+          "name": "native-ios-arm64-frameworks",
+          "size_in_bytes": 13638675,
+          "digest": "sha256:bf5e77b08056c4331ec34750592df88581dcc525c8e705d201d892f023f280bc",
+          "created_at": "2026-11-27T06:31:23Z",
+          "expires_at": "2026-12-27T06:31:21Z"
+        },
+        {
+          "id": 15177008061,
+          "name": "intermediates-macos-arm64",
+          "size_in_bytes": 88696855,
+          "digest": "sha256:20ec602aece2bc35d2faf0d622fce578d9d01b160aafc9d042acab0412aa6bb3",
+          "created_at": "2026-11-27T06:36:42Z",
+          "expires_at": "2026-11-30T06:36:37Z"
+        },
+        {
+          "id": 15177006813,
+          "name": "native-macos-arm64",
+          "size_in_bytes": 210474548,
+          "digest": "sha256:ed5e3c94e83c5470a3ccd52717eacfe0b4b2147124778ddd416a17683bff2760",
+          "created_at": "2026-11-27T06:28:05Z",
+          "expires_at": "2026-12-27T06:27:52Z"
+        },
+        {
+          "id": 15176983082,
+          "name": "installer-macos-arm64",
+          "size_in_bytes": 252487703,
+          "digest": "sha256:1628aa575c27d033d8cf685505b7339d813e0efb1dd0abfb5c17c89ed6a26799",
+          "created_at": "2026-11-27T06:36:33Z",
+          "expires_at": "2026-12-27T06:36:19Z"
+        },
+        {
+          "id": 15176674633,
+          "name": "intermediates-ios-arm64",
+          "size_in_bytes": 76508239,
+          "digest": "sha256:1c5763aaf259ac26c44c9ba9249013ca4ed2f359fb238cd4a36a5e618930706b",
+          "created_at": "2026-11-27T06:31:34Z",
+          "expires_at": "2026-11-30T06:31:32Z"
+        }
+      ]
+    },
+    {
+      "workflow": "Android Windows Linux applications",
+      "path": ".github/workflows/application-build.yml",
+      "run_id": "45951761396",
+      "attempt": 1,
+      "head_sha": "59236e3885fc1c11e3c2ac3d75c6584e2668f70e",
+      "event": "workflow_dispatch",
+      "conclusion": "success",
+      "url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45951761396",
+      "jobs": [
+        {
+          "id": 140349005240,
+          "name": "android-arm64-v8a",
+          "conclusion": "success"
+        },
+        {
+          "id": 140349005385,
+          "name": "android-x86_64",
+          "conclusion": "success"
+        },
+        {
+          "id": 140349005396,
+          "name": "windows-x64",
+          "conclusion": "success"
+        },
+        {
+          "id": 140349005929,
+          "name": "linux-x64",
+          "conclusion": "success"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 15177810339,
+          "name": "intermediates-linux-x64",
+          "size_in_bytes": 27737814,
+          "digest": "sha256:6f1602afb2b1b51429fc38bd85394cc01f4317d68ca2dd8afa63b945b179eb53",
+          "created_at": "2026-11-27T06:32:24Z",
+          "expires_at": "2026-11-30T06:32:23Z"
+        },
+        {
+          "id": 15177685022,
+          "name": "native-windows-x64",
+          "size_in_bytes": 208900948,
+          "digest": "sha256:e08a7671c5b89f5dd548bc1226e84db97582ebdb5b76df43bc82960bd4508acb",
+          "created_at": "2026-11-27T06:27:22Z",
+          "expires_at": "2026-12-27T06:27:15Z"
+        },
+        {
+          "id": 15177612159,
+          "name": "host-checks-linux-x64",
+          "size_in_bytes": 5620,
+          "digest": "sha256:44ea539a3025dc2ce27674b75914e3728d9429b3745a97957e918fcd576a727e",
+          "created_at": "2026-11-27T06:32:25Z",
+          "expires_at": "2026-11-30T06:32:25Z"
+        },
+        {
+          "id": 15177560783,
+          "name": "native-linux-x64",
+          "size_in_bytes": 226593426,
+          "digest": "sha256:a337d6f2ab03716eaba33b13741e652f51d494af0225113d0f746cae314b59d7",
+          "created_at": "2026-11-27T06:27:20Z",
+          "expires_at": "2026-12-27T06:27:15Z"
+        },
+        {
+          "id": 15177486514,
+          "name": "installer-windows-x64",
+          "size_in_bytes": 165713787,
+          "digest": "sha256:68c0e35417ca2509344bb103a4beb3561b5847b068f3580cef01098234ed1599",
+          "created_at": "2026-11-27T06:31:57Z",
+          "expires_at": "2026-12-27T06:31:51Z"
+        },
+        {
+          "id": 15177417341,
+          "name": "intermediates-android-x86_64",
+          "size_in_bytes": 892973292,
+          "digest": "sha256:0589935d73dbfff4a215327464e4c654791bb7244e11a209bb3adfd94bdf23f6",
+          "created_at": "2026-11-27T06:30:09Z",
+          "expires_at": "2026-11-30T06:30:04Z"
+        },
+        {
+          "id": 15177402737,
+          "name": "installer-linux-x64",
+          "size_in_bytes": 170970362,
+          "digest": "sha256:c773dd668e19ee0860f468a008682f045f3a029758bad38c12c245cf6b54979c",
+          "created_at": "2026-11-27T06:32:22Z",
+          "expires_at": "2026-12-27T06:32:18Z"
+        },
+        {
+          "id": 15177221580,
+          "name": "intermediates-android-arm64-v8a",
+          "size_in_bytes": 708845917,
+          "digest": "sha256:e1312cdb44a7afa403bff5243c80bcbfda24f62159650e5ea7da28e85a10505b",
+          "created_at": "2026-11-27T06:29:59Z",
+          "expires_at": "2026-11-30T06:29:54Z"
+        },
+        {
+          "id": 15177116887,
+          "name": "app-linux-x64",
+          "size_in_bytes": 250267762,
+          "digest": "sha256:aafdee24e54f45bfdf67160327e2ae822d23e7857f696fbfda92e79f3e7dce1c",
+          "created_at": "2026-11-27T06:31:03Z",
+          "expires_at": "2026-12-27T06:30:57Z"
+        },
+        {
+          "id": 15177087911,
+          "name": "app-windows-x64",
+          "size_in_bytes": 226279784,
+          "digest": "sha256:a669901ade13e1ef9fe19f3c7035524183bb27141cc72474b7f4454443f12311",
+          "created_at": "2026-11-27T06:30:24Z",
+          "expires_at": "2026-12-27T06:30:16Z"
+        },
+        {
+          "id": 15177068124,
+          "name": "app-android-x86_64",
+          "size_in_bytes": 219927749,
+          "digest": "sha256:9fa88c0102c665303b959023971a06d2aebc6ae6576927412d3cbd467fc2729c",
+          "created_at": "2026-11-27T06:29:42Z",
+          "expires_at": "2026-12-27T06:29:36Z"
+        },
+        {
+          "id": 15176887192,
+          "name": "app-android-arm64-v8a",
+          "size_in_bytes": 160661877,
+          "digest": "sha256:749082af52f6384084ab161348fe36629caf1e5531ffc8fb599354c643c0b9ad",
+          "created_at": "2026-11-27T06:29:38Z",
+          "expires_at": "2026-12-27T06:29:34Z"
+        },
+        {
+          "id": 15176822728,
+          "name": "intermediates-windows-x64",
+          "size_in_bytes": 27856792,
+          "digest": "sha256:6ab3b4843b04c6dda9a1509c4be6b1cad2b585367ca25d356431dd7e762efaa4",
+          "created_at": "2026-11-27T06:32:01Z",
+          "expires_at": "2026-11-30T06:31:59Z"
+        }
+      ]
+    },
+    {
+      "workflow": "Cloud source and tooling checks",
+      "path": ".github/workflows/cloud-check.yml",
+      "run_id": "45951389682",
+      "attempt": 1,
+      "head_sha": "59236e3885fc1c11e3c2ac3d75c6584e2668f70e",
+      "event": "push",
+      "conclusion": "success",
+      "url": "https://github.com/azurekiln2333/qflistudio-dart/actions/runs/45951389682",
+      "jobs": [
+        {
+          "id": 140347828973,
+          "name": "Windows archive and NTFS junction boundaries",
+          "conclusion": "success"
+        },
+        {
+          "id": 140347829209,
+          "name": "check",
+          "conclusion": "success"
+        }
+      ],
+      "artifacts": []
+    }
+  ],
+  "signing": {
+    "Windows": "Unsigned setup; hosted installation verification",
+    "Linux": "Debian package; no distribution signature claimed",
+    "macOS": "Ad hoc application signing; no notarization",
+    "iOS": "Unsigned IPA; packaging checks signature resources and profiles, not arbitrary Mach-O signatures or device acceptance",
+    "Android": "Test-signed APKs for arm64-v8a and x86_64",
+    "OHOS": "Unsigned ARM64 HAP and APP",
+    "devices": "No physical-device acceptance or production signing claimed"
+  },
+  "scope": "Accepted main checkpoint 59236e3 before this evidence-only commit. For later commits require exact-SHA Actions evidence; query the cloned HEAD. No artifact contents downloaded."
+}

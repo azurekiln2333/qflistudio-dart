@@ -1,5 +1,13 @@
 # Branch disposition - fresh audit, 2026-11-27
 
+## Integration addendum
+
+At the accepted main checkpoint `59236e3885fc1c11e3c2ac3d75c6584e2668f70e`, source main and GitHub main match, source installer branch `f6cc154dbc196bb96ce23258c04cfadc77610362` is contained, and published installer branch `24b6e11a80c26beef83eac00c594dd42e5bfc4c8` is contained. Each mirror main remains `788a519be90ec48b8ad591b1c93668cfcb892435` and contained. Disposition for each of the two local branches and six remote branches: retain; their effective work is integrated in main. No remote branch deletion or mirror push occurred. The evidence-only closing commit will extend main without changing these dispositions. The immutable native input tag remains unchanged.
+
+The target fast-forwarded to that checkpoint and passed independent Herdr acceptance. See `handoff-checkpoint.md` for clean-state, byte-parity, cloud evidence and the remaining preservation hold. The tables below are the original audit snapshot, preserved as history.
+
+## Original audit
+
 Integration owner: `w5S:p1`. Auditor: `w5S:p4`.
 
 **Integration is pending.** This is a read-only Git/remote evidence checkpoint, not final migration acceptance. No branch was merged, advanced, pushed or deleted by this audit. No remote branch deletion is permitted.

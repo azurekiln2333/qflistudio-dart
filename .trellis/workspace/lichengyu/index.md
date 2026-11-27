@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
-- **Last Active**: 2026-11-26
+- **Total Sessions**: 4
+- **Last Active**: 2026-11-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~164 | Active |
+| `journal-1.md` | ~176 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-11-27 | Published main, hosted builds and destination handoff | `f6cc154`, `59236e3` | `main` |
 | 3 | 2026-11-26 | GitHub workspace migration preservation checkpoint | `f885395`, `70c7a62`, `1f63032` | `ci/installer-packages` |
 | 2 | 2026-11-17 | Cross-platform GitHub builds and GPL alignment | `d781661`, `2f9243a`, `a08421d`, `edcf9ca` | `ci/native-android-sdk` |
 | 1 | 2026-10-15 | Dart store audit, terminal repair and platform verification | `3e17a63`, `fae207e`, `602e4a0`, `901bb35`, `2341e78`, `84ae58b`, `38e082c`, `07a3d11` | `main` |

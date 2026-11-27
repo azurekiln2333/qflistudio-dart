@@ -12,7 +12,7 @@
   "assignee": "lichengyu",
   "createdAt": "2026-11-26",
   "completedAt": null,
-  "branch": "ci/installer-packages",
+  "branch": "main",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "See handoff-checkpoint.md and accepted-cloud-evidence.json. Published 59236e3 passed five exact-SHA workflows and destination acceptance. Forty-four preservation entries moved intact. The .agents directory remains because Windows deny ACLs prevent its move; no bypass attempted. Task remains in progress for that explicit hold and final evidence-commit receipt.",
   "meta": {}
 }

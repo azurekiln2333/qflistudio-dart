@@ -1,5 +1,7 @@
 # Execution
 
+Latest checkpoint: see `handoff-checkpoint.md`. The accepted main checkpoint passed all five hosted workflows and destination verification. Forty-four preservation entries were moved; the protected `.agents` directory remains an explicit hold. Historical open checklists below describe their dated checkpoints and do not supersede this record.
+
 ## Progress checkpoint — 2026-11-26
 
 Integration owner: w5S:p1. This is an in-progress evidence checkpoint, not final migration acceptance.

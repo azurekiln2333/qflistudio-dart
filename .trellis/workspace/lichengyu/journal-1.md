@@ -162,3 +162,15 @@ Only documentation edits and read-only source/Git evidence inspection were perfo
 - Commit the final evidence records, fast-forward the E drive clone from GitHub, and compare commit/tree, actual tracked contents and Trellis inventories. Confirm both workspaces are clean and match GitHub main.
 - Obtain target Codex acknowledgement through Herdr before accepting migration or cleaning the old workspace.
 - Retain distribution signing, macOS notarization, installed-device execution and application-sandbox SDK acceptance as separate external gates.
+
+## Session 4: Published main, hosted builds and destination handoff
+
+Date: 2026-11-27. Branch: main.
+
+Commits: `f6cc154` preserved reviewed migration work; `59236e3` fixed the final Chinese wording finding and recorded hosted build progress. The GitHub push gate passed both commits without warnings or exceptions. All five workflows passed at 59236e3 and exposed 30 expected artifacts. This includes Windows link/junction coverage and the corrected unsigned iOS IPA packaging.
+
+Root fast-forwarded E:/MyNewProjects/QFLIProjects/qflistudio-dart from GitHub. Source, destination and GitHub matched SHA 59236e3885fc1c11e3c2ac3d75c6584e2668f70e and tree 4951903c33732caa7360596f9c352effa3daae2b. All 867 tracked files, including 407 Trellis files, matched byte-for-byte. Target Codex w6M:p1 independently accepted the handoff through Herdr.
+
+After acceptance, root moved 44 of 45 manifest entries intact to D:/MyNewProjects/_migration-backup/qflistudio-dart-20261127. Persistent IDs, individual-file hashes and 22 source probes matched. The whole build tree and both nested Core repositories remain preserved. No file, WSL distribution or Git branch was deleted. No local build, test, analyzer, installation or artifact download ran.
+
+The sole hold is the source .agents directory, whose explicit Windows deny ACL prevented its move. It remains intact; no permission bypass was attempted. Keep the migration task in progress for this hold. See its handoff-checkpoint.md and accepted-cloud-evidence.json for portable evidence. The evidence-only closing commit requires its own exact-SHA hosted results, destination comparison and final Herdr acknowledgement, recorded by root in the orchestra receipt.
