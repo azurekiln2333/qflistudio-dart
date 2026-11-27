@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: azurekiln2333/qflistudio-core
-          ref: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
+          ref: 1ae4674a4b153701b0c3b3ff04b1a1b77a318611
           path: qflistudio-core
           persist-credentials: false
       - name: Check out Flutter 3.41.9
@@ -95,7 +95,7 @@ jobs:
       - name: Resolve application dependencies
         run: |
           set -euo pipefail
-          python3 tool/ci/prepare_core.py --core ../qflistudio-core --flutter ../flutter
+          python3 ../qflistudio-core/tool/ci/prepare_flutter_core.py --core-root ../qflistudio-core --sdk-root ../flutter --sdk-revision 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694 --flavor official --app-root .
           flutter pub get
       - name: Verify SDK signing in a minimal application bundle
         run: |
@@ -151,7 +151,7 @@ jobs:
               'applicationCommit': os.environ['GITHUB_SHA'],
               'repository': os.environ['GITHUB_REPOSITORY'],
               'runId': os.environ['GITHUB_RUN_ID'],
-              'coreCommit': '573d1b6eecf1c2b392ad753264a5a09f62f8335e',
+              'coreCommit': '1ae4674a4b153701b0c3b3ff04b1a1b77a318611',
               'flutterCommit': '00b0c91f06209d9e4a41f71b7a512d6eb3b9c694',
               'platform': 'macos', 'architecture': os.environ['ARCH'],
               'signing': 'ad hoc', 'notarized': False,
@@ -228,7 +228,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: azurekiln2333/qflistudio-core
-          ref: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
+          ref: 1ae4674a4b153701b0c3b3ff04b1a1b77a318611
           path: qflistudio-core
           persist-credentials: false
       - name: Check out Flutter 3.41.9
@@ -246,7 +246,7 @@ jobs:
           ../flutter/bin/flutter config --no-analytics
           ../flutter/bin/flutter precache --ios
           ../flutter/bin/flutter --version --machine > "$RUNNER_TEMP/flutter-version.json"
-          python3 tool/ci/prepare_core.py --core ../qflistudio-core --flutter ../flutter
+          python3 ../qflistudio-core/tool/ci/prepare_flutter_core.py --core-root ../qflistudio-core --sdk-root ../flutter --sdk-revision 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694 --flavor official --app-root .
           ../flutter/bin/flutter pub get
       - name: Build unsigned iOS device archive
         id: build
@@ -277,7 +277,7 @@ jobs:
               'applicationCommit': os.environ['GITHUB_SHA'],
               'repository': os.environ['GITHUB_REPOSITORY'],
               'runId': os.environ['GITHUB_RUN_ID'],
-              'coreCommit': '573d1b6eecf1c2b392ad753264a5a09f62f8335e',
+              'coreCommit': '1ae4674a4b153701b0c3b3ff04b1a1b77a318611',
               'flutterCommit': '00b0c91f06209d9e4a41f71b7a512d6eb3b9c694',
               'platform': 'ios', 'architecture': 'arm64',
               'signing': 'unsigned', 'standaloneDartVmSdk': False,

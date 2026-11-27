@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: azurekiln2333/qflistudio-core
-          ref: 573d1b6eecf1c2b392ad753264a5a09f62f8335e
+          ref: 1ae4674a4b153701b0c3b3ff04b1a1b77a318611
           path: qflistudio-core
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,7 +83,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Prepare the pinned core for standard Flutter
-        run: python tool/ci/prepare_core.py --core ../qflistudio-core --flutter ../flutter
+        run: python ../qflistudio-core/tool/ci/prepare_flutter_core.py --core-root ../qflistudio-core --sdk-root ../flutter --sdk-revision 00b0c91f06209d9e4a41f71b7a512d6eb3b9c694 --flavor official --app-root .
       - name: Resolve app dependencies
         run: flutter pub get
       - name: Validate the Android native SDK
@@ -168,7 +168,7 @@ jobs:
               digest = hashlib.file_digest(stream, 'sha256').hexdigest()
           (output / 'SHA256SUMS').write_text(f'{digest}  {target.name}\n')
           evidence = {'commit': os.environ['GITHUB_SHA'], 'runId': os.environ['GITHUB_RUN_ID'],
-                      'coreCommit': '573d1b6eecf1c2b392ad753264a5a09f62f8335e',
+                      'coreCommit': '1ae4674a4b153701b0c3b3ff04b1a1b77a318611',
                       'flutterCommit': '00b0c91f06209d9e4a41f71b7a512d6eb3b9c694',
                       'platform': platform, 'architecture': os.environ['CI_ARCH'],
                       'signing': 'ephemeral debug key' if platform == 'android' else 'unsigned',
