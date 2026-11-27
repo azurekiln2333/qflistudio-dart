@@ -53,7 +53,12 @@ class IntermediateArchiveTest(unittest.TestCase):
             external = Path(directory) / 'outside'
             external.write_text('must not escape')
             (root / 'build/app/intermediates/native/object.o').chmod(0o755)
-            self.symlink(root / 'build/app/intermediates/internal-link', 'native/object.o')
+            internal_link = root / 'build/app/intermediates/internal-link'
+            # Windows stores the target verbatim; use its native separators.
+            self.symlink(internal_link, Path('native') / 'object.o')
+            self.assertEqual(internal_link.resolve(strict=True),
+                             (root / 'build/app/intermediates/native/object.o').resolve(strict=True))
+            self.assertEqual(internal_link.read_bytes(), b'native object')
             self.symlink(root / 'build/app/intermediates/unsafe-link', external)
             self.symlink(root / 'build/app/intermediates/broken-link', 'missing')
             self.symlink(root / 'build/app/intermediates/private-link', 'private.p12')
@@ -82,6 +87,41 @@ class IntermediateArchiveTest(unittest.TestCase):
                 digest, name = line.split('  ')
                 self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), digest)
             self.assertEqual(json.loads((output / 'provenance.json').read_text())['retentionDays'], 3)
+
+    def test_native_relative_links_have_portable_tar_headers_and_keep_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'repo'
+            source = root / 'native/build/objects/object.o'
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b'native object')
+            link = root / 'native/build/internal-link'
+            target = Path('objects') / 'object.o'
+            # This cloud regression requires real links, without a skip fallback.
+            link.symlink_to(target)
+            self.assertEqual(os.readlink(link), str(target))
+            self.assertEqual(link.resolve(strict=True), source.resolve(strict=True))
+            self.assertEqual(link.read_bytes(), b'native object')
+            # Even an included payload cannot make an absolute link portable.
+            absolute_link = link.with_name('absolute-link')
+            absolute_link.symlink_to(source.resolve(strict=True))
+            self.assertEqual(absolute_link.read_bytes(), b'native object')
+            external = Path(directory) / 'outside.o'
+            external.write_bytes(b'outside payload')
+            escaping_link = link.with_name('escaping-link')
+            escaping_link.symlink_to(os.path.relpath(external, link.parent))
+            self.assertEqual(escaping_link.read_bytes(), b'outside payload')
+            output = root / 'dist/intermediates'
+            archive_outputs(root, output, 'native-links', 'success')
+            with tarfile.open(output / 'native-links.tar.gz') as archive:
+                member = archive.getmember('native/build/internal-link')
+                self.assertTrue(member.issym())
+                self.assertEqual(member.linkname, 'objects/object.o')
+                self.assertEqual(archive.extractfile(member).read(), b'native object')
+                self.assertEqual(archive.extractfile('native/build/objects/object.o').read(),
+                                 b'native object')
+                names = set(archive.getnames())
+                self.assertNotIn('native/build/absolute-link', names)
+                self.assertNotIn('native/build/escaping-link', names)
 
     def test_empty_failed_source_warns_without_creating_output(self):
         with tempfile.TemporaryDirectory() as directory:

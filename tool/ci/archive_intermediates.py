@@ -156,6 +156,9 @@ def archive_outputs(root, output, name, job_status="unknown", build_status=None)
     with tarfile.open(target, "w:gz", compresslevel=1, dereference=False) as package:
         for member, path in sorted(members.items()):
             info = package.gettarinfo(str(path), arcname=member)
+            if info.issym():
+                # Accepted native targets need POSIX separators in a portable tar.
+                info.linkname = Path(info.linkname).as_posix()
             info.uid = info.gid = 0
             info.uname = info.gname = ""
             if info.isfile():
