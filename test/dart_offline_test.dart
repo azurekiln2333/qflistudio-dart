@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:qfli_dart/dart_content_repository.dart';
 import 'package:qfli_dart/main.dart' show dartProfile;
 import 'package:qfli_studio_core/editor/editor_page.dart';
 import 'package:qfli_studio_core/i18n/studio_localizations.dart';
@@ -16,6 +17,8 @@ import 'package:qfli_studio_core/models/project.dart';
 import 'package:qfli_studio_core/pages/community/post_list_page.dart';
 import 'package:qfli_studio_core/pages/home_page.dart';
 import 'package:qfli_studio_core/pages/local_content_pages.dart';
+import 'package:qfli_studio_core/pages/profile_page.dart';
+import 'package:qfli_studio_core/pages/settings_page.dart';
 import 'package:qfli_studio_core/services/project_templates.dart';
 import 'package:qfli_studio_core/services/studio_profile.dart';
 import 'package:qfli_studio_core/store/auth_store.dart';
@@ -114,28 +117,50 @@ void main() {
         ),
       ),
     );
-    // Let the shell build its first frame; the retained page view mounts the
-    // home tab. Content-tab loads are left pending on purpose — the assertions
-    // are about which *entries* exist, not their loaded content.
+    // Let the real shell mount Home before checking its named destinations.
     await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byType(HomeTab), findsOneWidget);
+    final rail = tester.widget<NavigationRail>(find.byType(NavigationRail));
+    expect(
+      rail.destinations.map((destination) => (destination.label as Text).data),
+      ['主页', '工具', '教程', '我的'],
+      reason: 'Home, Tools, Content and Profile are the four destinations',
+    );
+    expect(rail.selectedIndex, 0);
   }
 
-  // The navigation labels are not the hit targets; tap the destination control
-  // (the nth tappable region of the rail/bar), matching the shell's own tests.
-  Future<void> selectTab(WidgetTester tester, int index) async {
-    final host = find.byType(NavigationRail).evaluate().isNotEmpty
-        ? find.byType(NavigationRail)
-        : find.byType(NavigationBar);
+  // Resolve the destination by name, then tap its control rather than its label.
+  Future<void> selectTab(WidgetTester tester, String label) async {
+    final host = find.byType(NavigationRail);
+    final rail = tester.widget<NavigationRail>(host);
+    final index = rail.destinations.indexWhere(
+      (destination) => (destination.label as Text).data == label,
+    );
+    expect(index, greaterThanOrEqualTo(0), reason: 'named destination exists');
     final items = find.descendant(
       of: host,
       matching: find.byWidgetPredicate((widget) => widget is InkResponse),
     );
-    expect(items, findsNWidgets(5), reason: 'five destinations are tappable');
+    expect(items, findsNWidgets(4), reason: 'four destinations are tappable');
     await tester.tap(items.at(index));
     // pumpAndSettle never returns: the home shell keeps a periodic timer alive.
     for (var i = 0; i < 30; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
+    expect(tester.widget<NavigationRail>(host).selectedIndex, index);
+  }
+
+  Future<void> waitForContent(WidgetTester tester, Finder target) async {
+    // Drain real asset/isolate and saved-example IO without replacing the
+    // profile's repository or waiting for the shell's periodic timer to settle.
+    for (var attempt = 0; attempt < 200; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 30));
+      if (target.evaluate().isNotEmpty) return;
+    }
+    fail('The requested local Dart content did not render');
   }
 
   group('档位合同', () {
@@ -184,27 +209,72 @@ void main() {
 
     testWidgets('教程页签是本地课程而不是社区帖子流', (tester) async {
       await mountShell(tester);
-      // The PageView builds tabs lazily, so navigate to the lesson tab first.
-      await selectTab(tester, 2);
+      await selectTab(tester, '教程');
       expect(
         StudioProfile.current?.offlineOnly,
         isTrue,
         reason: 'shell must treat the Dart profile as offline',
       );
+      final center = find.byType(TutorialCenterPage);
       expect(
-        find.byType(LocalTutorialsTab),
+        center,
         findsOneWidget,
-        reason: 'offline shell must mount the local lesson tab',
+        reason: 'offline shell must mount the local tutorial/example center',
       );
+      final content = tester.widget<TutorialCenterPage>(center);
+      expect(content.language, dartProfile.id);
+      expect(content.repository, isA<DartContentRepository>());
+      final tutorials = find.byKey(TutorialCenterPage.tutorialSectionKey);
+      final examples = find.byKey(TutorialCenterPage.examplesSectionKey);
+      expect(tutorials.hitTestable(), findsOneWidget);
+      expect(examples.hitTestable(), findsOneWidget);
+      final firstLesson = find.ancestor(
+        of: find.descendant(
+          of: center,
+          matching: find.text('第一个 Dart 程序'),
+        ),
+        matching: find.byType(ListTile),
+      );
+      final firstExample = find.ancestor(
+        of: find.descendant(
+          of: center,
+          matching: find.text('示例 001：第一个 Dart 程序'),
+        ),
+        matching: find.byType(ListTile),
+      );
+      await waitForContent(tester, firstLesson);
+      expect(firstLesson.hitTestable(), findsOneWidget);
+      expect(firstExample, findsNothing);
       // 社区帖子页在本档位不应被构建。
       expect(find.byType(PostListPage), findsNothing);
+
+      await tester.tap(examples);
+      await tester.pump();
+      await waitForContent(tester, firstExample);
+      expect(center, findsOneWidget);
+      expect(firstExample.hitTestable(), findsOneWidget);
+      expect(firstLesson, findsNothing);
+      expect(find.byType(PostListPage), findsNothing);
+
+      await tester.tap(tutorials);
+      await tester.pump();
+      await waitForContent(tester, firstLesson);
+      expect(firstLesson.hitTestable(), findsOneWidget);
+      expect(firstExample, findsNothing);
+      expect(find.byType(PostListPage), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   });
 
   group('个人页入口收窄（真实外壳）', () {
     Future<void> openProfile(WidgetTester tester) async {
       await mountShell(tester);
-      await selectTab(tester, 4);
+      await selectTab(tester, '我的');
+      expect(
+        tester.widget<NavigationRail>(find.byType(NavigationRail)).selectedIndex,
+        3,
+      );
+      expect(find.byType(ProfileTab), findsOneWidget);
     }
 
     testWidgets('没有登录入口、签到积分和管理区', (tester) async {
@@ -235,6 +305,11 @@ void main() {
       for (var i = 0; i < 35; i++) {
         await tester.pump(const Duration(milliseconds: 100));
       }
+      expect(find.byType(SettingsPage), findsOneWidget);
+      expect(
+        tester.widget<SettingsPage>(find.byType(SettingsPage)).showAi,
+        isFalse,
+      );
       expect(find.text('设置'), findsWidgets);
       // 离线产品的设置页不暴露用户自配的外部 AI 网络端点；编辑器入口与
       // 个人页入口都传入 showAi=false。
@@ -249,7 +324,7 @@ void main() {
   group('功能页 / 终端入口', () {
     testWidgets('功能页只提供本地通用工具与沙盒终端', (tester) async {
       await mountShell(tester);
-      await selectTab(tester, 1);
+      await selectTab(tester, '工具');
       // 通用本地工具存在（不外发数据）。
       expect(find.text('JSON 格式化'), findsOneWidget);
       // Dart 档位注入了自己的本地工具页构建器。
@@ -311,8 +386,48 @@ void main() {
       }
       expect(find.text('Git'), findsNothing);
       expect(find.text('从云端拉取'), findsNothing);
+      // The fitting layout keeps Settings in the quick bar, not the popup.
+      // Dismiss the popup before proving the real local Settings route.
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      final quickBar = find.byKey(const ValueKey('editor-quick-bar'));
+      expect(quickBar, findsOneWidget);
+      for (final tooltip in ['Git', '从云端拉取', '在线终端（服务器执行）', 'AI 助手']) {
+        expect(
+          find.descendant(of: quickBar, matching: find.byTooltip(tooltip)),
+          findsNothing,
+        );
+      }
+      final settingsAction = find.descendant(
+        of: quickBar,
+        matching: find.byTooltip('设置'),
+      );
+      expect(settingsAction, findsOneWidget);
+      expect(
+        find.descendant(
+          of: settingsAction,
+          matching: find.byIcon(Icons.settings_outlined),
+        ),
+        findsOneWidget,
+      );
+      await tester.ensureVisible(settingsAction);
+      expect(settingsAction.hitTestable(), findsOneWidget);
+      await tester.tap(settingsAction);
+      for (var i = 0; i < 35; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(find.byType(SettingsPage), findsOneWidget);
+      expect(
+        tester.widget<SettingsPage>(find.byType(SettingsPage)).showAi,
+        isFalse,
+      );
       // 本地入口仍在。
       expect(find.text('设置'), findsWidgets);
+      expect(find.text('AI 助手'), findsNothing);
+      expect(find.text('个人 AI 接口'), findsNothing);
+      expect(find.text('外观与体验'), findsOneWidget);
+      expect(find.text('编辑器'), findsOneWidget);
     });
   });
 }

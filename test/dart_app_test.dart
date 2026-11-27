@@ -108,7 +108,7 @@ void main() {
         entryFile: p.join(project.path, 'src/main.dart'),
       );
       expect(result, isNotNull, reason: '运行后端没有接管本语言文件');
-      expect(await result!.stdout.toList(), ['Hello, QFLIStudio+!']);
+      expect(await result!.stdout.toList(), ['Hello, QFLIStudioN!']);
       expect(await result.stderr.toList(), isEmpty);
       expect(await result.exitCode, 0);
       expect(result.title, isNot(contains('开发中')));

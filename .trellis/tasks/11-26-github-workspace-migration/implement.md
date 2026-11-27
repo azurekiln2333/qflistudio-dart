@@ -1,6 +1,47 @@
 # Execution
 
-Latest checkpoint: see `handoff-checkpoint.md`. The accepted main checkpoint passed all five hosted workflows and destination verification. Forty-four preservation entries were moved; the protected `.agents` directory remains an explicit hold. Historical open checklists below describe their dated checkpoints and do not supersede this record.
+## Core consumer waves - 2026-11-28
+
+The original migration was accepted at `51c43c2`. The later administrative
+decision permits the protected `.agents` directory to stay in place; its 46
+files have matching private backup copies. Preserve the source and backups.
+
+First wave `2d3d12e` selected Core `1ae4674` and its hosted official-Flutter
+preparation helper. Real cloud logs confirmed vendored xterm resolution.
+Commit `b51a848` repaired Windows dependency checkout with pre-checkout Git
+long paths and excluded only `**/x86_64/libqfli_git.so` from the ARM64 OHOS
+product. Its application run `46055324297` passed Windows and both Android
+ABIs. OHOS run `46055324327` passed the unchanged strict HAP inspector and
+reported ARM64-only libapp/libflutter/libqfli_git libraries. Cloud source run
+`46055324358` and Android SDK run `46055850713` also passed. Apple run
+`46055847004` subsequently passed all three jobs at the same b51a848 SHA.
+
+The Linux job still reported 213 passed, eight failed and three skipped.
+Core's approved section 9 contract explains the older template, navigation,
+Settings and phone-shell assertions. The three test files now preserve the
+real execution, offline restrictions, content navigation and startup evidence
+while adopting those explicit contracts. An additive Linux desktop test keeps
+the default host shell covered. Independent static reviews are recorded by
+the coordinator; hosted execution remains required.
+
+The brain's second wave requires Core
+`8e031313ffc8d531c5a6b4d131f721f35da04c86`. Its immutable consumer-fixes and
+OHOS native ABI research were read. Update all eight active workflow checkout
+and provenance pins in a separate commit. Retain the official preparation
+helper, narrow OHOS filter and strict inspector. The older guarded
+`prepare_core.py` and patch remain historical evidence.
+
+Final acceptance requires the exact new application SHA to pass the push gate,
+target fast-forward, raw tracked-file/Trellis parity, target Herdr ACK and
+hosted CI triage. Final receipts live under `_orchestra/status` so recording
+run outcomes does not change the tested commit. No local validation or cleanup
+actions are allowed. The requested cleanup-readiness report is read-only and
+follows this wave.
+
+Historical checkpoint: see `handoff-checkpoint.md`. It records the accepted
+original migration and its then-open `.agents` relocation hold. The Core-wave
+section above records the later preservation ruling and current work. Historical
+open checklists below describe their dated checkpoints.
 
 ## Progress checkpoint — 2026-11-26
 

@@ -50,6 +50,32 @@ flutter test --no-pub
 
 ## Testing Requirements
 
+All validation commands in this guide run only on GitHub-hosted runners.
+
+### Shared Core UI contract after the 2026-11-28 migration
+
+- Keep real Dart template execution and exact stdout `Hello, QFLIStudioN!`,
+  empty stderr, successful exit and the runtime title assertion.
+- Assert the four named Home/Tools/Content/Profile destinations before selecting
+  controls by their label identity. Profile is index 3. Preserve every offline
+  login, account, network, Git and AI absence assertion after navigation.
+- Offline Content mounts the real `TutorialCenterPage` with
+  `DartContentRepository`. Reach both tutorial and example sections, drain real
+  asset/storage IO with bounded `runAsync` and pump cycles, and assert actual
+  bundled titles. The community page must remain absent after switching.
+- A fitting editor layout exposes Settings through its quick-bar tooltip/icon.
+  Dismiss the popup, activate the visible control and assert the real
+  `SettingsPage(showAi: false)` plus local settings and forbidden AI entries.
+- Hosted phone tests still call the real `app.main()` and assert its first
+  loading frame. Set only `QfliApp.formFactor` to `AppFormFactor.phone`, retaining
+  the existing state, stores and readiness notifier. Preserve frame-deferral,
+  progress, readiness and exact phone-shell checks. Separately assert that real
+  Linux with no override resolves to `LargeScreenWorkbench`.
+
+These contracts follow Core's `core-consumers.md` section 9. Changing a
+`TargetPlatformVariant` does not change the host OS. Do not remove assertions,
+skip failing behavior or tolerate framework errors to migrate selectors.
+
 - `test/` uses `flutter_test`. Widget tests mount the **real** core pages where
   possible (e.g. `test/dart_content_widget_test.dart` mounts
   `LocalTutorialsTab` / `ExampleCodeTab` with the real repository).

@@ -174,3 +174,28 @@ Root fast-forwarded E:/MyNewProjects/QFLIProjects/qflistudio-dart from GitHub. S
 After acceptance, root moved 44 of 45 manifest entries intact to D:/MyNewProjects/_migration-backup/qflistudio-dart-20261127. Persistent IDs, individual-file hashes and 22 source probes matched. The whole build tree and both nested Core repositories remain preserved. No file, WSL distribution or Git branch was deleted. No local build, test, analyzer, installation or artifact download ran.
 
 The sole hold is the source .agents directory, whose explicit Windows deny ACL prevented its move. It remains intact; no permission bypass was attempted. Keep the migration task in progress for this hold. See its handoff-checkpoint.md and accepted-cloud-evidence.json for portable evidence. The evidence-only closing commit requires its own exact-SHA hosted results, destination comparison and final Herdr acknowledgement, recorded by root in the orchestra receipt.
+
+## Session 5: Core consumer waves and hosted compatibility repairs
+
+Date: 2026-11-28. Branch: main.
+
+The original migration completed at `51c43c2`. A later decision retained the
+protected source `.agents` directory and accepted its 46 matching private
+backup copies without changing its ACL. Source and private backup stay intact.
+
+Commits `2d3d12e` and `b51a848` adopted released Core, its official Flutter
+preparation helper, Windows long paths and a narrow ARM64 OHOS packaging
+filter. The latter passed cloud source checks, native Android, both Android
+applications, Windows and the strict OHOS package gate. The eight Linux test
+failures require Core's approved template, four-destination shell, local
+content, Settings quick-bar and deterministic phone contracts. Tests preserve
+all offline restrictions and real startup/runtime checks; Linux desktop gets
+an additional exact-shell assertion.
+
+The second coordinated Core pin is `8e031313ffc8d531c5a6b4d131f721f35da04c86`.
+Its consumer-fixes and OHOS ABI contract were read before updating active
+checkout/provenance pins. Static reviews do not establish hosted acceptance.
+Root must publish via the gate, compare both clones, obtain the target ACK and
+record exact-SHA CI in the orchestra receipt. The cleanup check remains
+read-only. No local builds, tests, analyzers, installs, artifact downloads,
+deletions, ACL changes or WSL operations ran during this session.
