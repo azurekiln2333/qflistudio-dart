@@ -11,6 +11,8 @@
 **/.test
 **/BuildProfile.ets
 **/oh-package-lock.json5
+# Portable root dependency integrity lock; nested locks contain machine paths.
+!/oh-package-lock.json5
 /package.json
 /package-lock.json
 
