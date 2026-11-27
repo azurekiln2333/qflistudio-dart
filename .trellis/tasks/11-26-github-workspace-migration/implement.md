@@ -2,6 +2,19 @@
 
 ## Core consumer waves - 2026-11-28
 
+At app `7267cdc5b303311e7158e694fa182db9baa6069e`, Core `8e031313`,
+application run `46062276332`, Linux job `140719143186` passed analysis and
+all 222 host tests with three existing skips. Every migrated test and the new
+Linux desktop case passed. Windows and both Android application jobs passed.
+Cloud source `46062276324`, Apple `46062276386` and OHOS `46062276402`
+also passed. Destination ACK and 869-file/409-Trellis raw parity were complete.
+
+Linux then failed its application build because the secure-storage plugin's
+CMake dependency `libsecret-1>=0.18.4` was absent. Add `libsecret-1-dev` to the
+existing Linux-only hosted apt step. Keep Core and all tests unchanged. The
+repair requires a new exact-SHA gate, target parity/ACK and hosted evidence;
+the 7267cdc results are historical, not acceptance of that next commit.
+
 The original migration was accepted at `51c43c2`. The later administrative
 decision permits the protected `.agents` directory to stay in place; its 46
 files have matching private backup copies. Preserve the source and backups.

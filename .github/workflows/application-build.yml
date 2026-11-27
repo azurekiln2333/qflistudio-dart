@@ -74,7 +74,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev libstdc++-12-dev
       - name: Verify and package the desktop native SDK
         if: matrix.platform != 'android'
         run: python tool/ci/package_desktop_sdk.py --sdk ../flutter/bin/cache/dart-sdk --platform "$CI_PLATFORM" --arch "$CI_ARCH" --output dist/native
